@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Runtime Adapter Profile",
+  "type": "object",
+  "required": ["schema_version", "id", "invocation", "prompt", "final_message", "success"],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "id": { "type": "string", "minLength": 1 },
+    "description": { "type": "string" },
+    "invocation": {
+      "type": "object",
+      "required": ["args"],
+      "properties": {
+        "args": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "stdin": {
+          "type": ["string", "null"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "prompt": {
+      "type": "object",
+      "required": ["write_file", "file_name"],
+      "properties": {
+        "write_file": { "type": "boolean" },
+        "file_name": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": false
+    },
+    "final_message": {
+      "type": "object",
+      "required": ["source"],
+      "properties": {
+        "source": {
+          "enum": ["stdout_json", "stdout_text", "stdout_jsonl_text", "final_message_file"]
+        },
+        "json_path": {
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "fallback": {
+          "enum": ["last_non_empty_stdout_line"]
+        }
+      },
+      "additionalProperties": false
+    },
+    "success": {
+      "type": "object",
+      "anyOf": [
+        { "required": ["exit_code"] },
+        { "required": ["exit_codes"] }
+      ],
+      "properties": {
+        "exit_code": { "type": "integer" },
+        "exit_codes": {
+          "type": "array",
+          "items": { "type": "integer" },
+          "minItems": 1
+        },
+        "json_conditions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["path", "equals"],
+            "properties": {
+              "path": {
+                "type": "array",
+                "items": { "type": "string" }
+              },
+              "equals": {}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

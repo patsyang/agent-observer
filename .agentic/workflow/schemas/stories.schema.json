@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-stories/v1",
+  "item_required": ["id", "title", "user_value", "acceptance_ids", "acceptance_criteria", "depends_on", "priority", "risk", "required_evidence", "status", "passes"]
+}

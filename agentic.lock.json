@@ -1,0 +1,438 @@
+{
+  "schema_version": 1,
+  "infra_name": "agentic-coding-infra",
+  "infra_version": "0.1.0",
+  "project_name": "agent-observer",
+  "variables": {
+    "PROJECT_NAME": "agent-observer",
+    "PROJECT_SLUG": "agent_observer"
+  },
+  "files": {
+    ".agentic/runtime-adapters/codex.json": {
+      "sha256": "a925f0cd57ea330b4c872e59dc68bf538dab6d91fd7a2b1d9a7f0082cfc616b5"
+    },
+    ".agentic/runtime-adapters/model-catalog.json": {
+      "sha256": "46d2af98ac97854c9a7fdf66893a2010b6a3c83f8e97e6f238b863bd5d8bb5fd"
+    },
+    ".agentic/runtime-adapters/opencode.json": {
+      "sha256": "f46068d859ebb19df0fb14ba855fbbcc328d1e73fb14a16e41a09c8ef50edcad"
+    },
+    ".agentic/runtime-adapters/qoder-cn.json": {
+      "sha256": "812f9d07ec0ace2b2c2118d5c2402b6572e470b277b1eb7858000945182f6951"
+    },
+    ".agentic/stack-profiles/catalog.json": {
+      "sha256": "bbd1e3aee1a8645a6e480e6c0b9b0bd5a2aa03bb3dc44148e378f691bde04521"
+    },
+    ".agentic/workflow/adapter-contract.md": {
+      "sha256": "3e6642d2456879a81bb883c934316281cfbda508a67e3ae03ea1d1dbf5918773"
+    },
+    ".agentic/workflow/architecture.md": {
+      "sha256": "8a26f06a92cb106eb5b01c52b0d5f91c75fc1b703dd365c0c1a58fba1ac1a1bf"
+    },
+    ".agentic/workflow/commands/ao-plan-acceptance-gate.md": {
+      "sha256": "c6e1aef2e209d067ef4f45eed670ac014379944bd8698979eb99ad2df001ae88"
+    },
+    ".agentic/workflow/commands/ao-plan-contract-gate.md": {
+      "sha256": "7f7e5130950ae8cf003c316fa3f5831517873ea9fbc2d9d4421e95c5b7e78e02"
+    },
+    ".agentic/workflow/commands/ao-plan-execute-task-loop.md": {
+      "sha256": "a0988f4058e4d8e5bf36df85e879a7ce0b675dd30858176eaff61531f3929015"
+    },
+    ".agentic/workflow/commands/ao-plan-fix.md": {
+      "sha256": "81d9fe68f9bb04c97189b3191d4aad637dfde640a4ef9f0c1f8186f085e647e1"
+    },
+    ".agentic/workflow/commands/ao-plan-generate-plan.md": {
+      "sha256": "fb286dec109f68ce35ecfb608bea5777d6fe08fb188afb1d7ce975199c99adb7"
+    },
+    ".agentic/workflow/commands/ao-plan-integration-verify.md": {
+      "sha256": "a7b0eabde02507c8b9b3893b7865e5349b26e3b9427462a3d13e4aa283bc2e37"
+    },
+    ".agentic/workflow/commands/ao-plan-resolve-slice-brief.md": {
+      "sha256": "67e93d28775bb00e300764bbd100f432078b45945cecd467b1c6a6a19c1ed8a7"
+    },
+    ".agentic/workflow/commands/ao-plan-review-gate.md": {
+      "sha256": "0d114d9363dedd764ac1fa35317bb3155de8a0dec9c59c1a2f16a99a67b08f73"
+    },
+    ".agentic/workflow/commands/ao-plan-review.md": {
+      "sha256": "11168e1cdeaff6e0cd725933140be33af8594801eab2792d08c9d553a83c4977"
+    },
+    ".agentic/workflow/commands/ao-plan-task-graph-gate.md": {
+      "sha256": "544383a813bdf26596e48de1438c3c7486a9ebe4bf57183faada915fe2945ddb"
+    },
+    ".agentic/workflow/commands/ao-small-acceptance-gate.md": {
+      "sha256": "b00fb36808c1c42694cc771723abd33465b89c2545b1a7759ee80b64e877569a"
+    },
+    ".agentic/workflow/commands/ao-small-execute.md": {
+      "sha256": "6d1053f8ca6f53347e14e16564a6b1466bd83e3f15ec8a893d601b6aa03225ee"
+    },
+    ".agentic/workflow/commands/ao-small-repro.md": {
+      "sha256": "3688d94d37103d325179d8e845d0749d3b744ee9466af60c77ba88e785aba2cd"
+    },
+    ".agentic/workflow/commands/ao-small-review.md": {
+      "sha256": "4bfd12ab980b006e997876152c3988f8e0122e42836f6137b9a564f4fdd732d9"
+    },
+    ".agentic/workflow/commands/ao-small-scope-gate.md": {
+      "sha256": "32ffc5496e5ff9062969d8338321f8949b407f56673ce2a667b441fec47fdf55"
+    },
+    ".agentic/workflow/commands/ao-small-verify.md": {
+      "sha256": "06174c7c3180ae3e945d63d7790e819fd9e0dc880300ab847a07743d58f27742"
+    },
+    ".agentic/workflow/commands/ao-spec-acceptance-matrix.md": {
+      "sha256": "ef5cf125fd913f9cd965520438c38ff42633fd83f4b9d2730d4831e413c1e9f7"
+    },
+    ".agentic/workflow/commands/ao-spec-distill.md": {
+      "sha256": "d2b95b183bd085f6e9ed332a76e764fcb9cebaae0998f5758364b508f1959116"
+    },
+    ".agentic/workflow/commands/ao-spec-final-e2e-proof.md": {
+      "sha256": "e2dd8d54a0314c76fe32b5cabf7a691fff9b77e7fef212295ef8811fac0e5a43"
+    },
+    ".agentic/workflow/commands/ao-spec-fix-warnings.md": {
+      "sha256": "10121c8fd901bb1a24e847363480a5db862b9e76783de0f41885b7af587a8e47"
+    },
+    ".agentic/workflow/commands/ao-spec-frontend-template-resolution.md": {
+      "sha256": "9ec8495b09e97fa418437e3964197a92f510cb9b473534bfb1a67d3d8331c4bd"
+    },
+    ".agentic/workflow/commands/ao-spec-full-verify.md": {
+      "sha256": "4787217b7b0b933569c1b5736693e26302785491bc18cbdf2fc2209e3fd46cbe"
+    },
+    ".agentic/workflow/commands/ao-spec-gate-frontend-template.md": {
+      "sha256": "4a339ce169388688c9f4a9459ea977c4cde45ee86c33cb228bfb89084a9a9e87"
+    },
+    ".agentic/workflow/commands/ao-spec-gate-implementation-plan.md": {
+      "sha256": "0500ce6817e4f29c9da6ba327d622eaa8f9aa67990cd95e0186990390c8966de"
+    },
+    ".agentic/workflow/commands/ao-spec-gate-production-spec.md": {
+      "sha256": "ab55e590ce0e601f00e9afbec4584314cc9bba2aeb0736ebc352da2608b1e6b5"
+    },
+    ".agentic/workflow/commands/ao-spec-generate-state.md": {
+      "sha256": "208b5be9baa8b9e32d0a04d7ff2377a881c95f89d266e2a10ff45a9d88a57488"
+    },
+    ".agentic/workflow/commands/ao-spec-implement-story.md": {
+      "sha256": "285ce7fddf19a1b2ea946a26aba52f102550b24bb2b2036ad8c6cc3ce4cb45e8"
+    },
+    ".agentic/workflow/commands/ao-spec-inspect-project.md": {
+      "sha256": "4006d7b13c977d10e4cc98b0d9c753fe9884e1ed7b57d78701ad61f59bdce072"
+    },
+    ".agentic/workflow/commands/ao-spec-plan.md": {
+      "sha256": "cf37ff150899d98bc4af75549b8286cf9ba0736722d14118b281be7bb8a55ed7"
+    },
+    ".agentic/workflow/commands/ao-spec-production-report.md": {
+      "sha256": "0f74f7b7fad0594ea7a8c2df59e5a4fcc11c1faff961b8c2951efeb7908baf2d"
+    },
+    ".agentic/workflow/commands/ao-spec-production-spec.md": {
+      "sha256": "0f215c86262f03a427d58f7baf6879a52f423597c48d0256c31e1a9fc9a6c3c9"
+    },
+    ".agentic/workflow/commands/ao-spec-release-readiness.md": {
+      "sha256": "769a11493b77326a1c11c47ac76e69d2cae44376ccfef45724e47937abf9e1d4"
+    },
+    ".agentic/workflow/commands/ao-spec-review-gate.md": {
+      "sha256": "d0e819e375fd91133f1a5804993f09a10623155c79e87348a3a5a30efcf41d20"
+    },
+    ".agentic/workflow/commands/ao-spec-review.md": {
+      "sha256": "c69786aab6152c5c6294c19f648e7f8673b008d821a8c877cda68fa87847423e"
+    },
+    ".agentic/workflow/commands/ao-spec-stabilize-state.md": {
+      "sha256": "e7b4f5bb0b80680f977af102fe0c7b24fbf405ff0bf032641903eb36d2cf7090"
+    },
+    ".agentic/workflow/commands/ao-spec-validate-product-state.md": {
+      "sha256": "81188c9006623a510166621180aabaa61f25d563ab6527ddc6be3ef4f84f4f50"
+    },
+    ".agentic/workflow/control-plane-change.md": {
+      "sha256": "81f9b0383c67f69854a507ddd13bc4f213e41005b47e2b97cf97cb80737cf9cb"
+    },
+    ".agentic/workflow/definitions/control-plane-change.json": {
+      "sha256": "1796b4e07f6b25454181211c05e308be1ceec2a3f8b7630dea99b0e7a7b7c04f"
+    },
+    ".agentic/workflow/definitions/plan-execute.json": {
+      "sha256": "c93647a01a13842df5c9382d5fd8ad1ce15fcdcd36cd84c2da7558ea9dcb3e99"
+    },
+    ".agentic/workflow/definitions/small-change.json": {
+      "sha256": "c9d32a0293bfc47126222123cc587a22fa5ef3020a858fc2789c403b74fdb3d9"
+    },
+    ".agentic/workflow/definitions/spec-driven.json": {
+      "sha256": "ac8f6ebdd5747142d06f41907b3c2f8a304e8b98989ccbbf269799fef71ddf0b"
+    },
+    ".agentic/workflow/multi-project-infra.md": {
+      "sha256": "a563ce84b038cbadf08c2edd3d1b8c9f458331cadda9bb80b6bffea2fde91ebe"
+    },
+    ".agentic/workflow/plan-execute.md": {
+      "sha256": "d9a64a494b520752f5fa31b5e2a3d0348d4278bb76169100f9eb743dd6de6e6e"
+    },
+    ".agentic/workflow/schemas/acceptance-matrix.schema.json": {
+      "sha256": "3859f99b4115f497b7aab3a3c1028bd7860596788e10e269b2916790aee3253f"
+    },
+    ".agentic/workflow/schemas/plan-gate.schema.json": {
+      "sha256": "4f0cded9dbe15f2f5dd8faa6c3f93534ea02dac8361256518fd02ba4a0d14ace"
+    },
+    ".agentic/workflow/schemas/product-contract.schema.json": {
+      "sha256": "96d8a11edbfc9297b9f98517eeb0ef359225bea599610b082f81fe3c4594ac17"
+    },
+    ".agentic/workflow/schemas/runtime-adapter-profile.schema.json": {
+      "sha256": "30711002ba38eb235536f359c10cf3d05852d4d7708f5bb485933bcd5a75cf27"
+    },
+    ".agentic/workflow/schemas/small-scope.schema.json": {
+      "sha256": "32702ed6a1b6231329b7c4826c2311c15560b7dc02c90e904179d072e6ffa178"
+    },
+    ".agentic/workflow/schemas/stories.schema.json": {
+      "sha256": "21ebd198da4cc1fe908020bfca379c70c31767d5abe76dcc078e1b5c2f430b9e"
+    },
+    ".agentic/workflow/schemas/task-graph.schema.json": {
+      "sha256": "e4c0dbc85dc83a74f3e70336e5ca73c4830ca3c03c459c6f4e8457213e5daff0"
+    },
+    ".agentic/workflow/schemas/tasks.schema.json": {
+      "sha256": "1cb034bcd7572441b7cfcae0aa40c1e0f11593139f014b05edb8541a1b6efbe8"
+    },
+    ".agentic/workflow/schemas/verification.schema.json": {
+      "sha256": "6eff89fc8326039eeb2a1aaba95e780401aa5528c844909adb5f1e2413b4c5a0"
+    },
+    ".agentic/workflow/small-change.md": {
+      "sha256": "b8ce8b0d2909639b9c893b2d1fc015e86970330a6ed70e371598b7d8ff02dba0"
+    },
+    ".agentic/workflow/spec-driven.md": {
+      "sha256": "2eb88fa78deff66722fa2c18242714f6c6263bcb22872620ec94f7ef9d45166d"
+    },
+    ".agentic/workflow/templates/plan/implementation-plan.md": {
+      "sha256": "79df88126400ce090eb41d12ecbd3ca29d21aec884b01a023f90572a84d64d85"
+    },
+    ".agentic/workflow/templates/plan/slice-brief.md": {
+      "sha256": "95fe5fbcbb6e660822659ab7461de9873a86491f6a1d0008c2f080600dd61058"
+    },
+    ".agentic/workflow/templates/small/repro.md": {
+      "sha256": "59f536fc7f487ebb45cf502bf4a57247bca96dacb954f90689f3271d80a12582"
+    },
+    ".agentic/workflow/templates/small/small-scope.md": {
+      "sha256": "441bf58ca507f9ad05825bebff6f88b6cd50c51fb5fede61553b1ff2b4591a91"
+    },
+    ".agentic/workflow/templates/spec/implementation-plan.md": {
+      "sha256": "b3017bb66b099c8e22dda4decccfcc4efb471260e3a0eff037e4d8c27a7452c1"
+    },
+    ".agentic/workflow/templates/spec/product-prd.md": {
+      "sha256": "d972fb0264e67588e6796edc4933407ff3e9fbc93c3f1caa88dda0f3a903000f"
+    },
+    ".agentic/workflow/templates/spec/production-spec.md": {
+      "sha256": "127d5979fcba749c28935a440ab4c96275df9054929fc3d0dbeb50a01cc31ae1"
+    },
+    ".agentic/workflow/workflow-governance.md": {
+      "sha256": "99071a565cbb837e37048457335fa11638ab330e101d8f0f24b7b71da1cd76ac"
+    },
+    ".codex/skills/ao-infra/SKILL.md": {
+      "sha256": "487481ba131ef395e3666550bacce817e212f818f2347d6e41e3cd4400c647bb"
+    },
+    ".codex/skills/ao-plan/SKILL.md": {
+      "sha256": "ca1b811f8f3257396dd650ba6ce669a61a93743f53a0f8088cdd2b0fe16bf27c"
+    },
+    ".codex/skills/ao-small/SKILL.md": {
+      "sha256": "440747c4a17de37b71670a0c9466bd61333cf963271d34ef2ad10713b5dfe056"
+    },
+    ".codex/skills/ao-spec/SKILL.md": {
+      "sha256": "0731901f21dae1d0e18bf890cc5cbe9ca86b80ffe9e8d92db14e4150ae1f2d3c"
+    },
+    ".gitignore": {
+      "sha256": "6fb25bb4a36b79ee47b675518b891b5110cbb4d78a96f6e9a480a50d7b5d2766"
+    },
+    "AGENTS.md": {
+      "sha256": "f2fb114ab50f02d8f166bca338748a967b7b6945c46955f4b8d26f6657181ca6"
+    },
+    "commands/ao-infra.md": {
+      "sha256": "eef788af3dfe6cf6c897ea2b7abe57c1183ef698a07727b755b8122811499d2c"
+    },
+    "commands/ao-plan.md": {
+      "sha256": "68256638f5c059d77c532f832b001c282fa74d67bf66b3bed2a2434a4a28dfbb"
+    },
+    "commands/ao-project.md": {
+      "sha256": "7bea2326810357f252f31265e7e9db336a55cffae6fca3e41019773c7cca539a"
+    },
+    "commands/ao-small.md": {
+      "sha256": "0ebb51508a463a1215aa8c05914df336e6ff6c01f8a284dc9010f56bef0217a7"
+    },
+    "commands/ao-spec.md": {
+      "sha256": "68ef2744d03ae4673e578b0fa933dfa28ed1e0d6b58e133adeee64763287345f"
+    },
+    "commands/skills.md": {
+      "sha256": "04fe919b88eb9fcf61abccebc14727723d8a0fd8eff09477cccef75bec25e1e5"
+    },
+    "scripts/ao.py": {
+      "sha256": "cab14cd78317e582fca8e82b5bedcf3012abe7bc73a88c7ea071bf00c0fe5283"
+    },
+    "tools/workflow_runner/e2e/fake_codex.py": {
+      "sha256": "255803264d50c8712e5c686a36194f630a22a8a5fc7b9a7c421721105c27ec4b"
+    },
+    "tools/workflow_runner/e2e/runner.py": {
+      "sha256": "b3e904874a7f54fee9788c6d543ca3bbcc69cfec07c429a0555a5a7ace24fa74"
+    },
+    "tools/workflow_runner/pyproject.toml": {
+      "sha256": "73ed8419f832716472472dbf3531aee0ebb6cbc62cc96d18a2319c3ea461d750"
+    },
+    "tools/workflow_runner/src/agentic_workflow/__init__.py": {
+      "sha256": "69f901f1ae8f9057b017f329e233bb2b27538dbc44995fb8b4590c20c49ee660"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/__init__.py": {
+      "sha256": "0f91cc6bfd5b2e725a019ff293bf6623f38064d900c527e31ad666f2a091ff6b"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/_prompts.py": {
+      "sha256": "504cd9aa0b3c96fef9243bd1f09dee62e7ffbbdbb53ba21bd7d332150391e0eb"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/adapter_runtime.py": {
+      "sha256": "bb30a3a137d5b43041732139e976e7b0bcdfea7cb70c8f13df1eed0eadfce19f"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/base.py": {
+      "sha256": "b9836f2334f3161cb3c7b5a78f8be277f7e92e948d6a56d7321044e160434316"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/codex.py": {
+      "sha256": "910f760e0fd450d78e9c4a7294d5916fa3520b8cedcef9c27ac292a870bd47c1"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/generic_cli.py": {
+      "sha256": "d87a5cecdc249e65909e952496f93860b504c94ca282bea9ec19980ea0b2e0e1"
+    },
+    "tools/workflow_runner/src/agentic_workflow/adapters/registry.py": {
+      "sha256": "7ba4190e277572fcfa04444d2ec517150ee001f85133c46fb843f24d63aa7d5c"
+    },
+    "tools/workflow_runner/src/agentic_workflow/ao_commands.py": {
+      "sha256": "9c6c474094e25b44f032b20629d46e5616bddcd7957fab3e30b6aa379eb1eb54"
+    },
+    "tools/workflow_runner/src/agentic_workflow/ao_entry.py": {
+      "sha256": "c3ba99533e8f1b626ec543ba698724e3568edde401a8c3200d6b5db3ffcc4bae"
+    },
+    "tools/workflow_runner/src/agentic_workflow/ao_parser.py": {
+      "sha256": "a376866b31e14de86edb99b6c63e2744fdfa69c57af6ea2e52fb945903779717"
+    },
+    "tools/workflow_runner/src/agentic_workflow/cli.py": {
+      "sha256": "95825c0b6f3049db7ee77ea5be29a3f1b6e766feda3d978408d90aabc81cff18"
+    },
+    "tools/workflow_runner/src/agentic_workflow/contract_gates.py": {
+      "sha256": "912b1a4637da33a3dea31e6188c8a9b31df8a8e7388661e8981e47e71f34f9d9"
+    },
+    "tools/workflow_runner/src/agentic_workflow/definitions.py": {
+      "sha256": "bf7348f5e1fa90515b12183175d881f749e7dc47adeaf8b86b035468e79b7c0a"
+    },
+    "tools/workflow_runner/src/agentic_workflow/dev_server.py": {
+      "sha256": "c894ff72fc735d4434844c5ed69c32bd1e93d9bca40b9b2f6a6b26fb335630e9"
+    },
+    "tools/workflow_runner/src/agentic_workflow/e2e_inputs.py": {
+      "sha256": "56fd773a62108516eb74291b750391bf30c064ed8bfa55a9e2383f076943e9d0"
+    },
+    "tools/workflow_runner/src/agentic_workflow/e2e_runner.py": {
+      "sha256": "dcb8846f8abe926ba4a7f8b6c77579e546d2680875c1ca927f39a4842c87e346"
+    },
+    "tools/workflow_runner/src/agentic_workflow/e2e_state.py": {
+      "sha256": "1a13c7ca7f7cfaa03953c851705a113b55cbd1caf3a2bb27a0b458b518f84765"
+    },
+    "tools/workflow_runner/src/agentic_workflow/events.py": {
+      "sha256": "2b2b263caa84cb176d0c0d0bf6d51caf942e5f12566d2ce1f6d9a70b93870ae4"
+    },
+    "tools/workflow_runner/src/agentic_workflow/features.py": {
+      "sha256": "18d061c4915ebe910d24a6b3d174adb03ff326a76e7ce858759550dcaac4b8ee"
+    },
+    "tools/workflow_runner/src/agentic_workflow/infra.py": {
+      "sha256": "ea228373b63eb8cbca56c15dfa9f225c6c41ec1c17e5cd71455b432880308f3b"
+    },
+    "tools/workflow_runner/src/agentic_workflow/infra_files.py": {
+      "sha256": "71a7940163a3d5a0bd8515dbfedae4e063085523f445a4c73c6da21e593a5c3d"
+    },
+    "tools/workflow_runner/src/agentic_workflow/infra_gates.py": {
+      "sha256": "dacf52eb8c554641d29f2516c80856222afa0501ce94a0cdd5836ae9ed33d80f"
+    },
+    "tools/workflow_runner/src/agentic_workflow/models.py": {
+      "sha256": "b752279d0362650082c806ac0336c0fdd976cc7eeecc7240fafa2676331c497a"
+    },
+    "tools/workflow_runner/src/agentic_workflow/plan_gates.py": {
+      "sha256": "3b3dffecf9f07405434a675db981663336bd71f60195176caebab9e71f73dbf2"
+    },
+    "tools/workflow_runner/src/agentic_workflow/production_gates.py": {
+      "sha256": "6d0e4c85f4d72e02a2b790b0bab1b98686f9ef6d6ce2beaeea66393c0ac57ba8"
+    },
+    "tools/workflow_runner/src/agentic_workflow/project_commands.py": {
+      "sha256": "35a7196c9c63074c7cba7e19eb813c7eccf0f2ae027ac9a4af5472159c61e9e8"
+    },
+    "tools/workflow_runner/src/agentic_workflow/project_config.py": {
+      "sha256": "296ed31f33349bbaec0e5ecb9827ee7371d3208d6bf72a555ced05a765a3c872"
+    },
+    "tools/workflow_runner/src/agentic_workflow/project_onboarding.py": {
+      "sha256": "d310876dc4ede501a2e243b00a3836d098656ce0122a6f942f59426570256c09"
+    },
+    "tools/workflow_runner/src/agentic_workflow/project_registry.py": {
+      "sha256": "41da0128e5922099c5280919041ef8f6ba85c116266be2a5ac634e84b4397802"
+    },
+    "tools/workflow_runner/src/agentic_workflow/project_scope.py": {
+      "sha256": "4a0af267b37576d4aeef0bdd8f6b74d278146bfa659c3d2acaabed771d615210"
+    },
+    "tools/workflow_runner/src/agentic_workflow/quality_gates.py": {
+      "sha256": "e67ebce22038ca5c915187b7d9acb63a305a4005a3e25d45d81bfa621f4be3fe"
+    },
+    "tools/workflow_runner/src/agentic_workflow/reports.py": {
+      "sha256": "f6ad6758688daf2960cf7fd9ea99b616c9e45abcf89933b71af6e483eefc07ab"
+    },
+    "tools/workflow_runner/src/agentic_workflow/runner.py": {
+      "sha256": "08cd8d95a58c5f62e1d7277fcb7c90600ba6d8e960d0a65667b9a52bc46c2314"
+    },
+    "tools/workflow_runner/src/agentic_workflow/runtime_profile.py": {
+      "sha256": "80c2f5cf26f8534cb581c94b18d6216323f3883b2543004de6c9eebd1d334e11"
+    },
+    "tools/workflow_runner/src/agentic_workflow/stack_contract.py": {
+      "sha256": "739d190d6ccc83ae2548d159de283e7744a339b20374fa4ae3499d1ab76a219e"
+    },
+    "tools/workflow_runner/src/agentic_workflow/stack_profiles.py": {
+      "sha256": "05d385ea302519966cf2ceb6fec2730999a6f98e9bd37677722fb5e6f4bd7b32"
+    },
+    "tools/workflow_runner/src/agentic_workflow/subprocess_utils.py": {
+      "sha256": "fce975f4599479cbe23d4a75d4edc1376df79d16fab154085e93a17b62e3c49c"
+    },
+    "tools/workflow_runner/src/agentic_workflow/workspace.py": {
+      "sha256": "7afe584f698ec7695beee2b099a085ddfef4b63137b5c7ad27e4eb88450eeb88"
+    },
+    "tools/workflow_runner/src/agentic_workflow/worktree.py": {
+      "sha256": "440f441dc27a7130e2fae8beeec6ebd88e974d8cb9870736e6322c4c3d47865b"
+    },
+    "tools/workflow_runner/tests/test_ao_entry.py": {
+      "sha256": "2319d4b0c4d1f47736db0e6d7456da16b4fb2a9cbffd7e9158d6669a70f2e2d2"
+    },
+    "tools/workflow_runner/tests/test_contract_gates.py": {
+      "sha256": "5243a00a578bdc897a105b06cbe8f2a6d603f4e483bba6eddefe8b850cff16be"
+    },
+    "tools/workflow_runner/tests/test_control_plane_gates.py": {
+      "sha256": "33752fe985b3ce111923e512fa98f7c19320e24164a7d9cf8cb162d932d2833d"
+    },
+    "tools/workflow_runner/tests/test_dev_server.py": {
+      "sha256": "e81963119239fb26dda7f4c4fef82d7065f256bf0ee9e2ac274bee70c09e7c19"
+    },
+    "tools/workflow_runner/tests/test_e2e_engine.py": {
+      "sha256": "0ccf6f72b49e15e022dcdffd6c4f2b846ae67dcd49f23903f642c6e41bd55b28"
+    },
+    "tools/workflow_runner/tests/test_features.py": {
+      "sha256": "c17ecc2840f9b048fa47bf6a446d2f95175f4b07f314bb5e0617899b63f01125"
+    },
+    "tools/workflow_runner/tests/test_generic_cli_adapter.py": {
+      "sha256": "2ccc74bff8e7183aa89c4b099c8ffc953fc832c1486662cd7250369c247afb0b"
+    },
+    "tools/workflow_runner/tests/test_infra.py": {
+      "sha256": "3360671bd9185d146ffe41b5f1b8448bc4f21144d3ac9ad21e03a86821e30985"
+    },
+    "tools/workflow_runner/tests/test_plan_gates.py": {
+      "sha256": "b55399853796522487974c25995ba8da49be6a6f91652b8f188012fa8db507bf"
+    },
+    "tools/workflow_runner/tests/test_production_gates.py": {
+      "sha256": "94b0dbd5bf948b0d553edbd1d99eeca642b23aebd393af3fd9722ba2c7d9c420"
+    },
+    "tools/workflow_runner/tests/test_project_commands.py": {
+      "sha256": "247c1a42b000f91305c086dfa5278514b64448b730faf321a062a12b31342680"
+    },
+    "tools/workflow_runner/tests/test_project_config.py": {
+      "sha256": "cd4c16b80c689cc9f4677d6e94c0f8a52fcb1d55c2752dcd88f800a68e0564e5"
+    },
+    "tools/workflow_runner/tests/test_project_runtime.py": {
+      "sha256": "240ab5ed511065ee1a2358b44bf682357a7c8246b202603538f7e84a337f2196"
+    },
+    "tools/workflow_runner/tests/test_quality_gates.py": {
+      "sha256": "335918d7227fe7ea7ac255ff4129d972af357dc764099861d6fc7b8f7a6f6db2"
+    },
+    "tools/workflow_runner/tests/test_repo_skills.py": {
+      "sha256": "66913f06c4885537f78be34f48821c67be22840eb62c210d6423367b138c30da"
+    },
+    "tools/workflow_runner/tests/test_runner.py": {
+      "sha256": "0f032be38bb7db9e5fb16d34cfe1bd340009df5107b3571ea25498c65c61e3ef"
+    },
+    "tools/workflow_runner/uv.lock": {
+      "sha256": "865cb01b76c0838e9a711ac9e67d4c29c686102f3ef9ae3a367bd5d13c6d5b08"
+    }
+  }
+}

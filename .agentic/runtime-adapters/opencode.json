@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "id": "opencode",
+  "description": "OpenCode CLI via generic-cli adapter",
+  "invocation": {
+    "args": [
+      "run",
+      "--pure",
+      "请读取附件中的任务说明并在当前工作区完成任务。",
+      "--dir",
+      "{{cwd}}",
+      "--dangerously-skip-permissions",
+      "--file",
+      "{{prompt_file}}",
+      "--format",
+      "json"
+    ],
+    "stdin": null
+  },
+  "prompt": {
+    "write_file": true,
+    "file_name": "runtime-prompt.md"
+  },
+  "final_message": {
+    "source": "stdout_jsonl_text",
+    "fallback": "last_non_empty_stdout_line"
+  },
+  "success": {
+    "exit_code": 0
+  }
+}

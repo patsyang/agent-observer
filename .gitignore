@@ -1,1 +1,35 @@
-/spec
+# Local workspace outputs
+/output/
+/dist/
+
+# Local reference notes
+/refs/codex-db/
+/refs/design/
+
+# Agent workflow scratch space
+/ai_docs/
+
+# Local business workspaces; never committed in this control-plane repo
+/apps/
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+build/
+dist/
+
+# Node
+node_modules/
+
+# Local environment
+.env
+.env.*
+!.env.example

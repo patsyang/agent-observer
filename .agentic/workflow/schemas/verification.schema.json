@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-verification/v1",
+  "required": ["commands", "expected_results", "regression_tests"]
+}

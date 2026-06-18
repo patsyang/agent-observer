@@ -1,0 +1,5 @@
+{
+  "schema": "agentic-task-graph/v1",
+  "required": ["tasks", "edges"],
+  "task_required": ["id", "acceptance_refs", "component_refs", "verification_commands", "done_signal"]
+}

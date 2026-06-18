@@ -1,0 +1,45 @@
+{
+  "contract_id": "agent-observer-stack",
+  "project_id": "agent-observer",
+  "revision": 1,
+  "status": "confirmed",
+  "profile_id": "default-web-app",
+  "profile_label": "默认 Web 应用",
+  "technology_stack": {
+    "frontend": "React + TypeScript + Vite + npm",
+    "backend": "Python + FastAPI + pytest + uv/pip",
+    "client": "无独立客户端",
+    "database": "SQLite"
+  },
+  "components": [
+    {
+      "component_id": "frontend",
+      "kind": "frontend",
+      "language": "typescript",
+      "framework": "react-vite",
+      "root": "frontend",
+      "package_manager": "npm"
+    },
+    {
+      "component_id": "backend",
+      "kind": "service",
+      "language": "python",
+      "framework": "fastapi",
+      "root": "backend",
+      "package_manager": "uv-or-pip"
+    },
+    {
+      "component_id": "database",
+      "kind": "database",
+      "language": "sql",
+      "framework": "sqlite",
+      "root": "data",
+      "package_manager": "none"
+    }
+  ],
+  "commands": {
+    "verify_all": [
+      "python scripts/ao.py verify"
+    ]
+  }
+}

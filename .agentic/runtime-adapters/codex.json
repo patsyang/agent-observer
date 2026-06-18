@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "id": "codex",
+  "description": "Codex CLI via generic-cli adapter",
+  "invocation": {
+    "args": [
+      "exec",
+      "--cd",
+      "{{cwd}}",
+      "--sandbox",
+      "danger-full-access",
+      "--output-last-message",
+      "{{final_message_path}}",
+      "-"
+    ],
+    "stdin": "{{prompt}}"
+  },
+  "prompt": {
+    "write_file": true,
+    "file_name": "runtime-prompt.md"
+  },
+  "final_message": {
+    "source": "final_message_file",
+    "fallback": "last_non_empty_stdout_line"
+  },
+  "success": {
+    "exit_code": 0
+  }
+}

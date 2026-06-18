@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-plan-gate/v1",
+  "required": ["result", "checked_artifacts", "findings"]
+}

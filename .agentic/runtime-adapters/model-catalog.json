@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "default_model": "codex-gpt-5",
+  "models": [
+    {
+      "id": "codex-gpt-5",
+      "label": "Codex GPT-5",
+      "adapter": {
+        "id": "generic-cli",
+        "command": ["codex"],
+        "profile": ".agentic/runtime-adapters/codex.json"
+      }
+    },
+    {
+      "id": "codex-gpt-5-codex-adapter",
+      "label": "Codex GPT-5 (CodexAdapter internal)",
+      "visible": false,
+      "adapter": {
+        "id": "codex",
+        "command": ["codex"]
+      }
+    },
+    {
+      "id": "qoder-cn-qwen",
+      "label": "Qoder CN Qwen",
+      "adapter": {
+        "id": "generic-cli",
+        "command": ["qoderclicn"],
+        "profile": ".agentic/runtime-adapters/qoder-cn.json"
+      }
+    },
+    {
+      "id": "opencode-default",
+      "label": "OpenCode Default",
+      "adapter": {
+        "id": "generic-cli",
+        "command": ["opencode"],
+        "profile": ".agentic/runtime-adapters/opencode.json"
+      }
+    }
+  ]
+}

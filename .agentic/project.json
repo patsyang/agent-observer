@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "project_id": "agent_observer",
+  "project_name": "agent-observer",
+  "model": {
+    "id": "codex-gpt-5"
+  },
+  "adapter": {
+    "id": "generic-cli",
+    "command": [
+      "codex"
+    ],
+    "profile": ".agentic/runtime-adapters/codex.json"
+  },
+  "verify": {
+    "command": [
+      "python",
+      "scripts/ao.py",
+      "verify"
+    ]
+  }
+}

@@ -1,0 +1,539 @@
+{
+  "name": "spec-driven",
+  "title": "生产级 PRD 到 Release Candidate 工作流",
+  "adapter": "local-governed",
+  "contract_path": ".agentic/workflow/spec-driven.md",
+  "primary_inputs": [
+    "prd_path",
+    "source_spec_path",
+    "spec_path",
+    "plan_path"
+  ],
+  "stages": [
+    "import-input",
+    "inspect-project",
+    "generate-product-state",
+    "validate-product-state",
+    "generate-production-spec",
+    "gate-production-spec",
+    "generate-implementation-plan",
+    "gate-implementation-plan",
+    "frontend-template-resolution",
+    "gate-frontend-template",
+    "implement-story-loop",
+    "stabilize-state",
+    "full-verify",
+    "independent-review",
+    "review-gate",
+    "fix-warnings-loop",
+    "release-readiness-gate",
+    "final-e2e-proof",
+    "acceptance-matrix",
+    "production-report",
+    "distill"
+  ],
+  "verify_policy": "full",
+  "worktree": true,
+  "parallelism": 1,
+  "state_schema": "ao-spec-state/v2",
+  "artifact_schema": "ao-spec-artifacts/v2",
+  "nodes": [
+    {
+      "id": "import-input",
+      "type": "system-import",
+      "required_artifacts": [
+        {
+          "path": "imported-source.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "inspect-project",
+      "type": "adapter_command",
+      "command": "ao-spec-inspect-project",
+      "depends_on": [
+        "import-input"
+      ],
+      "timeout_seconds": 1200,
+      "required_artifacts": [
+        {
+          "path": "project-inspection.json",
+          "kind": "json"
+        },
+        {
+          "path": "project-inspection.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generate-product-state",
+      "type": "adapter_command",
+      "command": "ao-spec-generate-state",
+      "depends_on": [
+        "inspect-project"
+      ],
+      "timeout_seconds": 1800,
+      "continue_on_provider_idle_timeout": true,
+      "required_artifacts": [
+        {
+          "path": "product-prd.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "product-contract.json",
+          "kind": "json",
+          "validators": [
+            "product_contract"
+          ]
+        },
+        {
+          "path": "stories.json",
+          "kind": "json",
+          "validators": [
+            "stories_contract"
+          ]
+        },
+        {
+          "path": "progress.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "validate-product-state",
+      "type": "adapter_command",
+      "command": "ao-spec-validate-product-state",
+      "depends_on": [
+        "generate-product-state"
+      ],
+      "required_artifacts": [
+        {
+          "path": "product-state-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "product-state-gate.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generate-production-spec",
+      "type": "adapter_command",
+      "command": "ao-spec-production-spec",
+      "depends_on": [
+        "validate-product-state"
+      ],
+      "timeout_seconds": 1800,
+      "continue_on_provider_idle_timeout": true,
+      "required_artifacts": [
+        {
+          "path": "production-spec.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "api-contract.json",
+          "kind": "json"
+        },
+        {
+          "path": "data-contract.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "gate-production-spec",
+      "type": "adapter_command",
+      "command": "ao-spec-gate-production-spec",
+      "depends_on": [
+        "generate-production-spec"
+      ],
+      "required_artifacts": [
+        {
+          "path": "spec-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "spec-gate.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generate-implementation-plan",
+      "type": "adapter_command",
+      "command": "ao-spec-plan",
+      "depends_on": [
+        "gate-production-spec"
+      ],
+      "timeout_seconds": 1800,
+      "continue_on_provider_idle_timeout": true,
+      "required_artifacts": [
+        {
+          "path": "plan.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "tasks.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "tasks.json",
+          "kind": "json",
+          "validators": [
+            "tasks_contract"
+          ]
+        },
+        {
+          "path": "task-graph.json",
+          "kind": "json",
+          "validators": [
+            "task_graph_contract"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gate-implementation-plan",
+      "type": "adapter_command",
+      "command": "ao-spec-gate-implementation-plan",
+      "depends_on": [
+        "generate-implementation-plan"
+      ],
+      "required_artifacts": [
+        {
+          "path": "plan-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "plan-gate.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "frontend-template-resolution",
+      "type": "adapter_command",
+      "command": "ao-spec-frontend-template-resolution",
+      "depends_on": [
+        "gate-implementation-plan"
+      ],
+      "required_artifacts": [
+        {
+          "path": "frontend-template-selection.json",
+          "kind": "json"
+        },
+        {
+          "path": "frontend-template-rationale.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "gate-frontend-template",
+      "type": "adapter_command",
+      "command": "ao-spec-gate-frontend-template",
+      "depends_on": [
+        "frontend-template-resolution"
+      ],
+      "required_artifacts": [
+        {
+          "path": "frontend-template-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "implement-story-loop",
+      "type": "loop",
+      "command": "ao-spec-implement-story",
+      "depends_on": [
+        "gate-frontend-template"
+      ],
+      "until": "COMPLETE",
+      "max_iterations": 100,
+      "timeout_seconds": 2400,
+      "continue_on_provider_idle_timeout": true,
+      "required_artifacts": [
+        {
+          "path": "implementation-state.json",
+          "kind": "json"
+        },
+        {
+          "path": "progress.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "stabilize-state",
+      "type": "adapter_command",
+      "command": "ao-spec-stabilize-state",
+      "depends_on": [
+        "implement-story-loop"
+      ],
+      "required_artifacts": [
+        {
+          "path": "stabilize-state.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "full-verify",
+      "type": "adapter_command",
+      "command": "ao-spec-full-verify",
+      "depends_on": [
+        "stabilize-state"
+      ],
+      "required_artifacts": [
+        {
+          "path": "full-verify.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "full-verify.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "independent-review",
+      "type": "adapter_command",
+      "command": "ao-spec-review",
+      "depends_on": [
+        "full-verify"
+      ],
+      "required_artifacts": [
+        {
+          "path": "review.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "review-findings.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "review-gate",
+      "type": "adapter_command",
+      "command": "ao-spec-review-gate",
+      "depends_on": [
+        "independent-review"
+      ],
+      "required_artifacts": [
+        {
+          "path": "review-gate.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "fix-warnings-loop",
+      "type": "loop",
+      "command": "ao-spec-fix-warnings",
+      "depends_on": [
+        "review-gate"
+      ],
+      "until": "NO_ACTIONABLE_WARNINGS",
+      "max_iterations": 20,
+      "timeout_seconds": 2400,
+      "continue_on_provider_idle_timeout": true,
+      "required_artifacts": [
+        {
+          "path": "fix.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        },
+        {
+          "path": "fix-state.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "release-readiness-gate",
+      "type": "adapter_command",
+      "command": "ao-spec-release-readiness",
+      "depends_on": [
+        "fix-warnings-loop"
+      ],
+      "required_artifacts": [
+        {
+          "path": "release-readiness.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "release-readiness.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "final-e2e-proof",
+      "type": "adapter_command",
+      "command": "ao-spec-final-e2e-proof",
+      "depends_on": [
+        "release-readiness-gate"
+      ],
+      "timeout_seconds": 2400,
+      "required_artifacts": [
+        {
+          "path": "e2e-proof.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "e2e-proof.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acceptance-matrix",
+      "type": "adapter_command",
+      "command": "ao-spec-acceptance-matrix",
+      "depends_on": [
+        "final-e2e-proof"
+      ],
+      "required_artifacts": [
+        {
+          "path": "acceptance-matrix.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "component-evidence.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "command-coverage.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "production-report",
+      "type": "adapter_command",
+      "command": "ao-spec-production-report",
+      "depends_on": [
+        "acceptance-matrix"
+      ],
+      "required_artifacts": [
+        {
+          "path": "production-report.json",
+          "kind": "json"
+        },
+        {
+          "path": "production-report.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "distill",
+      "type": "adapter_command",
+      "command": "ao-spec-distill",
+      "depends_on": [
+        "production-report"
+      ],
+      "required_artifacts": [
+        {
+          "path": "distill-result.json",
+          "kind": "json"
+        },
+        {
+          "path": "distill-result.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    }
+  ]
+}

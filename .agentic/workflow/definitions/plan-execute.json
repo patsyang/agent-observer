@@ -1,0 +1,215 @@
+{
+  "name": "plan-execute",
+  "title": "普通功能计划与实现闭环",
+  "adapter": "local-governed",
+  "contract_path": ".agentic/workflow/plan-execute.md",
+  "primary_inputs": ["goal", "goal_path", "spec_path", "plan_path"],
+  "stages": ["scope-resolve", "create-worktree", "resolve-slice-brief", "generate-plan", "plan-contract-gate", "task-graph-gate", "execute-task-loop", "integration-verify", "independent-review", "review-gate", "fix-loop", "acceptance-gate", "merge-back", "report"],
+  "verify_policy": "full",
+  "worktree": true,
+  "parallelism": 3,
+  "nodes": [
+    {
+      "id": "resolve-slice-brief",
+      "type": "adapter_command",
+      "command": "ao-plan-resolve-slice-brief",
+      "required_artifacts": [
+        {
+          "path": "slice-brief.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder",
+            "stack_trace"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "generate-plan",
+      "type": "adapter_command",
+      "command": "ao-plan-generate-plan",
+      "depends_on": [
+        "resolve-slice-brief"
+      ],
+      "required_artifacts": [
+        {
+          "path": "plan.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder",
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "tasks.json",
+          "kind": "json",
+          "validators": [
+            "tasks_contract",
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "task-graph.json",
+          "kind": "json",
+          "validators": [
+            "task_graph_contract",
+            "stack_trace"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "plan-contract-gate",
+      "type": "adapter_command",
+      "command": "ao-plan-contract-gate",
+      "depends_on": [
+        "generate-plan"
+      ],
+      "required_artifacts": [
+        {
+          "path": "plan-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "plan-gate.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "task-graph-gate",
+      "type": "adapter_command",
+      "command": "ao-plan-task-graph-gate",
+      "depends_on": [
+        "plan-contract-gate"
+      ],
+      "required_artifacts": [
+        {
+          "path": "task-graph-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "execute-task-loop",
+      "type": "adapter_command",
+      "command": "ao-plan-execute-task-loop",
+      "depends_on": [
+        "task-graph-gate"
+      ],
+      "required_artifacts": ["implementation.md", "changed-files.txt", "verification.md"]
+    },
+    {
+      "id": "integration-verify",
+      "type": "adapter_command",
+      "command": "ao-plan-integration-verify",
+      "depends_on": [
+        "execute-task-loop"
+      ],
+      "required_artifacts": [
+        {
+          "path": "integration-verify.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        },
+        {
+          "path": "integration-verify.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "independent-review",
+      "type": "adapter_command",
+      "command": "ao-plan-review",
+      "depends_on": [
+        "integration-verify"
+      ],
+      "required_artifacts": ["review.md"]
+    },
+    {
+      "id": "review-gate",
+      "type": "adapter_command",
+      "command": "ao-plan-review-gate",
+      "depends_on": [
+        "independent-review"
+      ],
+      "required_artifacts": [
+        {
+          "path": "review-gate.json",
+          "kind": "json"
+        }
+      ]
+    },
+    {
+      "id": "fix-loop",
+      "type": "adapter_command",
+      "command": "ao-plan-fix",
+      "depends_on": [
+        "review-gate"
+      ],
+      "required_artifacts": [
+        {
+          "path": "fix.md",
+          "kind": "markdown",
+          "validators": [
+            "non_placeholder",
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "acceptance-matrix.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "component-evidence.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        },
+        {
+          "path": "command-coverage.json",
+          "kind": "json",
+          "validators": [
+            "stack_trace"
+          ]
+        }
+      ]
+    },
+    {
+      "id": "acceptance-gate",
+      "type": "adapter_command",
+      "command": "ao-plan-acceptance-gate",
+      "depends_on": [
+        "fix-loop"
+      ],
+      "required_artifacts": [
+        {
+          "path": "acceptance-gate.json",
+          "kind": "json",
+          "validators": [
+            "gate_pass"
+          ]
+        }
+      ]
+    }
+  ]
+}

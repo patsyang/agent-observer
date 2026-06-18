@@ -1,0 +1,26 @@
+{
+  "name": "control-plane-change",
+  "title": "控制面与受管 infra 修改",
+  "adapter": "local-governed",
+  "contract_path": ".agentic/workflow/control-plane-change.md",
+  "primary_inputs": ["goal", "goal_path"],
+  "stages": ["scope-check", "read-contracts", "minimum-contract-diff", "sync-template", "update-lock", "finalizer-review", "finalizer-verification", "report"],
+  "verify_policy": "control-plane",
+  "nodes": [
+    {
+      "id": "scope-check",
+      "required_artifacts": [
+        {"path": "infra-scope.md", "kind": "markdown", "validators": ["non_placeholder"]}
+      ]
+    },
+    {
+      "id": "implementation",
+      "depends_on": ["scope-check"],
+      "required_artifacts": [
+        {"path": "implementation.md", "kind": "markdown", "validators": ["non_placeholder"]},
+        {"path": "changed-files.json", "kind": "json"},
+        {"path": "changed-files.txt", "kind": "artifact"}
+      ]
+    }
+  ]
+}

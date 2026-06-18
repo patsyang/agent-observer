@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "id": "qoder-cn",
+  "description": "Qoder CLI CN via generic-cli adapter",
+  "invocation": {
+    "args": [
+      "-p",
+      "请读取附件中的任务说明并在当前工作区完成任务。",
+      "-w",
+      "{{cwd}}",
+      "--dangerously-skip-permissions",
+      "--attachment",
+      "{{prompt_file}}",
+      "-o",
+      "json"
+    ],
+    "stdin": null
+  },
+  "prompt": {
+    "write_file": true,
+    "file_name": "runtime-prompt.md"
+  },
+  "final_message": {
+    "source": "stdout_json",
+    "json_path": ["result"],
+    "fallback": "last_non_empty_stdout_line"
+  },
+  "success": {
+    "exit_codes": [0, 1],
+    "json_conditions": [
+      {
+        "path": ["is_error"],
+        "equals": false
+      }
+    ]
+  }
+}

@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-tasks/v1",
+  "item_required": ["id", "title", "observable_outcome", "files_expected", "tests_required", "verification_commands", "done_signal", "dependencies", "risk", "size"]
+}

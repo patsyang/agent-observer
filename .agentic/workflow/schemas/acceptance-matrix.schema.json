@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-acceptance-matrix/v1",
+  "item_required": ["acceptance_id", "story_id", "result", "evidence"]
+}

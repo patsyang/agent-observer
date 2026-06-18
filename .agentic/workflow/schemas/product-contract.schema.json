@@ -1,0 +1,4 @@
+{
+  "schema": "agentic-product-contract/v1",
+  "required": ["product_goal", "users", "workflows", "non_goals", "domain_objects", "states", "frontend", "backend", "data", "privacy", "security", "acceptance_items"]
+}
