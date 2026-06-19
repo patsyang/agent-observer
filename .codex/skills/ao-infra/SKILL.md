@@ -53,4 +53,3 @@ description: 修改当前项目控制面、workflow、command、skill、脚本�
 - 不要手写 `infra-acceptance.json` 或 `gate-results/*.json` 伪造通过。
 - 不要把 `changed-files.txt` 当作门禁事实；门禁事实来自 git 和 `changed-files.json` 对账。
 - 不要新增项目自有 `.ps1` 持久入口。
-- 不要上传或写入原始日志、token、auth、prompt 或敏感输出。

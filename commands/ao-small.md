@@ -26,7 +26,7 @@
 - 必须读取命令输出 `run_dir` 中的 `agent-instructions.md`；控制面 run_dir 位于 `ai_docs/runs/<run_id>/`，业务项目 run_dir 位于目标项目 `runtime.runs_dir/<run_id>/`。
 - workflow 必须创建隔离 worktree、完成 small-scope gate、repro/signal、最小实现、定向验证、独立审查、小修验收 gate 和报告。
 - 最终 `review` 节点必须产出 `acceptance-matrix.json`、`component-evidence.json`、`command-coverage.json`，并带相同 `stack_contract_ref`。
-- 先做 small-scope gate；涉及数据模型、隐私策略、跨端新功能、多组件修改或大重构时失败，建议改用 `/ao-plan` 或 `/ao-spec`。
+- 先做 small-scope gate；涉及数据模型、数据处理策略、跨端新功能、多组件修改或大重构时失败，建议改用 `/ao-plan` 或 `/ao-spec`。
 - Bug 修复必须先补回归测试。
 - 完成后运行受影响测试；同一失败最多修复 3 次，仍失败则停止并报告。
 - `run-report.md` 由 workflow run 写入；失败时输出 run_id、失败节点和 resume 命令。

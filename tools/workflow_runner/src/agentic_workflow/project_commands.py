@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import subprocess
 import sys
@@ -46,6 +47,9 @@ def e2e(repo_root: Path) -> int:
 
 
 def verify(repo_root: Path) -> int:
+    business_commands = _business_verify_commands(repo_root)
+    if business_commands:
+        return _run_many(business_commands)
     return _run_many(
         [([sys.executable, "scripts/ao.py", name], repo_root) for name in _verify_steps()]
     )
@@ -72,6 +76,29 @@ def package_collector(repo_root: Path) -> int:
 
 def _verify_steps() -> tuple[str, ...]:
     return ("agentic-check", "lint", "test", "e2e")
+
+
+def _business_verify_commands(repo_root: Path) -> list[tuple[list[str], Path]]:
+    commands: list[tuple[list[str], Path]] = []
+    if (repo_root / "backend" / "tests").exists():
+        commands.append(([sys.executable, "-m", "pytest", "backend/tests"], repo_root))
+    frontend_package = repo_root / "frontend" / "package.json"
+    frontend_scripts = _package_scripts(frontend_package)
+    if "test" in frontend_scripts:
+        commands.append((["npm", "--prefix", "frontend", "test", "--", "--run"], repo_root))
+    if "build" in frontend_scripts:
+        commands.append((["npm", "--prefix", "frontend", "run", "build"], repo_root))
+    if "e2e" in frontend_scripts:
+        commands.append((["npm", "--prefix", "frontend", "run", "e2e"], repo_root))
+    return commands
+
+
+def _package_scripts(package_path: Path) -> dict[str, str]:
+    if not package_path.exists():
+        return {}
+    payload = json.loads(package_path.read_text(encoding="utf-8"))
+    scripts = payload.get("scripts", {})
+    return scripts if isinstance(scripts, dict) else {}
 
 
 def _run_many(commands: list[tuple[list[str], Path]]) -> int:

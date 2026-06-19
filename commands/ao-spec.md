@@ -13,7 +13,7 @@
 ## 规则
 
 - Skill：`.codex/skills/ao-spec/SKILL.md`
-- `/ao-spec` 用于建立或改变产品事实：产品目标、用户、业务对象、状态、数据模型、隐私、安全、验收矩阵或多 story 能力。
+- `/ao-spec` 用于建立或改变产品事实：产品目标、用户、业务对象、状态、数据模型、数据处理、安全、验收矩阵或多 story 能力。
 - 从 0 开发时使用 `<项目名> -prd <路径>` 或 `<项目名> -spec <路径>`。
 - 项目名对应已注册业务项目，例如 `app-a`；业务应用代码和规格都属于目标项目仓库。
 - 业务项目运行前必须存在 confirmed `.agentic/stack-contract.json`；缺失时 prepare 阶段失败，先使用 `/ao-project -r <项目> <项目根目录>` 完成一步式项目接入并确认技术栈 profile。
