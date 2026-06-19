@@ -32,11 +32,44 @@ node_modules/
 # Local logs
 .logs/
 
-# SQLite runtime files (locks, WAL)
+# Runtime logs
+data/runtime/*.err.log
+data/runtime/*.out.log
+
+# SQLite runtime files (locks, WAL, backups)
 *.sqlite-shm
 *.sqlite-wal
+*.bak-*
 
 # Local environment
 .env
 .env.*
 !.env.example
+
+# Runtime data (generated at runtime)
+data/runtime/screenshots/
+data/runtime/debug-validation.json
+data/runtime/agent-observer-windows-*.zip
+data/runtime/manual-collector/
+data/runtime/manual-collector-current/
+data/runtime/manual-collector-latest/
+
+# Data directory runtime artifacts
+data/packages/
+data/manual-real-collector/
+data/manual-real-collector-clean/
+data/manual-real-collector-final/
+data/manual-real-collector-final2/
+data/manual-real-collector-single/
+data/manual-real-collector-v2/
+
+# Agent Observer runtime databases (kept in backend/data/ for tests)
+data/*.sqlite
+
+# Frontend build/test artifacts
+frontend/tsconfig.tsbuildinfo
+frontend/test-results/
+frontend/data/runtime/
+
+# Backend data (keep only migrations, not runtime DBs)
+backend/data/*.sqlite
