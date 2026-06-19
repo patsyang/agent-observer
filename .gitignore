@@ -29,6 +29,13 @@ dist/
 # Node
 node_modules/
 
+# Local logs
+.logs/
+
+# SQLite runtime files (locks, WAL)
+*.sqlite-shm
+*.sqlite-wal
+
 # Local environment
 .env
 .env.*

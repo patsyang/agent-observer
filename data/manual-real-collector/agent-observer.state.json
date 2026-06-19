@@ -1,0 +1,10 @@
+{
+  "cursor": {
+    "last_sequence": 1,
+    "last_source_key": "C:/Users/yuandian/.codex/sessions/2026/06/06/rollout-2026-06-06T15-23-03-019e9bd0-460d-7a90-be53-a3dcbbec8d88.jsonl:00000500"
+  },
+  "last_error": null,
+  "last_upload_at": "2026-06-19T07:23:21.863808+00:00",
+  "outbox": [],
+  "running": false
+}

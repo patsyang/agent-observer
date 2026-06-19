@@ -1,0 +1,11 @@
+{
+  "cursor": {
+    "last_sequence": 2,
+    "last_source_key": "D:/workspace/agentic_factory/apps/agent-observer/frontend/test-results/release-critical-flows-rel-24a43-ry-and-DB-backed-validation/collector-package/.codex/sessions/session-e2e.jsonl:00000006"
+  },
+  "last_error": null,
+  "last_upload_at": "2026-06-19T16:41:03.564539+00:00",
+  "outbox": [],
+  "raw_upload_enabled": true,
+  "running": false
+}

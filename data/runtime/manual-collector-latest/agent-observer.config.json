@@ -1,0 +1,20 @@
+{
+  "server_url": "http://127.0.0.1:8765",
+  "collector_id": "windows-collector",
+  "state_path": "agent-observer.state.json",
+  "telemetry_mode": "safe_probe",
+  "collection_interval_seconds": 30,
+  "codex_home": "%USERPROFILE%\\.codex",
+  "history_window_days": 7,
+  "max_events_per_cycle": 500,
+  "evidence_mode": "structured_projection",
+  "raw_upload_enabled": true,
+  "agent_type": "codex",
+  "effective_policy": {
+    "policy_version": 2,
+    "template_enabled": true,
+    "upload_raw": true,
+    "collection_policy": "codex default local observation",
+    "diagnostic_policy": "whitelist only"
+  }
+}

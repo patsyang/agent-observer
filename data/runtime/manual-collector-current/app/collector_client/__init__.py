@@ -1,0 +1,1 @@
+"""Packaged Windows collector client."""

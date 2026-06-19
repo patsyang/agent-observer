@@ -1,0 +1,210 @@
+{
+  "schema": "agent-observer-validation-summary/v1",
+  "stack_contract_ref": {
+    "contract_id": "agent-observer-stack",
+    "revision": 1,
+    "hash": "37b5897842fe09a95d389808c7215664f0c4ce24b10f6fdf6423bfa156a8b30e",
+    "status": "confirmed",
+    "path": "D:/workspace/agentic_factory/apps/agent-observer/.agentic/stack-contract.json"
+  },
+  "sample_source": "unqualified_synthetic_or_short_local_sample",
+  "sample_profile": {
+    "sample_source": "unqualified_synthetic_or_short_local_sample",
+    "qualified_for_release_evaluation": false,
+    "sample_count": 17,
+    "observed_date_span_days": 0,
+    "coverage_categories": [
+      "error_recurrence",
+      "low_evidence_fact",
+      "diagnostic_feedback",
+      "usage_anomaly",
+      "high_risk_operation",
+      "sensitive_object_touch"
+    ],
+    "missing_categories": []
+  },
+  "sample_coverage": [
+    {
+      "category": "error_recurrence",
+      "sample_count": 5,
+      "covered": true
+    },
+    {
+      "category": "low_evidence_fact",
+      "sample_count": 2,
+      "covered": true
+    },
+    {
+      "category": "diagnostic_feedback",
+      "sample_count": 2,
+      "covered": true
+    },
+    {
+      "category": "usage_anomaly",
+      "sample_count": 4,
+      "covered": true
+    },
+    {
+      "category": "high_risk_operation",
+      "sample_count": 1,
+      "covered": true
+    },
+    {
+      "category": "sensitive_object_touch",
+      "sample_count": 2,
+      "covered": true
+    }
+  ],
+  "error_story_evidence_chain_pass_rate": 1.0,
+  "usage_explanation_pass_rate": 1.0,
+  "flow_coverage": {
+    "FLOW-001": {
+      "covered": true,
+      "evidence": [
+        "collectors"
+      ]
+    },
+    "FLOW-002": {
+      "covered": true,
+      "evidence": [
+        "observed_facts",
+        "evidence_projections"
+      ]
+    },
+    "FLOW-003": {
+      "covered": true,
+      "evidence": [
+        "observation_stories"
+      ]
+    },
+    "FLOW-004": {
+      "covered": true,
+      "evidence": [
+        "story_handling_states",
+        "audit_logs"
+      ]
+    },
+    "FLOW-005": {
+      "covered": true,
+      "evidence": [
+        "diagnostic_jobs",
+        "diagnostic_results"
+      ]
+    },
+    "FLOW-006": {
+      "covered": true,
+      "evidence": [
+        "usage_signals",
+        "risk_signals"
+      ]
+    },
+    "FLOW-007": {
+      "covered": true,
+      "evidence": [
+        "effective_policies",
+        "audit_logs"
+      ]
+    }
+  },
+  "acceptance_coverage": {
+    "AC-001": {
+      "covered": true,
+      "evidence_key": "collector-onboarding"
+    },
+    "AC-002": {
+      "covered": true,
+      "evidence_key": "fact-ingest"
+    },
+    "AC-003": {
+      "covered": true,
+      "evidence_key": "fact-query"
+    },
+    "AC-004": {
+      "covered": true,
+      "evidence_key": "story-recurrence"
+    },
+    "AC-005": {
+      "covered": true,
+      "evidence_key": "story-handling"
+    },
+    "AC-006": {
+      "covered": true,
+      "evidence_key": "story-recompute-preservation"
+    },
+    "AC-007": {
+      "covered": true,
+      "evidence_key": "usage-rollup"
+    },
+    "AC-008": {
+      "covered": true,
+      "evidence_key": "usage-attribution"
+    },
+    "AC-009": {
+      "covered": true,
+      "evidence_key": "risk-governance"
+    },
+    "AC-010": {
+      "covered": true,
+      "evidence_key": "collector-source-status"
+    },
+    "AC-011": {
+      "covered": true,
+      "evidence_key": "diagnostic-availability"
+    },
+    "AC-012": {
+      "covered": true,
+      "evidence_key": "diagnostic-result"
+    },
+    "AC-013": {
+      "covered": true,
+      "evidence_key": "fixed-account-audit"
+    },
+    "AC-014": {
+      "covered": true,
+      "evidence_key": "public-console"
+    },
+    "AC-015": {
+      "covered": true,
+      "evidence_key": "story-default-queue"
+    },
+    "AC-016": {
+      "covered": true,
+      "evidence_key": "minimum-validation-thresholds"
+    },
+    "AC-017": {
+      "covered": true,
+      "evidence_key": "minimum-validation-stop-marker"
+    },
+    "AC-018": {
+      "covered": true,
+      "evidence_key": "access-config-policy"
+    },
+    "AC-019": {
+      "covered": true,
+      "evidence_key": "forbidden-surface-regression"
+    },
+    "AC-020": {
+      "covered": true,
+      "evidence_key": "flow-command-coverage"
+    }
+  },
+  "data_handling_review": {
+    "raw_upload_mode": "policy_controlled",
+    "reported_fields": [
+      "category",
+      "counts",
+      "pass_rates",
+      "evidence_refs",
+      "rule_fix_list"
+    ]
+  },
+  "stop_marker": true,
+  "result": "STOP",
+  "rule_fix_list": [
+    {
+      "rule_id": "validation-sample-representativeness",
+      "reason_code": "sample_not_td011_or_documented_7_day_local_data",
+      "suggested_fix": "Run TD-011 real Codex session samples or a documented 7-day local data sample before release evaluation."
+    }
+  ]
+}

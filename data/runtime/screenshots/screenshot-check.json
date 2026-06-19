@@ -1,0 +1,102 @@
+{
+  "dashboard-24h-desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 980
+    },
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "bodyScrollWidth": 1440,
+    "overflowingControls": []
+  },
+  "story-detail-desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 980
+    },
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "bodyScrollWidth": 1440,
+    "overflowingControls": []
+  },
+  "facts-detail-desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 980
+    },
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "bodyScrollWidth": 1440,
+    "overflowingControls": []
+  },
+  "collectors-desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 980
+    },
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "bodyScrollWidth": 1440,
+    "overflowingControls": []
+  },
+  "access-drawer-desktop": {
+    "viewport": {
+      "width": 1440,
+      "height": 980
+    },
+    "scrollWidth": 1440,
+    "clientWidth": 1440,
+    "bodyScrollWidth": 1440,
+    "overflowingControls": []
+  },
+  "dashboard-24h-narrow": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "bodyScrollWidth": 390,
+    "overflowingControls": []
+  },
+  "story-detail-narrow": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "bodyScrollWidth": 390,
+    "overflowingControls": []
+  },
+  "facts-detail-narrow": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "bodyScrollWidth": 390,
+    "overflowingControls": []
+  },
+  "collectors-narrow": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "bodyScrollWidth": 390,
+    "overflowingControls": []
+  },
+  "access-drawer-narrow": {
+    "viewport": {
+      "width": 390,
+      "height": 844
+    },
+    "scrollWidth": 390,
+    "clientWidth": 390,
+    "bodyScrollWidth": 390,
+    "overflowingControls": []
+  }
+}
