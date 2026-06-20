@@ -5,6 +5,8 @@ import sqlite3
 import hashlib
 from datetime import UTC, datetime
 
+from app.evidence.presentation import projection_preview, raw_available, raw_status_label
+
 
 def _now() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
@@ -21,6 +23,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     cursor = batch.get("cursor", "")
     accepted = 0
     duplicates = 0
+    affected_fact_ids: list[str] = []
     now = _now()
 
     for item in batch.get("items", []):
@@ -34,13 +37,17 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
             duplicates += 1
             continue
         fact_id = _fact_id(conn, collector_id, source_event_id)
+        preview = _list_projection_preview(item)
+        refs = item.get("source_refs") or {}
+        specific = item.get("source_specific") or {}
         conn.execute(
             """
             insert into observed_facts (
               fact_id, source_event_id, batch_id, collector_id, source, fact_type, category, quality,
               severity, summary, occurred_at, promoted_to_story, source_refs_json,
-              source_specific_json, created_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)
+              source_specific_json, content_preview, raw_available, raw_status, conversation_ref,
+              session_ref, source_event_type, source_path_hash, created_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact_id,
@@ -54,14 +61,22 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
                 item.get("severity", "low"),
                 item["summary"],
                 item["occurred_at"],
-                _json(item.get("source_refs")),
-                _json(item.get("source_specific")),
+                _json(refs),
+                _json(specific),
+                preview["content_preview"],
+                1 if preview["raw_available"] else 0,
+                preview["raw_status"],
+                str(refs.get("conversation_ref") or ""),
+                str(refs.get("session_ref") or ""),
+                str(specific.get("codex_event_type") or ""),
+                str(refs.get("source_path_hash") or ""),
                 now,
             ),
         )
         _insert_evidence_projections(conn, fact_id, item)
         _insert_optional_signals(conn, fact_id, item)
         accepted += 1
+        affected_fact_ids.append(fact_id)
 
     conn.execute(
         """
@@ -72,20 +87,23 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
         (batch_id, collector_id, source, cursor, accepted, duplicates, now),
     )
     conn.commit()
-    if accepted:
-        from app.stories.service import rebuild_stories
+    if affected_fact_ids:
+        from app.stories.service import update_stories_for_facts
 
-        rebuild_stories(conn, reason="telemetry_ingest")
+        update_stories_for_facts(conn, affected_fact_ids, reason="telemetry_ingest")
     return {"batch_id": batch_id, "accepted": accepted, "duplicates": duplicates}
 
 
 def _enrich_existing_raw_projection(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:
     if not _has_raw_content(item):
         return
+    preview = _list_projection_preview(item)
     conn.execute(
         """
         update observed_facts
-        set summary = ?, quality = ?, severity = ?, source_refs_json = ?, source_specific_json = ?
+        set summary = ?, quality = ?, severity = ?, source_refs_json = ?, source_specific_json = ?,
+            content_preview = ?, raw_available = ?, raw_status = ?,
+            conversation_ref = ?, session_ref = ?, source_event_type = ?, source_path_hash = ?
         where fact_id = ?
         """,
         (
@@ -94,6 +112,13 @@ def _enrich_existing_raw_projection(conn: sqlite3.Connection, fact_id: str, item
             item.get("severity", "low"),
             _json(item.get("source_refs")),
             _json(item.get("source_specific")),
+            preview["content_preview"],
+            1 if preview["raw_available"] else 0,
+            preview["raw_status"],
+            str((item.get("source_refs") or {}).get("conversation_ref") or ""),
+            str((item.get("source_refs") or {}).get("session_ref") or ""),
+            str((item.get("source_specific") or {}).get("codex_event_type") or ""),
+            str((item.get("source_refs") or {}).get("source_path_hash") or ""),
             fact_id,
         ),
     )
@@ -216,6 +241,19 @@ def _raw_content(projection: dict, item: dict) -> str | None:
     if value is None:
         return None
     return str(value)
+
+
+def _list_projection_preview(item: dict) -> dict:
+    projection = _normalized_projections(item)[0]
+    projection_json = projection.get("projection") or projection.get("projection_json") or item.get("projection") or {}
+    raw_content = _raw_content(projection, item)
+    upload_raw = bool(projection.get("upload_raw", item.get("upload_raw", False)))
+    category = projection.get("category", item.get("category", "uncategorized"))
+    return {
+        "content_preview": projection_preview(projection_json, raw_content, item.get("summary", ""), category),
+        "raw_available": raw_available(upload_raw, raw_content),
+        "raw_status": raw_status_label(upload_raw, raw_content),
+    }
 
 
 def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:

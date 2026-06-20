@@ -1,12 +1,13 @@
+import type { CollectorsResponse, FactsResponse, TimeWindow, UsageSummary } from '../api/types';
+import { formatCount, formatNumber } from '../utils/numberFormat';
+
 export function sourceStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     online: '在线',
+    degraded: '异常但进程仍在',
     offline: '离线',
     source_missing: '数据源缺失',
     source_locked: '数据源锁定',
-    state_corrupt: '状态损坏',
-    outbox_backlog: '待传队列',
-    policy_not_fetched: '未拉取策略',
   };
   return labels[status] ?? status;
 }
@@ -16,13 +17,34 @@ export function reasonCodeLabel(reason: string): string {
     run_once: '单次上报完成',
     run_once_completed: '单次上报完成',
     start_running: '持续采集中',
+    started: '已启动',
+    collecting: '采集中',
+    uploading: '上传中',
+    waiting: '等待下一轮',
+    backfilling: '历史回填中',
+    policy_stale: '策略待刷新',
     heartbeat_stale: '心跳已过期',
-    policy_not_fetched: '未拉取策略',
     source_locked: '数据源锁定',
     collector_offline: '采集器已停止',
     collector_stopped: '采集器已停止',
   };
   return labels[reason] ?? reason;
+}
+
+export function collectorRuntimeLabel(status: string, phase?: string): string {
+  if (status === 'online') {
+    const phases: Record<string, string> = {
+      collecting: '在线采集中',
+      uploading: '在线上传中',
+      waiting: '在线等待下一轮',
+      backfilling: '在线回填历史',
+      starting: '在线启动中',
+      idle: '在线空闲',
+    };
+    return phases[phase ?? ''] ?? '在线';
+  }
+  if (status === 'degraded') return '异常但进程仍在';
+  return sourceStatusLabel(status);
 }
 
 export function factTypeLabel(type: string): string {
@@ -121,8 +143,36 @@ export function scopeValueLabel(scope: string, value: string): string {
   return '对象引用';
 }
 
-function looksLikeOpaqueRef(value: string): boolean {
+export function looksLikeOpaqueRef(value: string): boolean {
   return /\b(ref|proj|hash|fact|codex)[-:_]/i.test(value) || /^[a-f0-9]{12,}$/i.test(value);
+}
+
+export function sumBacklog(data: CollectorsResponse): number {
+  return data.collectors.reduce((total, collector) => total + collector.outbox_backlog, 0);
+}
+
+export function qualitySummary(data: FactsResponse): string {
+  const high = data.facts.filter((fact) => fact.quality === 'high').length;
+  const low = data.facts.filter((fact) => fact.quality === 'low').length;
+  return `高置信 ${formatNumber(high)} / 待补证 ${formatNumber(low)}`;
+}
+
+export function latestFactTitle(fact: FactsResponse['facts'][number] | undefined): string {
+  if (!fact) return '暂无事实';
+  const raw = fact.raw_available ? '已上传原文' : '未上传原文';
+  return `最近上报：${factTypeLabel(fact.category || fact.fact_type)}，${qualityLabel(fact.quality)}可信，${raw}`;
+}
+
+export function queueSummary(activeCount: number): string {
+  return activeCount > 0 ? `${formatCount(activeCount, '个故事待处理')}` : '暂无待处理故事';
+}
+
+export function emptyUsage(window: TimeWindow): UsageSummary {
+  return {
+    window,
+    totals: { associated_units: 0, attributed_units: 0, unknown_units: 0 },
+    rollups: []
+  };
 }
 
 export function formatDateTime(value?: string | null): string {

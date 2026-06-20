@@ -152,6 +152,18 @@ def test_usage_summary_filters_by_window_and_rebuilds_rollups(tmp_path):
     assert all_time["totals"]["associated_units"] == 135
 
 
+def test_usage_summary_read_does_not_write_rollup_rows(tmp_path):
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, _usage_risk_batch())
+        before = conn.execute("select count(*) from usage_rollups").fetchone()[0]
+        summary = get_usage_summary(conn, window="1h")
+        after = conn.execute("select count(*) from usage_rollups").fetchone()[0]
+
+    assert summary["totals"]["associated_units"] == 135
+    assert before == 0
+    assert after == 0
+
+
 def test_risk_summary_uses_projection_refs_and_object_counts(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(conn, _usage_risk_batch())
@@ -246,4 +258,4 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
 
     signals = {(signal["risk_type"], signal["object_type"]): signal for signal in summary["signals"]}
     assert ("sensitive_object_touch", "credential") not in signals
-    assert signals[("sensitive_object_touch", "auth")]["count"] == 1
+    assert ("sensitive_object_touch", "auth") not in signals

@@ -69,11 +69,16 @@ export function objectTypeLabel(value: string): string {
 }
 
 export function highlightSensitiveTerms(value: string): ReactNode {
-  const pattern =
-    /(\b(?:access|refresh|api|bearer|auth|session|credential|secret)[-_ ]?token\b|\btoken[-_ ]?(?:secret|key|value)\b|["']?token["']?\s*[:=]|\b(?:set-cookie|cookies?|cookie_jar|secret|secrets|client_secret|credential|credentials|auth|authentication|authorization)\b|auth[._/-])/gi;
-  const parts = value.split(pattern);
-  return parts.map((part, index) =>
-    matchesSensitiveHighlight(part) ? <mark className="sensitive-hit" key={`${part}-${index}`}>{part}</mark> : part
+  return value;
+}
+
+export function highlightSensitiveMatches(value: string, matches: Array<Record<string, unknown>> = []): ReactNode {
+  const terms = Array.from(new Set(matches.flatMap(matchTerms))).filter((term) => value.includes(term));
+  if (!terms.length) return value;
+  terms.sort((left, right) => right.length - left.length);
+  const pattern = new RegExp(`(${terms.map(escapeRegExp).join('|')})`, 'g');
+  return value.split(pattern).map((part, index) =>
+    terms.includes(part) ? <mark className="sensitive-hit" key={`${part}-${index}`}>{part}</mark> : part
   );
 }
 
@@ -90,6 +95,18 @@ function factPriority(fact: ObservedFact): number {
   return 10;
 }
 
-function matchesSensitiveHighlight(value: string): boolean {
-  return /^(?:\b(?:access|refresh|api|bearer|auth|session|credential|secret)[-_ ]?token\b|\btoken[-_ ]?(?:secret|key|value)\b|["']?token["']?\s*[:=]|\b(?:set-cookie|cookies?|cookie_jar|secret|secrets|client_secret|credential|credentials|auth|authentication|authorization)\b|auth[._/-])$/i.test(value);
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function matchTerms(match: Record<string, unknown>): string[] {
+  const fullValue = typeof match.matched_value === 'string' ? match.matched_value : '';
+  if (fullValue) return [fullValue];
+  const preview = typeof match.matched_preview === 'string' ? match.matched_preview : '';
+  if (!preview) return [];
+  if (!preview.includes('...')) return [preview];
+  return preview
+    .split('...')
+    .map((part) => part.trim())
+    .filter((part) => part.length >= 8);
 }

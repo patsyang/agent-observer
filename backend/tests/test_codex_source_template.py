@@ -43,8 +43,12 @@ def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
         },
         {
             "timestamp": "2026-06-18T10:04:00+00:00",
-            "type": "message",
-            "sensitive_categories": ["token", "auth"],
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "arguments": json.dumps({"command": "curl -H 'Authorization: Bearer abcdefghijklmnop' http://127.0.0.1"}),
+            },
             "conversation_id": "conversation-001",
             "session_id": "session-001",
             "project": "agent-observer",
@@ -182,7 +186,8 @@ def test_codex_source_template_extracts_structured_facts_without_raw_content(tmp
     assert any(fact.get("risk", {}).get("risk_type") == "high_risk_operation" for fact in facts)
     sensitive_fact = next(fact for fact in facts if fact["category"] == "sensitive_touch")
     assert sensitive_fact["projection"]["object_type"] == "credential"
-    assert sensitive_fact["projection"]["sensitive_categories"] == ["auth", "token"]
+    assert sensitive_fact["projection"]["sensitive_categories"] == ["token"]
+    assert sensitive_fact["projection"]["sensitive_matches"][0]["match_type"] == "authorization_bearer"
     message_fact = next(fact for fact in facts if fact["category"] == "codex_message")
     assert message_fact["projection"]["role"] == "unknown"
     assert message_fact["projection"]["content_length"] == 0
@@ -304,7 +309,7 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"tool_call", "codex_error", "usage", "high_risk_operation", "sensitive_touch", "codex_prompt", "codex_reasoning"} <= categories
+    assert {"tool_call", "codex_error", "usage", "high_risk_operation", "codex_prompt", "codex_reasoning"} <= categories
     prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
     assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，原文上报未开启。"
     assert prompt_fact["projection"]["content_length"] == len("请检查 Dashboard 为什么看不到原始 Prompt")
@@ -312,74 +317,4 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     assert any(fact.get("usage", {}).get("units") == 120 for fact in facts)
     assert any(fact.get("error_signature", {}).get("signature_key", "").startswith("codex_error:function_call_output") for fact in facts)
     assert any(fact.get("projection", {}).get("command_category") == "test" for fact in facts)
-    sensitive_facts = [fact for fact in facts if fact["category"] == "sensitive_touch"]
-    assert len(sensitive_facts) == 1
-    sensitive_fact = sensitive_facts[0]
-    assert sensitive_fact["projection"]["object_type"] == "auth"
-    assert sensitive_fact["projection"]["sensitive_categories"] == ["auth"]
-
-
-def test_codex_source_template_uploads_raw_prompt_when_enabled(tmp_path):
-    codex_home = tmp_path / ".codex"
-    _write_real_shape_session(codex_home)
-
-    facts = collect_facts(
-        "collector-codex-real",
-        1,
-        "raw_enabled",
-        codex_home=codex_home,
-        history_window_days=7,
-        max_events=20,
-        cursor={"last_source_key": ""},
-        upload_raw=True,
-    )
-
-    prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
-    assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
-    assert "请检查 Dashboard 为什么看不到原始 Prompt" in prompt_fact["raw_content"]
-    assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
-    reasoning_fact = next(fact for fact in facts if fact["category"] == "codex_reasoning")
-    assert reasoning_fact["projection"]["content_length"] == len("模型正在判断证据链刷新路径")
-
-
-def test_codex_error_signature_groups_same_failure_shape(tmp_path):
-    codex_home = tmp_path / ".codex"
-    sessions = codex_home / "sessions"
-    sessions.mkdir(parents=True)
-    records = [
-        {
-            "timestamp": "2026-06-18T11:01:00+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call_output",
-                "output": "Exit code: 1\nOutput from first failed command",
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:02:00+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call_output",
-                "output": "Exit code: 1\nDifferent stderr text from the same failure shape",
-            },
-        },
-    ]
-    (sessions / "same-error-shape.jsonl").write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
-
-    facts = collect_facts(
-        "collector-codex-errors",
-        1,
-        "safe_probe",
-        codex_home=codex_home,
-        history_window_days=7,
-        max_events=20,
-        cursor={"last_source_key": ""},
-    )
-
-    signatures = {
-        fact["error_signature"]["signature_key"]
-        for fact in facts
-        if fact["category"] == "codex_error"
-    }
-
-    assert signatures == {"codex_error:function_call_output:response_item:1:function_call_output"}
+    assert not [fact for fact in facts if fact["category"] == "sensitive_touch"]

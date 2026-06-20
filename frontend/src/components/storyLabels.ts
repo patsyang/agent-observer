@@ -1,4 +1,5 @@
 import { formatNumber } from '../utils/numberFormat';
+import { looksLikeOpaqueRef } from '../pages/dashboardLabels';
 
 export function attentionStateLabel(value: string): string {
   const labels: Record<string, string> = {
@@ -42,6 +43,7 @@ export function conclusionCodeLabel(value: string): string {
 }
 
 export function storyKindLabel(storyKey: string): string {
+  if (storyKey.startsWith('command_timeout:')) return '命令超时';
   if (storyKey.startsWith('usage:')) return '用量异常';
   if (storyKey.startsWith('risk:sensitive_object_touch')) return '敏感对象触达';
   if (storyKey.startsWith('risk:high_risk_operation')) return '高风险操作';
@@ -73,8 +75,14 @@ export function evidenceSummary(refs: string[]): string {
   return `${formatNumber(refs.length)} 条证据投影`;
 }
 
-function looksLikeOpaqueRef(value: string): boolean {
-  return /\b(ref|proj|hash|fact|codex)[-:_]/i.test(value) || /^[a-f0-9]{12,}$/i.test(value);
+export function storyEvidenceSummary(options: {
+  evidence_refs: string[];
+  latest_summary?: string | null;
+  occurrence_count?: number;
+}): string {
+  if (options.latest_summary) return options.latest_summary;
+  if (options.occurrence_count && options.occurrence_count > 0) return `${formatNumber(options.occurrence_count)} 条事实证据`;
+  return evidenceSummary(options.evidence_refs);
 }
 
 function formatUnits(value: number): string {

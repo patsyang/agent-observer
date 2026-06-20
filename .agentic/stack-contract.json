@@ -22,7 +22,7 @@
     },
     {
       "component_id": "backend",
-      "kind": "service",
+      "kind": "backend",
       "language": "python",
       "framework": "fastapi",
       "root": "backend",
@@ -30,7 +30,7 @@
     },
     {
       "component_id": "database",
-      "kind": "database",
+      "kind": "backend",
       "language": "sql",
       "framework": "sqlite",
       "root": "data",

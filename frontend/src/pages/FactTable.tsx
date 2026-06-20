@@ -74,32 +74,58 @@ function FactRow({
   isSelected: boolean;
   onInspect: (factId: string) => void;
 }) {
+  const contentText = fact.content_preview || localizedSummary(fact.summary);
+  const secondarySummary = fact.content_preview && !isGenericCandidateSummary(fact.summary) && fact.content_preview !== fact.summary;
   return (
-    <tr aria-selected={isSelected ? 'true' : 'false'} className={isSelected ? 'selected-row' : ''}>
+    <tr
+      aria-selected={isSelected ? 'true' : 'false'}
+      className={isSelected ? 'selected-row clickable-row' : 'clickable-row'}
+      onClick={() => onInspect(fact.fact_id)}
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          onInspect(fact.fact_id);
+        }
+      }}
+    >
       <td data-label="序号">{formatNumber(absoluteIndex)}</td>
       <td data-label="观测到什么">
         <strong>{factTypeLabel(fact.category || fact.fact_type)}</strong>
         <small>{eventTypeText(fact.source_event_type)}</small>
       </td>
       <td data-label="真实内容">
-        <span className="content-preview" title={fact.content_preview || localizedSummary(fact.summary)}>
-          {highlightSensitiveTerms(fact.content_preview || localizedSummary(fact.summary))}
+        <span className="content-preview" title={contentText}>
+          {highlightSensitiveTerms(contentText)}
         </span>
-        {fact.content_preview && fact.content_preview !== fact.summary && <small>{localizedSummary(fact.summary)}</small>}
+        {secondarySummary && <small>{localizedSummary(fact.summary)}</small>}
       </td>
       <td data-label="可信度">{qualityText(fact.quality)}</td>
       <td data-label="来源 / 时间">
         {factSourceLabel(fact)}
-        <small>{formatDateTime(fact.occurred_at)}</small>
+        <small>发生 {formatDateTime(fact.occurred_at)}</small>
+        {fact.ingested_at && <small>入库 {formatDateTime(fact.ingested_at)}</small>}
       </td>
       <td data-label="原文">
         <span className={`badge ${fact.raw_available ? 'green' : 'gray'}`}>{rawStatusText(fact)}</span>
       </td>
       <td data-label="操作">
-        <button className="compact-button" onClick={() => onInspect(fact.fact_id)} aria-label={`查看 ${fact.fact_id}`} type="button">
+        <button
+          className="compact-button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onInspect(fact.fact_id);
+          }}
+          aria-label={`查看 ${fact.fact_id}`}
+          type="button"
+        >
           查看
         </button>
       </td>
     </tr>
   );
+}
+
+function isGenericCandidateSummary(value: string): boolean {
+  return value.includes('未归类但来源合法的低证据事件') || value.includes('保留为事实查询候选');
 }

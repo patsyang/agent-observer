@@ -6,8 +6,8 @@ import {
   attentionStateLabel,
   compactListSummary,
   diagnosticStatusLabel,
-  evidenceSummary,
   handlingStateLabel,
+  storyEvidenceSummary,
   storyKindLabel,
   usageSummaryText,
 } from './storyLabels';
@@ -25,6 +25,7 @@ export function StoryCard({ story, onOpen }: Props) {
           <div className="story-card__badges">
             <span className="badge violet">{storyKindLabel(story.story_key)}</span>
             <span className="badge gray">优先级 {formatNumber(story.priority_score)}</span>
+            <span className="badge teal">最近 {formatStoryTime(story.last_event_at)}</span>
           </div>
           <h3>{story.conclusion}</h3>
           <small>{story.suggested_action}</small>
@@ -38,7 +39,7 @@ export function StoryCard({ story, onOpen }: Props) {
         </div>
         <div>
           <dt>证据链</dt>
-          <dd>{evidenceSummary(story.evidence_refs)}</dd>
+          <dd>{storyEvidenceSummary(story)}</dd>
         </div>
         <div>
           <dt>用量</dt>
@@ -49,6 +50,10 @@ export function StoryCard({ story, onOpen }: Props) {
           <dd>
             {attentionStateLabel(story.attention_state)}，{handlingStateLabel(story.handling_state)}
           </dd>
+        </div>
+        <div>
+          <dt>次数</dt>
+          <dd>{formatNumber(story.occurrence_count ?? story.evidence_refs.length)} 次</dd>
         </div>
         <div>
           <dt>补证</dt>
@@ -64,4 +69,16 @@ export function StoryCard({ story, onOpen }: Props) {
       </div>
     </article>
   );
+}
+
+function formatStoryTime(value?: string | null): string {
+  if (!value) return '暂无时间';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(date);
 }

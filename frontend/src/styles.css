@@ -1086,6 +1086,19 @@ th {
   box-shadow: inset 4px 0 0 #16795b;
 }
 
+.clickable-row {
+  cursor: pointer;
+}
+
+.clickable-row:hover {
+  background: #f7fbfa;
+}
+
+.clickable-row:focus-visible {
+  outline: 2px solid #16795b;
+  outline-offset: -2px;
+}
+
 .detail-panel__heading {
   align-items: start;
   display: flex;

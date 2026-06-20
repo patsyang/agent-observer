@@ -1,24 +1,26 @@
 import { useEffect, useState } from 'react';
 
-import type { CollectorsResponse, FactsResponse, RiskSummary, StoriesResponse, TimeWindow, UsageSummary } from '../api/types';
+import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, StoriesResponse, TimeWindow, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
 import { StoryCard } from '../components/StoryCard';
 import { TimeWindowTabs } from '../components/TimeWindowTabs';
-import { formatCount, formatNumber } from '../utils/numberFormat';
+import { formatNumber } from '../utils/numberFormat';
 import { DashboardInvestigationSummary, type FactJumpFilters } from './DashboardInvestigationSummary';
 import {
-  factTypeLabel,
+  collectorRuntimeLabel,
+  emptyUsage,
   formatDateTime,
-  qualityLabel,
+  latestFactTitle,
+  qualitySummary,
+  queueSummary,
   reasonCodeLabel,
-  sourceStatusLabel,
+  sumBacklog,
 } from './dashboardLabels';
 import { UsageGovernanceSummary } from './UsageGovernanceSummary';
 
 interface Props {
-  loadCollectors: () => Promise<CollectorsResponse>;
-  loadFacts: (filters: { window: TimeWindow; include_health: boolean }) => Promise<FactsResponse>;
-  loadStories: (options: { window: TimeWindow; queue: 'actionable' | 'all' }) => Promise<StoriesResponse>;
+  loadDashboardSummary: (window: TimeWindow) => Promise<DashboardSummary>;
+  loadStories: (options: { window: TimeWindow; queue: 'actionable' | 'all'; page?: number; page_size?: number }) => Promise<StoriesResponse>;
   loadUsageSummary: (window: TimeWindow) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindow) => Promise<RiskSummary>;
   onOpenStory: (storyId: string) => void;
@@ -31,15 +33,24 @@ type LoadState =
   | {
       status: 'ready';
       collectors: CollectorsResponse;
+      collectorCounts: DashboardSummary['collectors'];
       facts: FactsResponse;
       stories: StoriesResponse;
       usage: UsageSummary;
       risks: RiskSummary;
     };
 
+function Mini({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="mini">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
 export function DashboardPage({
-  loadCollectors,
-  loadFacts,
+  loadDashboardSummary,
   loadRiskSummary,
   loadStories,
   loadUsageSummary,
@@ -54,18 +65,44 @@ export function DashboardPage({
   useEffect(() => {
     let cancelled = false;
     setState({ status: 'loading' });
-    Promise.all([
-      loadCollectors(),
-      loadFacts({ window, include_health: false }),
-      loadStories({ window, queue: 'actionable' }),
-      loadUsageSummary(window),
-      loadRiskSummary(window)
-    ])
-      .then(([collectors, facts, stories, usage, risks]) => {
+    loadDashboardSummary(window)
+      .then((summary) => {
         if (!cancelled) {
-          setState({ status: 'ready', collectors, facts, stories, usage, risks });
+          setState({
+            status: 'ready',
+            collectors: { collectors: summary.collectors.items },
+            collectorCounts: summary.collectors,
+            facts: { facts: summary.facts.items, total: summary.facts.total, page: 1, page_size: 5, has_more: summary.facts.total > summary.facts.items.length },
+            stories: {
+              stories: summary.stories.items,
+              total: summary.stories.total,
+              page: 1,
+              page_size: 20,
+              has_more: summary.stories.total > summary.stories.items.length
+            },
+            usage: emptyUsage(window),
+            risks: { mode: 'summary', window, signals: summary.risks.top }
+          });
           setLastRefresh(new Date().toISOString());
         }
+        return Promise.allSettled([
+          loadStories({ window, queue: 'actionable', page: 1, page_size: 20 }),
+          loadUsageSummary(window),
+          loadRiskSummary(window)
+        ]);
+      })
+      .then((results) => {
+        if (cancelled) return;
+        setState((current) => {
+          if (current.status !== 'ready') return current;
+          const [stories, usage, risks] = results;
+          return {
+            ...current,
+            stories: stories.status === 'fulfilled' ? stories.value : current.stories,
+            usage: usage.status === 'fulfilled' ? usage.value : current.usage,
+            risks: risks.status === 'fulfilled' ? risks.value : current.risks
+          };
+        });
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error' });
@@ -73,7 +110,7 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadCollectors, loadFacts, loadRiskSummary, loadStories, loadUsageSummary, refreshToken, window]);
+  }, [loadDashboardSummary, loadRiskSummary, loadStories, loadUsageSummary, refreshToken, window]);
 
   if (state.status === 'loading') {
     return (
@@ -124,11 +161,11 @@ export function DashboardPage({
       <section className="metrics" aria-label="核心指标">
         <Metric
           label="采集器"
-          value={`${formatNumber(onlineCollectors.length)} / ${formatNumber(state.collectors.collectors.length)}`}
+          value={`${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
           note="在线 / 总数"
         />
-        <Metric label="事实" value={formatNumber(state.facts.facts.length)} note="已接收结构化事实" />
-        <Metric label="待处理故事" value={formatNumber(activeStories.length)} note="active / needs_review" />
+        <Metric label="事实" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口事实总数" />
+        <Metric label="待处理故事" value={formatNumber(state.stories.total ?? activeStories.length)} note="active / needs_review" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
       </section>
 
@@ -157,7 +194,7 @@ export function DashboardPage({
                       <small>{collector.collector_id}</small>
                     </div>
                     <span className="collector-row__status">
-                      {sourceStatusLabel(collector.source_status)} / {reasonCodeLabel(collector.reason_code)}
+                      {collectorRuntimeLabel(collector.source_status, collector.runtime_phase)} / {reasonCodeLabel(collector.reason_code)}
                     </span>
                     <span className="badge teal">backlog {formatNumber(collector.outbox_backlog)}</span>
                   </div>
@@ -170,7 +207,7 @@ export function DashboardPage({
         <section className="panel flush story-workbench" aria-label="观察故事">
           <div className="panel-header">
             <h2>观察故事队列</h2>
-            <span className="badge violet">{formatNumber(activeStories.length)} 条待看</span>
+            <span className="badge violet">{formatNumber(state.stories.total ?? activeStories.length)} 条待看</span>
           </div>
           <p className="panel-intro">每条故事都应该能回答：发生了什么、影响谁、为什么值得处理、下一步怎么做。</p>
           <div className="panel-body">
@@ -181,6 +218,7 @@ export function DashboardPage({
                 {activeStories.map((story) => (
                   <StoryCard key={story.story_id} story={story} onOpen={onOpenStory} />
                 ))}
+                {state.stories.has_more && <div className="list-footer">更多故事请进入分页列表继续查看。</div>}
               </div>
             )}
           </div>
@@ -199,33 +237,4 @@ export function DashboardPage({
       </div>
     </div>
   );
-}
-
-function Mini({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="mini">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
-function sumBacklog(data: CollectorsResponse): number {
-  return data.collectors.reduce((total, collector) => total + collector.outbox_backlog, 0);
-}
-
-function qualitySummary(data: FactsResponse): string {
-  const high = data.facts.filter((fact) => fact.quality === 'high').length;
-  const low = data.facts.filter((fact) => fact.quality === 'low').length;
-  return `高置信 ${formatNumber(high)} / 待补证 ${formatNumber(low)}`;
-}
-
-function latestFactTitle(fact: FactsResponse['facts'][number] | undefined): string {
-  if (!fact) return '暂无事实';
-  const raw = fact.raw_available ? '已上传原文' : '未上传原文';
-  return `最近上报：${factTypeLabel(fact.category || fact.fact_type)}，${qualityLabel(fact.quality)}可信，${raw}`;
-}
-
-function queueSummary(activeCount: number): string {
-  return activeCount > 0 ? `${formatCount(activeCount, '个故事待处理')}` : '暂无待处理故事';
 }

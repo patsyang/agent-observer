@@ -3,10 +3,9 @@ import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
 import type { FactDetail, FactQuality, FactsResponse, ObservedFact, TimeWindow } from '../api/types';
 import { TimeWindowTabs } from '../components/TimeWindowTabs';
 import { formatNumber } from '../utils/numberFormat';
-import { EmptyDetailPanel, FactDetailPanel } from './FactDetailPanel';
+import { EmptyDetailPanel, ErrorDetailPanel, FactDetailPanel, LoadingDetailPanel } from './FactDetailPanel';
 import { FactTable } from './FactTable';
 import { formatDateTime } from './dashboardLabels';
-import { prioritizeFacts } from './factQueryPresentation';
 
 export type InitialFactFilters = Partial<Pick<Filters, 'fact_type' | 'include_health' | 'quality' | 'source' | 'window'>>;
 
@@ -38,6 +37,8 @@ export function FactQueryPage({
   const [facts, setFacts] = useState<ObservedFact[]>([]);
   const [meta, setMeta] = useState({ total: 0, limit: PAGE_SIZE, offset: 0 });
   const [detail, setDetail] = useState<FactDetail | null>(null);
+  const [detailState, setDetailState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
+  const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
   const [refreshToken, setRefreshToken] = useState(0);
   const detailRef = useRef<HTMLElement | null>(null);
@@ -78,9 +79,18 @@ export function FactQueryPage({
   }, [filters, loadFacts, refreshToken]);
 
   const inspect = useCallback((factId: string) => {
+    setSelectedFactId(factId);
+    setDetail(null);
+    setDetailState('loading');
     loadFactDetail(factId)
-      .then(setDetail)
-      .catch(() => setDetail(null));
+      .then((data) => {
+        setDetail(data);
+        setDetailState('ready');
+      })
+      .catch(() => {
+        setDetail(null);
+        setDetailState('error');
+      });
   }, [loadFactDetail]);
 
   useEffect(() => {
@@ -91,14 +101,15 @@ export function FactQueryPage({
 
   const updateFilters = (patch: Partial<Filters>) => {
     setDetail(null);
+    setDetailState('idle');
+    setSelectedFactId(null);
     setFilters((current) => ({ ...current, ...patch, offset: 0 }));
   };
   const refresh = () => {
     setRefreshToken((value) => value + 1);
-    if (detail) inspect(detail.fact.fact_id);
+    if (selectedFactId) inspect(selectedFactId);
   };
-  const visibleFacts = prioritizeFacts(facts);
-  const selectedFactId = detail?.fact.fact_id ?? null;
+  const visibleFacts = facts;
   const selectedIndex = selectedFactId ? visibleFacts.findIndex((fact) => fact.fact_id === selectedFactId) : -1;
   const selectedIndexLabel = selectedIndex >= 0 ? `第 ${formatNumber(meta.offset + selectedIndex + 1)} 条` : '列表外事实';
 
@@ -172,7 +183,11 @@ export function FactQueryPage({
               </p>
             </div>
           )}
-          {detail ? (
+          {detailState === 'loading' ? (
+            <LoadingDetailPanel factIndexLabel={selectedIndexLabel} />
+          ) : detailState === 'error' ? (
+            <ErrorDetailPanel factIndexLabel={selectedIndexLabel} />
+          ) : detail ? (
             <FactDetailPanel detail={detail} factIndexLabel={selectedIndexLabel} panelRef={detailRef} />
           ) : (
             <EmptyDetailPanel />

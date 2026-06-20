@@ -126,7 +126,7 @@ function reasonCodeLabel(reason: string): string {
   const labels: Record<string, string> = {
     collector_offline: '采集器离线',
     source_locked: '数据源锁定',
-    policy_not_fetched: '未拉取策略',
+    policy_stale: '策略待刷新',
     heartbeat_stale: '心跳已过期',
   };
   return labels[reason] ?? reason;

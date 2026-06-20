@@ -5,6 +5,7 @@ import {
   clientPackageUrl,
   cancelDiagnostic,
   deleteCollector,
+  fetchDashboardSummary,
   fetchClientPackageConfig,
   fetchCollectors,
   fetchDiagnosticAvailability,
@@ -96,8 +97,7 @@ export function App() {
         </header>
         {view === 'dashboard' && selectedStoryId === null && (
           <DashboardPage
-            loadCollectors={fetchCollectors}
-            loadFacts={fetchFacts}
+            loadDashboardSummary={fetchDashboardSummary}
             loadStories={fetchStories}
             loadUsageSummary={fetchUsageSummary}
             loadRiskSummary={fetchRiskSummary}

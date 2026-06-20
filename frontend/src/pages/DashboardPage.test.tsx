@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { CollectorsResponse, FactsResponse, RiskSummary, UsageSummary } from '../api/types';
+import type { DashboardSummary, RiskSummary, StoriesResponse, UsageSummary } from '../api/types';
 import { DashboardPage } from './DashboardPage';
 
 const usage: UsageSummary = {
@@ -57,8 +57,14 @@ const risks: RiskSummary = {
   ]
 };
 
-const collectors: CollectorsResponse = {
-  collectors: [
+const summary: DashboardSummary = {
+  window: '1h',
+  collectors: {
+    total: 6,
+    online: 1,
+    degraded: 0,
+    offline: 0,
+    items: [
     {
       collector_id: 'windows-collector',
       display_name: 'windows-collector',
@@ -73,13 +79,17 @@ const collectors: CollectorsResponse = {
       outbox_backlog: 0,
       raw_upload_enabled: false,
       raw_upload_override: false,
-      raw_upload_source: 'global_policy'
+      raw_upload_source: 'global_policy',
+      runtime_phase: 'uploading',
+      last_seen_at: '2026-06-19T11:30:03+08:00',
+      last_cycle_duration_ms: 3100,
+      last_error: null
     }
-  ]
-};
-
-const facts: FactsResponse = {
-  facts: [
+    ]
+  },
+  facts: {
+    total: 1,
+    items: [
     {
       fact_id: 'windows-collector-health-1',
       fact_type: 'collector_health',
@@ -91,20 +101,24 @@ const facts: FactsResponse = {
       source: 'codex',
       promoted_to_story: false
     }
-  ]
+    ]
+  },
+  stories: { total: 0, items: [] },
+  risks: { total: 1, top: risks.signals }
 };
+
+const storyPage: StoriesResponse = { stories: [], total: 0, page: 1, page_size: 20, has_more: false };
 
 describe('DashboardPage', () => {
   it('renders investigation summary instead of raw fact source counts', async () => {
-    const loadFacts = vi.fn(async () => facts);
-    const loadStories = vi.fn(async () => ({ stories: [] }));
+    const loadDashboardSummary = vi.fn(async () => summary);
+    const loadStories = vi.fn(async () => storyPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
     const onOpenFacts = vi.fn();
     render(
       <DashboardPage
-        loadCollectors={async () => collectors}
-        loadFacts={loadFacts}
+        loadDashboardSummary={loadDashboardSummary}
         loadStories={loadStories}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
@@ -119,6 +133,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText('排查摘要')).toBeInTheDocument();
     expect(screen.getByText(/风险 Top 项/)).toBeInTheDocument();
     expect(screen.getByText(/最近上报：采集器自检/)).toBeInTheDocument();
+    expect(screen.getByText('1 / 6')).toBeInTheDocument();
     expect(screen.getByText(/当前没有需要人工处理的故事/)).toBeInTheDocument();
     expect(screen.getByText('1,135')).toBeInTheDocument();
     expect(screen.getByText('2,040')).toBeInTheDocument();
@@ -129,23 +144,21 @@ describe('DashboardPage', () => {
     expect(screen.getAllByText(/敏感对象触达 \/ 配置：1,001/).length).toBeGreaterThan(0);
     await userEvent.click(screen.getByRole('button', { name: /筛选风险/ }));
     expect(onOpenFacts).toHaveBeenCalledWith({ fact_type: 'risk', window: '1h' });
-    expect(loadFacts).toHaveBeenCalledWith({ window: '1h', include_health: false });
-    expect(loadStories).toHaveBeenCalledWith({ window: '1h', queue: 'actionable' });
+    expect(loadStories).toHaveBeenCalledWith({ window: '1h', queue: 'actionable', page: 1, page_size: 20 });
     expect(loadUsageSummary).toHaveBeenCalledWith('1h');
     expect(loadRiskSummary).toHaveBeenCalledWith('1h');
+    expect(loadDashboardSummary).toHaveBeenCalledWith('1h');
   });
 
   it('refreshes dashboard data without changing the selected time window', async () => {
     const user = userEvent.setup();
-    const loadCollectors = vi.fn(async () => collectors);
-    const loadFacts = vi.fn(async () => facts);
-    const loadStories = vi.fn(async () => ({ stories: [] }));
+    const loadDashboardSummary = vi.fn(async () => summary);
+    const loadStories = vi.fn(async () => storyPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
     render(
       <DashboardPage
-        loadCollectors={loadCollectors}
-        loadFacts={loadFacts}
+        loadDashboardSummary={loadDashboardSummary}
         loadStories={loadStories}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
@@ -155,12 +168,12 @@ describe('DashboardPage', () => {
 
     await screen.findByText('排查摘要');
     await user.click(screen.getByRole('button', { name: '24小时' }));
-    await waitFor(() => expect(loadFacts).toHaveBeenLastCalledWith({ window: '24h', include_health: false }));
+    await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('24h'));
     expect(loadRiskSummary).toHaveBeenLastCalledWith('24h');
     await user.click(screen.getByRole('button', { name: '刷新' }));
-    await waitFor(() => expect(loadFacts).toHaveBeenLastCalledWith({ window: '24h', include_health: false }));
+    await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('24h'));
     expect(loadRiskSummary).toHaveBeenLastCalledWith('24h');
-    expect(loadCollectors).toHaveBeenCalledTimes(3);
+    expect(loadDashboardSummary).toHaveBeenCalledTimes(3);
     expect(loadRiskSummary).toHaveBeenCalledTimes(3);
     expect(screen.getByText(/最后刷新/)).toBeInTheDocument();
   });

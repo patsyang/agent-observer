@@ -13,9 +13,11 @@ class CollectorConfig:
     state_path: Path
     telemetry_mode: str
     collection_interval_seconds: float
+    heartbeat_interval_seconds: float
     codex_home: Path
     history_window_days: int
     max_events_per_cycle: int
+    upload_batch_size: int
     evidence_mode: str
     raw_upload_enabled: bool
 
@@ -37,10 +39,12 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
             collector_id=str(payload.get("collector_id", "windows-collector")),
             state_path=state_path,
             telemetry_mode=str(payload.get("telemetry_mode", "fixture")),
-            collection_interval_seconds=float(payload.get("collection_interval_seconds", 30)),
+            collection_interval_seconds=float(payload.get("collection_interval_seconds", 15)),
+            heartbeat_interval_seconds=float(payload.get("heartbeat_interval_seconds", 10)),
             codex_home=codex_home,
             history_window_days=int(payload.get("history_window_days", 7)),
-            max_events_per_cycle=int(payload.get("max_events_per_cycle", 500)),
+            max_events_per_cycle=int(payload.get("max_events_per_cycle", 100)),
+            upload_batch_size=int(payload.get("upload_batch_size", 50)),
             evidence_mode=str(payload.get("evidence_mode", "structured_projection")),
             raw_upload_enabled=bool(payload.get("raw_upload_enabled", (payload.get("effective_policy") or {}).get("upload_raw", False))),
         ),

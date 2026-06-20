@@ -3,7 +3,7 @@ import type { RefObject } from 'react';
 import type { FactDetail } from '../api/types';
 import {
   eventTypeText,
-  highlightSensitiveTerms,
+  highlightSensitiveMatches,
   objectTypeLabel,
   rawStatusText,
   shortHash,
@@ -72,13 +72,13 @@ export function FactDetailPanel({ detail, factIndexLabel, panelRef }: Props) {
       {promptText && (
         <section className="raw-block" aria-label="原始 Prompt">
           <h4>原始 Prompt</h4>
-          <pre>{highlightSensitiveTerms(promptText)}</pre>
+          <pre>{highlightSensitiveMatches(promptText, detail.sensitive_matches)}</pre>
         </section>
       )}
       <section className="raw-block raw-block--last" aria-label="原文证据">
         <h4>原文证据</h4>
         {detail.evidence_projection.raw_content ? (
-          <pre>{highlightSensitiveTerms(detail.evidence_projection.raw_content)}</pre>
+          <pre>{highlightSensitiveMatches(detail.evidence_projection.raw_content, detail.sensitive_matches)}</pre>
         ) : (
           <p>未上传原文，本条只能查看摘要、字段和值。</p>
         )}
@@ -90,8 +90,26 @@ export function FactDetailPanel({ detail, factIndexLabel, panelRef }: Props) {
 export function EmptyDetailPanel() {
   return (
     <aside className="detail-panel muted-detail fact-detail-side" aria-label="证据详情">
-      <h3>证据详情</h3>
-      <p>点击列表中的“查看”，右侧会显示对应事实的真实内容、来源位置、原始 Prompt 和完整原文。</p>
+      <h3>未选择事实</h3>
+      <p>点击左侧任意事实行或“查看”，这里会显示对应事实的真实内容、来源位置、原始 Prompt 和完整原文。</p>
+    </aside>
+  );
+}
+
+export function LoadingDetailPanel({ factIndexLabel }: { factIndexLabel: string }) {
+  return (
+    <aside className="detail-panel muted-detail fact-detail-side" aria-label="证据详情">
+      <h3>正在加载证据详情</h3>
+      <p>{factIndexLabel} 已选中，正在读取原文、结构化字段和来源位置。</p>
+    </aside>
+  );
+}
+
+export function ErrorDetailPanel({ factIndexLabel }: { factIndexLabel: string }) {
+  return (
+    <aside className="detail-panel muted-detail fact-detail-side" aria-label="证据详情">
+      <h3>证据详情加载失败</h3>
+      <p>{factIndexLabel} 的详情暂时不可用，请刷新后重试。</p>
     </aside>
   );
 }
@@ -120,9 +138,15 @@ function projectionLabel(key: string): string {
     prompt_text: 'Prompt 摘要',
     raw_content_uploaded: '原文状态',
     tool_name: '工具',
+    command: '命令',
+    workdir: '工作目录',
     payload_type: '事件类型',
     command_category: '命令类别',
     exit_code: '退出码',
+    wall_time_seconds: '耗时秒数',
+    timeout_after_ms: '超时毫秒',
+    workflow: '工作流',
+    run_id: '运行编号',
   };
   return labels[key] ?? key;
 }

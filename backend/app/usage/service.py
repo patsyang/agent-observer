@@ -89,7 +89,26 @@ def _empty_summary(window: str) -> dict:
 def get_usage_summary(conn: sqlite3.Connection, window: str = "24h") -> dict:
     if conn.execute("select count(*) from usage_signals").fetchone()[0] == 0:
         return _empty_summary(window)
-    return build_usage_rollups(conn, window=window)
+    return _usage_summary_from_signals(conn, window=window)
+
+
+def _usage_summary_from_signals(conn: sqlite3.Connection, window: str = "24h") -> dict:
+    cutoff = _window_cutoff(window)
+    where = "where of.occurred_at >= ?" if cutoff else ""
+    params = (cutoff.isoformat(),) if cutoff else ()
+    rows = conn.execute(
+        f"""
+        select us.*, ep.projection_id, of.occurred_at
+        from usage_signals us
+        join observed_facts of on of.fact_id = us.fact_id
+        left join evidence_projections ep on ep.fact_id = us.fact_id
+        {where}
+        """,
+        params,
+    ).fetchall()
+    grouped = _group_usage_rows(rows, window)
+    rollups = [_rollup_payload(window, key, entry) for key, entry in sorted(grouped.items())]
+    return _summary_payload(window, rollups)
 
 
 def _read_usage_summary(conn: sqlite3.Connection, window: str = "24h") -> dict:
@@ -115,6 +134,48 @@ def _read_usage_summary(conn: sqlite3.Connection, window: str = "24h") -> dict:
         }
         for row in rows
     ]
+    return _summary_payload(window, rollups)
+
+
+def _group_usage_rows(rows: list[sqlite3.Row], window: str) -> dict[tuple[str, str, str, str], dict]:
+    grouped: dict[tuple[str, str, str, str], dict] = {}
+    for row in rows:
+        if not _within_window(row["occurred_at"], window):
+            continue
+        values = {
+            "total": "all",
+            "session": row["session_id"],
+            "conversation": row["conversation_id"],
+            "project": row["project_ref"],
+            "account": row["account_ref"],
+            "activity_tag": row["activity_tag"],
+        }
+        for scope in ROLLUP_SCOPES:
+            activity_tag = row["activity_tag"] if scope == "activity_tag" else "all"
+            key = (scope, values[scope], row["usage_kind"], activity_tag)
+            entry = grouped.setdefault(key, {"units": 0, "evidence_refs": []})
+            entry["units"] += int(row["units"])
+            if row["projection_id"]:
+                entry["evidence_refs"].append(row["projection_id"])
+    return grouped
+
+
+def _rollup_payload(window: str, key: tuple[str, str, str, str], entry: dict) -> dict:
+    scope, scope_value, usage_kind, activity_tag = key
+    return {
+        "rollup_id": f"{window}:{scope}:{scope_value}:{usage_kind}:{activity_tag}",
+        "window": window,
+        "scope": scope,
+        "scope_value": scope_value,
+        "units": entry["units"],
+        "usage_kind": usage_kind,
+        "activity_tag": activity_tag,
+        "additive": usage_kind == "attributed",
+        "evidence_refs": sorted(set(entry["evidence_refs"])),
+    }
+
+
+def _summary_payload(window: str, rollups: list[dict]) -> dict:
     unknown_units = sum(row["units"] for row in rollups if row["activity_tag"] == "unknown")
     return {
         "window": window,

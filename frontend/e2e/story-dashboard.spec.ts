@@ -80,5 +80,8 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
   const stories = await request.get('http://127.0.0.1:8765/api/stories');
   const body = await stories.json();
   const story = body.stories.find((item: { story_key: string }) => item.story_key === storyKey);
-  expect(story.evidence_refs).toContain(`proj-${errorFact}`);
+  expect(story.evidence_refs).toEqual([]);
+  const detail = await request.get(`http://127.0.0.1:8765/api/stories/${story.story_id}`);
+  const detailBody = await detail.json();
+  expect(detailBody.evidence_refs).toContain(`proj-${errorFact}`);
 });

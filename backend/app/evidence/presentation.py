@@ -57,6 +57,10 @@ def projection_preview(
             return f"{risk_type}: {object_label}{hit_text}"
         return f"{risk_type or object_label}{hit_text}"
 
+    low_evidence = _low_evidence_preview(projection)
+    if low_evidence:
+        return low_evidence
+
     raw_text = _raw_text_preview(raw_content)
     if raw_text:
         return raw_text
@@ -196,10 +200,14 @@ def _object_label(value: str) -> str:
 
 
 def _sensitive_hits(projection: dict[str, Any]) -> list[str]:
-    value = projection.get("sensitive_categories")
-    if not isinstance(value, list):
-        return []
-    return [str(item) for item in value[:5] if str(item) != "sensitive_reference"]
+    matches = projection.get("sensitive_matches")
+    if isinstance(matches, list):
+        return [
+            str(match.get("category"))
+            for match in matches[:5]
+            if isinstance(match, dict) and match.get("confidence") == "high" and match.get("category")
+        ]
+    return []
 
 
 def _sensitive_hits_from_text(value: str) -> list[str]:
@@ -240,3 +248,24 @@ def _content_name(category: str) -> str:
         "codex_message": "Codex 消息",
         "codex_reasoning": "推理片段",
     }.get(category, "内容事件")
+
+
+def _low_evidence_preview(projection: dict[str, Any]) -> str:
+    payload_type = _string_value(projection, "payload_type")
+    observed_keys = _string_list(projection.get("observed_keys"))
+    payload_keys = _string_list(projection.get("payload_keys"))
+    if not payload_type and not observed_keys and not payload_keys:
+        return ""
+    pieces = []
+    if payload_type:
+        pieces.append(f"事件类型 {payload_type}")
+    keys = payload_keys or observed_keys
+    if keys:
+        pieces.append(f"可用字段 {', '.join(keys[:6])}")
+    return "未归类 Codex 事件：" + "，".join(pieces)
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if item]

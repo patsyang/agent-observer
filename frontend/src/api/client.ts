@@ -3,6 +3,7 @@ import type {
   DiagnosticAvailability,
   DiagnosticJob,
   CollectorsResponse,
+  DashboardSummary,
   EffectivePolicy,
   FactDetail,
   FactsResponse,
@@ -63,6 +64,10 @@ export function fetchCollectors(): Promise<CollectorsResponse> {
   return readJson<CollectorsResponse>('/api/collectors');
 }
 
+export function fetchDashboardSummary(window: TimeWindow = '1h'): Promise<DashboardSummary> {
+  return readJson<DashboardSummary>(`/api/dashboard/summary?window=${encodeURIComponent(window)}`);
+}
+
 export function deleteCollector(collectorId: string): Promise<{ collector_id: string; removed: boolean; reason_code: string }> {
   return deleteJson(`/api/collectors/${encodeURIComponent(collectorId)}`);
 }
@@ -103,6 +108,9 @@ export function fetchFacts(
     include_health?: boolean;
     limit?: number;
     offset?: number;
+    page?: number;
+    page_size?: number;
+    time_basis?: 'occurred' | 'ingested';
   } = {}
 ): Promise<FactsResponse> {
   const params = new URLSearchParams();
@@ -110,9 +118,14 @@ export function fetchFacts(
   if (filters.fact_type && filters.fact_type !== 'all') params.set('fact_type', filters.fact_type);
   if (filters.source && filters.source !== 'all') params.set('source', filters.source);
   params.set('window', filters.window ?? '1h');
+  params.set('time_basis', filters.time_basis ?? 'occurred');
   params.set('include_health', String(filters.include_health ?? false));
-  params.set('limit', String(filters.limit ?? 50));
-  params.set('offset', String(filters.offset ?? 0));
+  params.set('page_size', String(filters.page_size ?? filters.limit ?? 50));
+  if (filters.page) {
+    params.set('page', String(filters.page));
+  } else {
+    params.set('offset', String(filters.offset ?? 0));
+  }
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return readJson<FactsResponse>(`/api/facts${suffix}`);
 }
@@ -129,11 +142,15 @@ export function fetchRiskSummary(window: TimeWindow = '1h'): Promise<RiskSummary
   return readJson<RiskSummary>(`/api/risks/summary?mode=summary&window=${encodeURIComponent(window)}`);
 }
 
-export function fetchStories(options: { includeHidden?: boolean; window?: TimeWindow; queue?: 'actionable' | 'all' } = {}): Promise<StoriesResponse> {
+export function fetchStories(
+  options: { includeHidden?: boolean; window?: TimeWindow; queue?: 'actionable' | 'all'; page?: number; page_size?: number } = {}
+): Promise<StoriesResponse> {
   const params = new URLSearchParams();
   if (options.includeHidden) params.set('include_hidden', 'true');
   params.set('window', options.window ?? '1h');
   params.set('queue', options.queue ?? 'actionable');
+  params.set('page', String(options.page ?? 1));
+  params.set('page_size', String(options.page_size ?? 20));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return readJson<StoriesResponse>(`/api/stories${suffix}`);
 }

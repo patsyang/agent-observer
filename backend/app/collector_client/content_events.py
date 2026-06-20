@@ -5,11 +5,11 @@ CONTENT_EVENTS = {"message", "reasoning", "agent_message", "user_message"}
 
 
 def content_fact(common: dict, record: dict) -> dict:
-    payload = _payload(record)
-    payload_type = _payload_type(record)
-    role = _clean(record.get("role") or payload.get("role") or _content_role(payload_type))
-    content_text = _extract_content_text(record)
-    category = _content_category(payload_type, role)
+    identity = content_identity(record)
+    payload_type = identity["payload_type"]
+    role = identity["role"]
+    content_text = identity["content_text"]
+    category = identity["category"]
     raw_enabled = bool(common.get("upload_raw"))
     projection = {
         "role": role,
@@ -28,6 +28,19 @@ def content_fact(common: dict, record: dict) -> dict:
         "severity": "low",
         "summary": f"记录到 {_content_label(category)}，{'已上传原始内容' if raw_enabled else '原文上报未开启'}。",
         "projection": projection,
+    }
+
+
+def content_identity(record: dict) -> dict:
+    payload = _payload(record)
+    payload_type = _payload_type(record)
+    role = _clean(record.get("role") or payload.get("role") or _content_role(payload_type))
+    content_text = _extract_content_text(record)
+    return {
+        "payload_type": payload_type,
+        "role": role,
+        "category": _content_category(payload_type, role),
+        "content_text": content_text,
     }
 
 

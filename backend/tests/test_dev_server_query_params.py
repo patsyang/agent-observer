@@ -4,7 +4,7 @@ from app.dev_server import _facts_query_options, _stories_query_options
 
 
 def test_dev_server_forwards_fact_window_and_health_filters():
-    options = _facts_query_options("/api/facts?quality=low&window=1h&include_health=false")
+    options = _facts_query_options("/api/facts?quality=low&window=1h&include_health=false&time_basis=ingested")
 
     assert options == {
         "quality": "low",
@@ -14,6 +14,9 @@ def test_dev_server_forwards_fact_window_and_health_filters():
         "include_health": False,
         "limit": 50,
         "offset": 0,
+        "page": None,
+        "page_size": 50,
+        "time_basis": "ingested",
     }
 
 
@@ -24,4 +27,6 @@ def test_dev_server_forwards_story_window_and_queue_filters():
         "include_hidden": True,
         "window": "24h",
         "queue": "actionable",
+        "page": 1,
+        "page_size": 20,
     }

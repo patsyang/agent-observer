@@ -18,7 +18,7 @@ function collector(status: Collector['source_status']): Collector {
     reason_code: status,
     policy_version: 1,
     last_heartbeat_at: '2026-06-18T00:00:00Z',
-    outbox_backlog: status === 'outbox_backlog' ? 5 : 0,
+    outbox_backlog: status === 'degraded' ? 5 : 0,
     raw_upload_enabled: false,
     raw_upload_override: false,
     raw_upload_source: 'global_policy'

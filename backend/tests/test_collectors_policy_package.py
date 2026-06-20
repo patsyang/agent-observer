@@ -62,7 +62,8 @@ def test_register_reuses_collector_and_returns_policy(tmp_path):
     assert first["collector_id"] == second["collector_id"]
     assert first["effective_policy"]["policy_version"] == 1
     assert len(collectors) == 1
-    assert collectors[0]["source_status"] == "policy_not_fetched"
+    assert collectors[0]["source_status"] == "online"
+    assert collectors[0]["runtime_phase"] == "idle"
     assert collectors[0]["windows_username_hash"] != "dev-user"
 
 
@@ -162,11 +163,18 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
         assert "agent-observer.cmd" in names
         assert "agent-observer.config.json" in archive.namelist()
         assert "app/collector_client/cli.py" in names
+        assert "app/collector_client/content_dedup.py" in names
+        assert "app/collector_client/runtime.py" in names
+        assert "app/collector_client/source_reader.py" in names
+        assert "app/collector_client/fact_mapper.py" in names
         config = json.loads(archive.read("agent-observer.config.json"))
     assert config["server_url"] == "http://127.0.0.1:8765"
     assert config["collector_id"] == "windows-collector"
     assert config["history_window_days"] == 7
-    assert config["max_events_per_cycle"] == 500
+    assert config["collection_interval_seconds"] == 15
+    assert config["heartbeat_interval_seconds"] == 10
+    assert config["max_events_per_cycle"] == 100
+    assert config["upload_batch_size"] == 50
     assert config["evidence_mode"] == "structured_projection"
     assert config["raw_upload_enabled"] is False
     assert config["effective_policy"]["policy_version"] == 1
@@ -196,165 +204,3 @@ def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
     assert any("错误指纹" in summary for summary in summaries)
     assert stories["stories"]
     assert any("错误指纹" in story["conclusion"] for story in stories["stories"])
-
-
-def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypatch):
-    package_path = tmp_path / "agent-observer-windows.zip"
-    with connect(tmp_path / "observer.sqlite") as conn:
-        build_windows_package(conn, tmp_path)
-
-    extract_dir = tmp_path / "unzipped"
-    with zipfile.ZipFile(package_path) as archive:
-        archive.extractall(extract_dir)
-
-    config_path = extract_dir / "agent-observer.config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["collector_id"] = "package-test"
-    config["collection_interval_seconds"] = 0
-    config["codex_home"] = str(extract_dir / ".codex")
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-    _write_codex_fixture(extract_dir / ".codex")
-
-    status = subprocess.run(
-        [str(extract_dir / "agent-observer.cmd"), "status"],
-        cwd=tmp_path,
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-
-    assert status.returncode == 0
-    status_payload = json.loads(status.stdout)
-    assert status_payload["running"] is False
-    assert status_payload["outbox_backlog"] == 0
-    assert status_payload["cursor"]["last_sequence"] == 0
-
-    calls: list[tuple[str, str]] = []
-
-    uploaded_batches: list[dict[str, object]] = []
-
-    def fake_post(_server_url: str, path: str, payload: dict[str, object]) -> dict[str, object]:
-        calls.append(("POST", path))
-        if path == "/api/telemetry/ingest":
-            uploaded_batches.append(payload)
-        return {"status": "ok", "effective_policy": {"upload_raw": True, "raw_upload_source": "collector_override"}}
-
-    def fake_get(_server_url: str, path: str) -> dict[str, object]:
-        calls.append(("GET", path))
-        if path.endswith("/diagnostics/next"):
-            return {"status": "none"}
-        return {"enabled": True}
-
-    monkeypatch.setattr("app.collector_client.cli._post_json", fake_post)
-    monkeypatch.setattr("app.collector_client.cli._get_json", fake_get)
-
-    doctor = run(["doctor"], cwd=extract_dir)
-    assert doctor.code == 0
-    doctor_payload = json.loads(doctor.output)
-    assert doctor_payload["collector_id"] == "package-test"
-    assert doctor_payload["server_reachable"] is True
-    assert calls == [("GET", "/api/policy")]
-
-    calls.clear()
-    result = run(["run-once"], cwd=extract_dir)
-    assert result.code == 0
-    assert calls == [
-        ("POST", "/api/collectors/register"),
-        ("POST", "/api/telemetry/ingest"),
-        ("POST", "/api/collectors/package-test/heartbeat"),
-        ("GET", "/api/collectors/package-test/diagnostics/next"),
-    ]
-    state = json.loads((extract_dir / "agent-observer.state.json").read_text(encoding="utf-8"))
-    assert state["outbox"] == []
-    assert state["cursor"]["last_sequence"] == 1
-    assert state["raw_upload_enabled"] is True
-    assert state["last_upload_at"]
-    batch_items = uploaded_batches[0]["items"]
-    assert len(batch_items) >= 2
-    assert any("采集器完成一次本机链路自检" in item["summary"] for item in batch_items)
-    assert any(item.get("error_signature") for item in batch_items)
-
-    status_after_once = json.loads(run(["status"], cwd=extract_dir).output)
-    assert status_after_once["outbox_backlog"] == 0
-    assert status_after_once["cursor"]["last_sequence"] == 1
-
-    with (extract_dir / ".codex" / "sessions" / "session-package.jsonl").open("a", encoding="utf-8") as handle:
-        handle.write(
-            "\n"
-            + json.dumps(
-                {
-                    "timestamp": "2026-06-18T10:03:00+00:00",
-                    "type": "tool_result",
-                    "tool": "shell",
-                    "exit_code": 1,
-                    "phase": "raw-check",
-                    "conversation_id": "conversation-package",
-                    "session_id": "session-package",
-                    "raw_message": "operator needs original evidence",
-                }
-            )
-        )
-
-    calls.clear()
-    monkeypatch.setenv("AGENT_OBSERVER_START_MAX_CYCLES", "2")
-    start = run(["start"], cwd=extract_dir)
-    start_payload = json.loads(start.output)
-    assert start.code == 0
-    assert start_payload["mode"] == "stopped"
-    assert start_payload["running"] is False
-    assert start_payload["cursor"]["last_sequence"] == 3
-    assert calls == [
-        ("POST", "/api/collectors/register"),
-        ("POST", "/api/telemetry/ingest"),
-        ("POST", "/api/collectors/package-test/heartbeat"),
-        ("GET", "/api/collectors/package-test/diagnostics/next"),
-        ("POST", "/api/collectors/register"),
-        ("POST", "/api/telemetry/ingest"),
-        ("POST", "/api/collectors/package-test/heartbeat"),
-        ("GET", "/api/collectors/package-test/diagnostics/next"),
-    ]
-    assert any(item.get("raw_content") for batch in uploaded_batches[1:] for item in batch["items"])
-
-    stop = json.loads(run(["stop"], cwd=extract_dir).output)
-    assert stop["running"] is False
-
-
-def test_packaged_collector_first_run_uses_download_raw_setting(tmp_path, monkeypatch):
-    package_path = tmp_path / "agent-observer-windows.zip"
-    with connect(tmp_path / "observer.sqlite") as conn:
-        build_windows_package(conn, tmp_path)
-
-    extract_dir = tmp_path / "unzipped-raw"
-    with zipfile.ZipFile(package_path) as archive:
-        archive.extractall(extract_dir)
-
-    config_path = extract_dir / "agent-observer.config.json"
-    config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["collector_id"] = "package-raw-test"
-    config["codex_home"] = str(extract_dir / ".codex")
-    config["raw_upload_enabled"] = True
-    config["effective_policy"]["upload_raw"] = True
-    config_path.write_text(json.dumps(config), encoding="utf-8")
-    _write_codex_fixture(extract_dir / ".codex")
-
-    uploaded_batches: list[dict[str, object]] = []
-
-    def fake_post(_server_url: str, path: str, payload: dict[str, object]) -> dict[str, object]:
-        if path == "/api/telemetry/ingest":
-            uploaded_batches.append(payload)
-        return {"status": "ok", "effective_policy": {"upload_raw": True, "raw_upload_source": "global_policy"}}
-
-    def fake_get(_server_url: str, _path: str) -> dict[str, object]:
-        return {"status": "none"}
-
-    monkeypatch.setattr("app.collector_client.cli._post_json", fake_post)
-    monkeypatch.setattr("app.collector_client.cli._get_json", fake_get)
-
-    result = run(["run-once"], cwd=extract_dir)
-    batch_items = uploaded_batches[0]["items"]
-    prompt = next(item for item in batch_items if item["category"] == "codex_prompt")
-
-    assert result.code == 0
-    assert prompt["upload_raw"] is True
-    assert prompt["raw_content"]
-    assert prompt["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"

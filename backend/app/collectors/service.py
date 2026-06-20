@@ -7,7 +7,8 @@ from datetime import UTC, datetime
 from app.db.connection import SOURCE_STATUSES
 from app.policy import get_effective_policy, write_management_audit
 
-ONLINE_TTL_SECONDS = 90
+ONLINE_TTL_SECONDS = 240
+RUNTIME_PHASES = {"starting", "idle", "collecting", "uploading", "waiting", "backfilling", "stopping"}
 
 
 def _now() -> str:
@@ -19,7 +20,7 @@ def _hash_identity(value: str) -> str:
 
 
 def _row_to_collector(row: sqlite3.Row, now: datetime | None = None, global_policy: dict | None = None) -> dict:
-    source_status = row["source_status"]
+    source_status = _normalize_source_status(row["source_status"])
     reason_code = row["reason_code"]
     if source_status == "online" and _heartbeat_stale(row["last_heartbeat_at"], now):
         source_status = "offline"
@@ -42,6 +43,10 @@ def _row_to_collector(row: sqlite3.Row, now: datetime | None = None, global_poli
         "reason_code": reason_code,
         "policy_version": row["policy_version"],
         "last_heartbeat_at": row["last_heartbeat_at"],
+        "last_seen_at": row["last_seen_at"] or row["last_heartbeat_at"],
+        "runtime_phase": row["runtime_phase"],
+        "last_cycle_duration_ms": row["last_cycle_duration_ms"],
+        "last_error": row["last_error"],
         "outbox_backlog": row["outbox_backlog"],
         "raw_upload_enabled": raw_upload_enabled,
         "raw_upload_override": raw_override is not None,
@@ -59,13 +64,10 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
         f"{hostname_hash or hostname}:{username_hash or windows_username}:{payload.get('agent_type', 'codex')}"
     )
     now = _now()
-    existing = conn.execute(
-        "select collector_id from collectors where collector_id = ?", (collector_id,)
-    ).fetchone()
-    source_status = payload.get("source_status", "policy_not_fetched")
-    if source_status not in SOURCE_STATUSES:
-        raise ValueError(f"unsupported source_status: {source_status}")
-    reason_code = payload.get("reason_code") or source_status
+    existing = conn.execute("select * from collectors where collector_id = ?", (collector_id,)).fetchone()
+    source_status = _source_status_from_payload(payload, existing)
+    reason_code = _reason_from_payload(payload, existing, source_status)
+    runtime_phase = _runtime_phase(payload.get("runtime_phase") or (existing["runtime_phase"] if existing else "idle"))
     values = {
         "collector_id": collector_id,
         "display_name": payload.get("display_name") or str(hostname or collector_id),
@@ -75,8 +77,12 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
         "agent_version": payload.get("agent_version", "0.1.0"),
         "source_status": source_status,
         "reason_code": reason_code,
+        "runtime_phase": runtime_phase,
         "policy_version": global_policy["policy_version"],
         "last_heartbeat_at": now,
+        "last_seen_at": now,
+        "last_cycle_duration_ms": _nullable_int(payload.get("last_cycle_duration_ms")),
+        "last_error": payload.get("last_error"),
         "outbox_backlog": int(payload.get("outbox_backlog", 0)),
         "created_at": now,
         "updated_at": now,
@@ -88,8 +94,12 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
             set display_name = :display_name,
                 source_status = :source_status,
                 reason_code = :reason_code,
+                runtime_phase = :runtime_phase,
                 policy_version = :policy_version,
                 last_heartbeat_at = :last_heartbeat_at,
+                last_seen_at = :last_seen_at,
+                last_cycle_duration_ms = coalesce(:last_cycle_duration_ms, last_cycle_duration_ms),
+                last_error = :last_error,
                 outbox_backlog = :outbox_backlog,
                 updated_at = :updated_at
             where collector_id = :collector_id
@@ -102,10 +112,12 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
             insert into collectors (
               collector_id, display_name, hostname_hash, windows_username_hash, agent_type,
               agent_version, source_status, reason_code, policy_version, last_heartbeat_at,
+              runtime_phase, last_seen_at, last_cycle_duration_ms, last_error,
               outbox_backlog, created_at, updated_at
             ) values (
               :collector_id, :display_name, :hostname_hash, :windows_username_hash, :agent_type,
               :agent_version, :source_status, :reason_code, :policy_version, :last_heartbeat_at,
+              :runtime_phase, :last_seen_at, :last_cycle_duration_ms, :last_error,
               :outbox_backlog, :created_at, :updated_at
             )
             """,
@@ -117,8 +129,10 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
 
 def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dict:
     source_status = payload.get("source_status", "online")
+    source_status = _normalize_source_status(source_status)
     if source_status not in SOURCE_STATUSES:
         raise ValueError(f"unsupported source_status: {source_status}")
+    runtime_phase = _runtime_phase(payload.get("runtime_phase", "idle"))
     global_policy = get_effective_policy(conn)
     now = _now()
     cursor = conn.execute(
@@ -126,8 +140,12 @@ def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dic
         update collectors
         set source_status = ?,
             reason_code = ?,
+            runtime_phase = ?,
             policy_version = ?,
             last_heartbeat_at = ?,
+            last_seen_at = ?,
+            last_cycle_duration_ms = ?,
+            last_error = ?,
             outbox_backlog = ?,
             updated_at = ?
         where collector_id = ?
@@ -135,8 +153,12 @@ def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dic
         (
             source_status,
             payload.get("reason_code") or source_status,
+            runtime_phase,
             global_policy["policy_version"],
             now,
+            now,
+            _nullable_int(payload.get("last_cycle_duration_ms")),
+            payload.get("last_error"),
             int(payload.get("outbox_backlog", 0)),
             now,
             collector_id,
@@ -251,6 +273,53 @@ def _collector_policy(conn: sqlite3.Connection, collector_id: str, global_policy
         policy["raw_upload_source"] = "collector_override"
     policy["raw_upload_enabled"] = bool(policy["upload_raw"])
     return policy
+
+
+def _normalize_source_status(value: object) -> str:
+    status = str(value or "online")
+    if status in SOURCE_STATUSES:
+        return status
+    if status == "policy_not_fetched":
+        return "degraded"
+    if status in {"state_corrupt", "outbox_backlog"}:
+        return "degraded"
+    return status
+
+
+def _source_status_from_payload(payload: dict, existing: sqlite3.Row | None) -> str:
+    incoming = payload.get("source_status")
+    if incoming is None:
+        return _normalize_source_status(existing["source_status"]) if existing else "online"
+    status = _normalize_source_status(incoming)
+    if status not in SOURCE_STATUSES:
+        raise ValueError(f"unsupported source_status: {incoming}")
+    if existing and incoming == "policy_not_fetched":
+        return _normalize_source_status(existing["source_status"])
+    return status
+
+
+def _reason_from_payload(payload: dict, existing: sqlite3.Row | None, source_status: str) -> str:
+    incoming = payload.get("source_status")
+    reason = payload.get("reason_code")
+    if existing and incoming == "policy_not_fetched":
+        return existing["reason_code"] or "policy_stale"
+    if reason == "policy_not_fetched":
+        return "policy_stale"
+    return reason or source_status
+
+
+def _runtime_phase(value: object) -> str:
+    phase = str(value or "idle")
+    return phase if phase in RUNTIME_PHASES else "idle"
+
+
+def _nullable_int(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _nullable_bool(value: object) -> bool | None:

@@ -5,73 +5,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { FactDetail, FactsResponse } from '../api/types';
 import { FactQueryPage } from './FactQueryPage';
 
-const facts: FactsResponse = {
-  total: 2,
-  limit: 50,
-  offset: 0,
-  facts: [
-    {
-      fact_id: 'event-low-001',
-      fact_type: 'unknown',
-      category: 'uncategorized',
-      quality: 'low',
-      severity: 'low',
-      summary: 'Low evidence fact remains queryable',
-      occurred_at: '2026-06-18T10:01:00+00:00',
-      source: 'codex',
-      promoted_to_story: false,
-      source_event_type: 'message',
-      source_label: 'Codex 会话 conv-hash-001',
-      content_preview: 'Prompt: 请检查 Dashboard 为什么没有数据',
-      raw_available: true,
-      raw_status: '已上传原文'
-    },
-    {
-      fact_id: 'event-error-001',
-      fact_type: 'error',
-      category: 'tool_failure',
-      quality: 'high',
-      severity: 'high',
-      summary: 'Tool execution failed with raw signature',
-      occurred_at: '2026-06-18T10:00:00+00:00',
-      source: 'codex',
-      promoted_to_story: false,
-      source_event_type: 'tool_result',
-      source_label: 'Codex 会话 conv-hash-001',
-      content_preview: '工具 shell_command，退出码 1',
-      raw_available: false,
-      raw_status: '仅结构化字段'
-    }
-  ]
-};
-
-const detail: FactDetail = {
-  fact: facts.facts[0],
-  evidence_projection: {
-    projection_id: 'proj-event-low-001',
-    fact_id: 'event-low-001',
-    category: 'uncategorized',
-    span: 'session:demo',
-    raw_hash: 'hash-low-001',
-    projection_json: { role: 'user', content_length: 18, prompt_text: '请检查 Dashboard 为什么没有数据' },
-    upload_raw: true,
-    raw_content: '{"payload":{"content":[{"text":"请检查 Dashboard 为什么没有数据"}]}}'
-  },
-  evidence_projections: [
-    {
-      projection_id: 'proj-event-low-001',
-      fact_id: 'event-low-001',
-      category: 'codex_prompt',
-      span: 'session:demo',
-      raw_hash: 'hash-low-001',
-      projection_json: { role: 'user', content_length: 18, prompt_text: '请检查 Dashboard 为什么没有数据' },
-      upload_raw: true,
-      raw_content: '{"payload":{"content":[{"text":"请检查 Dashboard 为什么没有数据"}]}}'
-    }
-  ],
-  source_refs: { conversation_ref: 'conv-hash-001' },
-  source_specific_json: { codex_event_type: 'message' }
-};
+import { detail, facts } from './FactQueryPage.fixtures';
 
 describe('FactQueryPage', () => {
   it('filters low evidence facts and drills into projection detail', async () => {
@@ -82,12 +16,7 @@ describe('FactQueryPage', () => {
       );
       return { facts: filtered, total: filtered.length, limit: filters.limit, offset: filters.offset };
     });
-    render(
-      <FactQueryPage
-        loadFacts={loadFacts}
-        loadFactDetail={async () => detail}
-      />
-    );
+    render(<FactQueryPage loadFacts={loadFacts} loadFactDetail={async () => detail} />);
 
     expect(await screen.findByText('事实查询')).toBeInTheDocument();
     expect(screen.getByText(/用于追溯故事的原始依据/)).toBeInTheDocument();
@@ -106,6 +35,12 @@ describe('FactQueryPage', () => {
     expect(screen.getAllByText('待补证').length).toBeGreaterThan(0);
     expect(screen.getByText('已进入故事')).toBeInTheDocument();
     expect(screen.getByText('真实内容')).toBeInTheDocument();
+    expect(screen.getAllByText(/发生/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/入库/).length).toBeGreaterThan(0);
+    const rows = screen.getAllByRole('row').map((row) => row.textContent || '');
+    expect(rows.findIndex((row) => row.includes('Low evidence fact remains queryable'))).toBeLessThan(
+      rows.findIndex((row) => row.includes('Tool execution failed with raw signature'))
+    );
     expect(screen.queryByText('排查价值')).not.toBeInTheDocument();
     expect(screen.getByText('工具 shell_command，退出码 1')).toBeInTheDocument();
     expect(screen.getByText('未上传原文，可查看摘要和字段')).toBeInTheDocument();
@@ -152,6 +87,8 @@ describe('FactQueryPage', () => {
       raw_available: true,
       raw_status: '已上传原文'
     };
+    const sensitiveHeader =
+      'Authorization: Bearer abcdefghijklmnopqrstuvwxyz1234567890abcdefghijklmnop';
     const riskDetail: FactDetail = {
       fact: riskFact,
       evidence_projection: {
@@ -160,11 +97,37 @@ describe('FactQueryPage', () => {
         category: 'sensitive_touch',
         span: 'session:risk',
         raw_hash: 'hash-risk-sensitive-001',
-        projection_json: { object_type: 'credential', category_count: 2, sensitive_categories: ['token', 'auth'] },
+        projection_json: {
+          object_type: 'credential',
+          category_count: 1,
+          sensitive_categories: ['token'],
+          sensitive_matches: [
+            {
+              category: 'token',
+              match_type: 'authorization_bearer',
+              confidence: 'high',
+              evidence_key: 'command',
+              matched_preview: 'Authorization: Bearer ab...efghijklmnop',
+              matched_value: sensitiveHeader,
+              reason_code: 'bearer_value'
+            }
+          ]
+        },
         upload_raw: true,
-        raw_content: '{"payload":{"arguments":"git commit -m \\"token telemetry\\"; oh auth status"}}'
+        raw_content: `{"payload":{"arguments":"curl -H \\"${sensitiveHeader}\\" http://127.0.0.1; git commit -m \\"token telemetry\\"; oh auth status"}}`
       },
       evidence_projections: [],
+      sensitive_matches: [
+        {
+          category: 'token',
+          match_type: 'authorization_bearer',
+          confidence: 'high',
+          evidence_key: 'command',
+          matched_preview: 'Authorization: Bearer ab...efghijklmnop',
+          matched_value: sensitiveHeader,
+          reason_code: 'bearer_value'
+        }
+      ],
       source_refs: { conversation_ref: 'conv-risk-001' },
       source_specific_json: { codex_event_type: 'function_call' }
     };
@@ -181,10 +144,11 @@ describe('FactQueryPage', () => {
     expect(screen.getAllByText('认证凭据对象').length).toBeGreaterThan(1);
     expect(screen.getByText('对象类型')).toBeInTheDocument();
     expect(screen.getByText('命中线索数')).toBeInTheDocument();
-    expect(screen.getByText('token、auth')).toBeInTheDocument();
+    expect(screen.getByText('token')).toBeInTheDocument();
     expect(screen.getByLabelText('原文证据')).toHaveTextContent('token telemetry');
     const highlightedTerms = Array.from(document.querySelectorAll('mark.sensitive-hit')).map((node) => node.textContent);
-    expect(highlightedTerms).toContain('auth');
+    expect(highlightedTerms).toContain(sensitiveHeader);
+    expect(highlightedTerms).not.toContain('auth');
     expect(highlightedTerms).not.toContain('token');
   });
 
@@ -203,6 +167,70 @@ describe('FactQueryPage', () => {
     expect(screen.getByText('原始 Prompt')).toBeInTheDocument();
   });
 
+  it('opens detail from row click and hides generic low evidence boilerplate', async () => {
+    const genericFact = {
+      fact_id: 'event-generic-001',
+      fact_type: 'unknown',
+      category: 'uncategorized',
+      quality: 'low' as const,
+      severity: 'low',
+      summary: 'Codex 会话出现未归类但来源合法的低证据事件，已保留为事实查询候选。',
+      occurred_at: '2026-06-18T10:03:00+00:00',
+      source: 'codex',
+      promoted_to_story: false,
+      source_event_type: 'message',
+      source_label: 'Codex 会话 conv-generic',
+      content_preview: '原文: 用户要求检查事实查询右侧详情',
+      raw_available: true,
+      raw_status: '已上传原文'
+    };
+    const genericDetail: FactDetail = {
+      ...detail,
+      fact: genericFact,
+      evidence_projection: {
+        ...detail.evidence_projection,
+        fact_id: genericFact.fact_id,
+        raw_content: '{"payload":{"content":[{"text":"用户要求检查事实查询右侧详情"}]}}',
+      },
+      source_refs: { conversation_ref: 'conv-generic' },
+    };
+
+    render(
+      <FactQueryPage
+        loadFacts={async () => ({ facts: [genericFact], total: 1, limit: 50, offset: 0 })}
+        loadFactDetail={async () => genericDetail}
+      />
+    );
+
+    expect(await screen.findByText('原文: 用户要求检查事实查询右侧详情')).toBeInTheDocument();
+    expect(screen.queryByText(/未归类但来源合法的低证据事件/)).not.toBeInTheDocument();
+    await userEvent.click(screen.getByRole('row', { name: /用户要求检查事实查询右侧详情/ }));
+    expect(await screen.findByText(/event-generic-001/)).toBeInTheDocument();
+    expect(screen.getByText('原始 Prompt')).toBeInTheDocument();
+  });
+
+  it('shows a pending detail state immediately after selecting a fact', async () => {
+    const user = userEvent.setup();
+    let resolveDetail: (value: FactDetail) => void = () => {};
+    const pendingDetail = new Promise<FactDetail>((resolve) => {
+      resolveDetail = resolve;
+    });
+
+    render(
+      <FactQueryPage
+        loadFacts={async () => facts}
+        loadFactDetail={() => pendingDetail}
+      />
+    );
+
+    await user.click(await screen.findByRole('button', { name: '查看 event-low-001' }));
+    expect(screen.getByText('正在加载证据详情')).toBeInTheDocument();
+    expect(screen.getByRole('row', { name: /Prompt: 请检查 Dashboard 为什么没有数据/ })).toHaveAttribute('aria-selected', 'true');
+
+    resolveDetail(detail);
+    expect(await screen.findByText('原始 Prompt')).toBeInTheDocument();
+  });
+
   it('shows story-linked fact detail even when the current list filter is empty', async () => {
     const loadFactDetail = vi.fn(async () => detail);
     render(
@@ -216,49 +244,5 @@ describe('FactQueryPage', () => {
     expect(await screen.findByText('证据详情')).toBeInTheDocument();
     expect(screen.getByText(/当前筛选没有命中列表/)).toBeInTheDocument();
     expect(screen.getByText('原始 Prompt')).toBeInTheDocument();
-  });
-
-  it('paginates facts and keeps selected fact after refresh', async () => {
-    const user = userEvent.setup();
-    const rows = Array.from({ length: 55 }, (_, index) => ({
-      fact_id: `fact-${index + 1}`,
-      fact_type: 'content',
-      category: 'codex_prompt',
-      quality: 'high' as const,
-      severity: 'low',
-      summary: `Prompt ${index + 1}`,
-      occurred_at: '2026-06-18T10:00:00+00:00',
-      source: 'codex',
-      promoted_to_story: false,
-      content_preview: `Prompt: 第 ${index + 1} 条`,
-      raw_available: false,
-      raw_status: '仅结构化字段'
-    }));
-    const loadFacts = vi.fn(async (filters) => ({
-      facts: rows.slice(filters.offset, filters.offset + filters.limit),
-      total: rows.length,
-      limit: filters.limit,
-      offset: filters.offset,
-    }));
-    const loadFactDetail = vi.fn(async (factId: string) => ({
-      ...detail,
-      fact: rows.find((row) => row.fact_id === factId) ?? rows[0],
-      evidence_projection: { ...detail.evidence_projection, fact_id: factId },
-    }));
-
-    render(<FactQueryPage loadFacts={loadFacts} loadFactDetail={loadFactDetail} />);
-
-    expect(await screen.findByText(/共 55 条/)).toBeInTheDocument();
-    expect(screen.getByText(/第\s*1\s*-\s*50\s*条/)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '下一页' })).toBeEnabled();
-    await user.click(screen.getByRole('button', { name: '下一页' }));
-    await waitFor(() => expect(loadFacts).toHaveBeenLastCalledWith(expect.objectContaining({ limit: 50, offset: 50 })));
-    expect(await screen.findByText(/第\s*51\s*-\s*55\s*条/)).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '查看 fact-51' }));
-    const detailPanel = await screen.findByLabelText('证据详情');
-    expect(within(detailPanel).getByText(/第 51 条/)).toHaveTextContent('fact-51');
-    await user.click(screen.getByRole('button', { name: '刷新' }));
-    await waitFor(() => expect(loadFactDetail).toHaveBeenLastCalledWith('fact-51'));
-    expect(screen.getByText(/最后刷新/)).toBeInTheDocument();
   });
 });

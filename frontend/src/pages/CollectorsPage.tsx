@@ -6,12 +6,10 @@ import { formatNumber } from '../utils/numberFormat';
 
 const statusLabels: Record<SourceStatus, string> = {
   online: '在线',
+  degraded: '异常但进程仍在',
   offline: '离线',
   source_missing: '数据源缺失',
-  source_locked: '数据源锁定',
-  state_corrupt: '状态损坏',
-  outbox_backlog: '待传队列',
-  policy_not_fetched: '未拉取策略'
+  source_locked: '数据源锁定'
 };
 
 export function CollectorsPage({

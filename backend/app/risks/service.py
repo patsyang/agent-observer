@@ -4,7 +4,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from app.sensitivity import sensitive_categories_from_text
+from app.sensitivity import sensitive_matches_from_text
 
 
 def get_risk_summary(conn: sqlite3.Connection, *, mode: str = "summary", window: str = "24h") -> dict:
@@ -130,13 +130,17 @@ def _normalized_object_type(risk_type: str, object_type: str, categories: set[st
 
 def _sensitive_categories_for_projection(projection_json: str | None, raw_content: str | None) -> set[str]:
     projection = _loads(projection_json)
-    categories = projection.get("sensitive_categories")
-    if isinstance(categories, list):
-        normalized = {str(category) for category in categories if str(category) != "sensitive_reference"}
+    matches = projection.get("sensitive_matches")
+    if isinstance(matches, list):
+        normalized = {
+            str(match.get("category"))
+            for match in matches
+            if isinstance(match, dict) and match.get("confidence") == "high" and match.get("category")
+        }
         if normalized:
             return normalized
     if raw_content:
-        return set(sensitive_categories_from_text(raw_content))
+        return {match["category"] for match in sensitive_matches_from_text(raw_content, "raw_content")}
     return set()
 
 

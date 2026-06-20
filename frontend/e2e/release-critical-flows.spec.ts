@@ -68,8 +68,14 @@ function codexRecords() {
     },
     {
       timestamp: now,
-      type: 'message',
-      sensitive_categories: ['credential'],
+      type: 'response_item',
+      payload: {
+        type: 'function_call',
+        name: 'shell_command',
+        arguments: JSON.stringify({
+          command: 'curl -H "Authorization: Bearer abcdefghijklmnopqrstuvwxyz123456" http://127.0.0.1'
+        })
+      },
       conversation_id: 'conversation-e2e',
       session_id: 'session-e2e',
       project: 'agent-observer',
