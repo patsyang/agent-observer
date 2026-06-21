@@ -34,7 +34,14 @@ export function ConversationTable({
         </thead>
         <tbody>
           {rows.map((row, index) => (
-            <tr className="clickable-row" key={row.conversation_ref} onClick={() => onOpen(row.conversation_ref)} tabIndex={0}>
+            <tr
+              className="clickable-row"
+              data-conversation-ref={row.conversation_ref}
+              data-testid="conversation-row"
+              key={row.conversation_ref}
+              onClick={() => onOpen(row.conversation_ref)}
+              tabIndex={0}
+            >
               <td data-label="序号">{formatNumber((meta.page - 1) * meta.page_size + index + 1)}</td>
               <td data-label="时间戳">{formatDateTime(row.last_event_at)}</td>
               <td data-label="提交 Prompt"><span className="content-preview">{row.prompt_preview || '暂无 Prompt'}</span></td>

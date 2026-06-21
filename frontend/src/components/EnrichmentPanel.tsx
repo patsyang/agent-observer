@@ -19,7 +19,7 @@ export function EnrichmentPanel({ storyId, availability, requestEnrichment, canc
   const [message, setMessage] = useState<string | null>(null);
 
   return (
-    <section aria-label="信号补证操作">
+    <section aria-label="信号补证操作" data-testid="enrichment-panel">
       <h3>信号补证</h3>
       {activeJob && (
         <div className="enrichment-status">
@@ -47,6 +47,7 @@ export function EnrichmentPanel({ storyId, availability, requestEnrichment, canc
             </div>
             <button
               className="compact-button primary"
+              data-testid="request-enrichment"
               disabled={Boolean(activeJob) || capability.state === 'unavailable' || mutationState === 'submitting'}
               onClick={() => runRequest(capability.capability_id)}
             >

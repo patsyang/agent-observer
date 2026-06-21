@@ -15,7 +15,7 @@ export function ConversationDrawer({ detail, onClose }: Props) {
 
   return (
     <div className="drawer-backdrop" role="presentation">
-      <aside className="drawer conversation-drawer" aria-label="会话详情">
+      <aside className="drawer conversation-drawer" aria-label="会话详情" data-testid="conversation-drawer">
         <header className="drawer-header">
           <div>
             <span>会话</span>

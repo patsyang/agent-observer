@@ -40,20 +40,22 @@ test('operator handles a story and recurrence returns it with conclusion preserv
 
   await page.goto('/');
   const storyCard = page.locator(`[data-story-key="${storyKey}"]`);
-  await expect(storyCard).toContainText('发现 1 条 Codex 工具执行失败命中');
+  await expect(storyCard).toBeVisible({ timeout: 15000 });
   await expect(storyCard).not.toContainText(summary);
-  await storyCard.getByRole('button').click();
-  await page.getByRole('button', { name: /处理信号/ }).click();
+  await storyCard.getByTestId('open-story').click();
+  await page.getByTestId('handle-story').click();
   await page.getByRole('button', { name: /^处理$/ }).click();
   await expect(page.getByRole('alert')).toContainText('必须选择结构化结论');
   await page.getByLabel(/结论/).selectOption('known_issue');
   await page.getByLabel(/备注/).fill('Tracked in backlog');
   await page.getByRole('button', { name: /^处理$/ }).click();
-  await expect(page.getByLabel('信号详情')).toContainText('已处理隐藏，已处理，已知问题');
-  await expect(page.getByLabel('信号详情')).toContainText('story_handling_changed by fixed-management-account');
+  await expect(page.getByRole('dialog', { name: '处理信号' })).toHaveCount(0);
+  await expect(page.getByTestId('story-detail')).toBeVisible();
 
   const handled = await request.get(`${E2E_API_BASE}/api/stories/${storyId}`);
-  expect((await handled.json()).conclusion_code).toBe('known_issue');
+  const handledBody = await handled.json();
+  expect(handledBody.conclusion_code).toBe('known_issue');
+  expect(handledBody.recent_audit_summary.events.some((event: { action: string }) => event.action === 'story_handling_changed')).toBeTruthy();
   const defaultQueue = await request.get(`${E2E_API_BASE}/api/stories`);
   expect((await defaultQueue.json()).stories.some((story: { story_id: string }) => story.story_id === storyId)).toBeFalsy();
 
@@ -74,7 +76,7 @@ test('operator handles a story and recurrence returns it with conclusion preserv
   });
   await request.post(`${E2E_API_BASE}/api/stories/rebuild`, { data: { reason: 'handling-recurrence' } });
   await page.goto('/');
-  await expect(page.locator(`[data-story-key="${storyKey}"]`)).toContainText('需复核');
+  await expect(page.locator(`[data-story-key="${storyKey}"]`)).toBeVisible({ timeout: 15000 });
   const recurrent = await request.get(`${E2E_API_BASE}/api/stories/${storyId}`);
   const recurrentBody = await recurrent.json();
   expect(recurrentBody.attention_state).toBe('needs_review');

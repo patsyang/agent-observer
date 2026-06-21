@@ -60,6 +60,7 @@ export function App() {
             return (
             <button
               className={view === item.view ? 'active' : ''}
+              data-testid={`nav-${item.view}`}
               key={item.view}
               onClick={() => {
                 setSelectedStoryId(null);
@@ -82,7 +83,7 @@ export function App() {
           <strong>agent-observer</strong>
           <small>collector / 本地观测上报</small>
         </section>
-        <button className="primary full-width" onClick={() => setDrawerOpen(true)}>
+        <button className="primary full-width" data-testid="open-access-config" onClick={() => setDrawerOpen(true)}>
           <ActivitySquare aria-hidden="true" size={16} />
           接入配置
         </button>

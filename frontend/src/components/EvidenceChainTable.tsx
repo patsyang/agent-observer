@@ -11,7 +11,7 @@ const MAX_VISIBLE_EVIDENCE = 20;
 
 export function EvidenceChainTable({ entries, onOpenFact }: Props) {
   if (entries.length === 0) {
-    return <p>暂无命中内容。请确认采集器已上报结构化观测。</p>;
+    return <p data-testid="empty-evidence-chain">暂无命中内容。请确认采集器已上报结构化观测。</p>;
   }
   const orderedEntries = [...entries].sort((left, right) => {
     const timeCompare = (right.occurred_at || '').localeCompare(left.occurred_at || '');
@@ -20,7 +20,7 @@ export function EvidenceChainTable({ entries, onOpenFact }: Props) {
   const visibleEntries = orderedEntries.slice(0, MAX_VISIBLE_EVIDENCE);
 
   return (
-    <div className="evidence-table-wrap">
+    <div className="evidence-table-wrap" data-testid="evidence-chain-table">
       {entries.length > visibleEntries.length && (
         <p className="result-note">
           该信号关联 {formatNumber(entries.length)} 条命中内容，当前按时间倒序展示前 {formatNumber(visibleEntries.length)} 条；完整排查请进入会话查询按时间和关键字过滤。
@@ -39,7 +39,7 @@ export function EvidenceChainTable({ entries, onOpenFact }: Props) {
         </thead>
         <tbody>
           {visibleEntries.map((entry, index) => (
-            <tr key={entry.evidence_ref}>
+            <tr data-evidence-ref={entry.evidence_ref} data-testid="evidence-row" key={entry.evidence_ref}>
               <td data-label="序号">{formatNumber(index + 1)}</td>
               <td data-label="时间">{formatDateTime(entry.occurred_at)}</td>
               <td data-label="命中内容">
@@ -70,7 +70,7 @@ export function EvidenceChainTable({ entries, onOpenFact }: Props) {
               </td>
               <td data-label="操作">
                 {entry.fact_id && onOpenFact ? (
-                  <button className="compact-button" type="button" onClick={() => onOpenFact(entry.fact_id as string)}>
+                  <button className="compact-button" data-testid="open-fact-conversation" type="button" onClick={() => onOpenFact(entry.fact_id as string)}>
                     查看会话
                   </button>
                 ) : (

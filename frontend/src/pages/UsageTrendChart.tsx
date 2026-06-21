@@ -30,7 +30,7 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
   const cachedPath = linePath(cachedValues);
 
   return (
-    <section className="panel flush usage-trend" aria-label="用量趋势">
+    <section className="panel flush usage-trend" aria-label="用量趋势" data-testid="usage-trend">
       <div className="panel-header">
         <h2>用量趋势</h2>
         <span className="badge teal">{formatNumber(total)} token / 缓存 {formatNumber(cachedTotal)}</span>

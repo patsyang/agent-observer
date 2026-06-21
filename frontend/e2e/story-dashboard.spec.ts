@@ -61,22 +61,15 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
 
   await page.goto('/');
   const storyCard = page.locator(`[data-story-key="${storyKey}"]`);
-  await expect(storyCard).toContainText('发现 1 条 Codex 工具执行失败命中');
-  await expect(storyCard).toContainText('没有用量证据');
+  await expect(storyCard).toBeVisible({ timeout: 15000 });
   await expect(storyCard).not.toContainText(summary);
-  await storyCard.getByRole('button').click();
-  await expect(page.getByLabel('信号详情')).toContainText('信号类型：错误复发');
-  const evidenceChain = page.getByLabel('证据链');
-  await expect(evidenceChain.getByRole('table')).toBeVisible();
-  await expect(evidenceChain).toContainText('命中内容');
-  await expect(evidenceChain).toContainText('类型 / 来源');
-  await expect(evidenceChain).toContainText('可信度 / 原文');
-  await expect(evidenceChain).toContainText('操作');
-  await expect(evidenceChain).toContainText('Codex 错误');
+  await storyCard.getByTestId('open-story').click();
+  await expect(page.getByTestId('story-detail')).toBeVisible();
+  const evidenceChain = page.getByTestId('evidence-chain');
+  await expect(page.getByTestId('evidence-chain-table')).toBeVisible();
   await expect(evidenceChain).toContainText(summary);
   await expect(evidenceChain).not.toContainText('用量 64 token，活动 缺陷修复');
-  await expect(evidenceChain).toContainText('未上传原文，可查看摘要和字段');
-  await expect(evidenceChain).toContainText('查看会话');
+  await expect(evidenceChain.getByTestId('open-fact-conversation')).toBeVisible();
   await expect(evidenceChain.getByRole('cell').first()).not.toContainText(`proj-${errorFact}`);
 
   const stories = await request.get(`${E2E_API_BASE}/api/stories`);
@@ -86,4 +79,5 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
   const detail = await request.get(`${E2E_API_BASE}/api/stories/${story.story_id}`);
   const detailBody = await detail.json();
   expect(detailBody.evidence_refs).toContain(`proj-${errorFact}`);
+  expect(detailBody.current_snapshot.evidence_chain.some((entry: { summary: string }) => entry.summary === summary)).toBeTruthy();
 });

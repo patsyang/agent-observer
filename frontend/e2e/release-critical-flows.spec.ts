@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { enableEnrichment } from './support/api';
 import { E2E_API_BASE } from './support/urls';
 
 interface E2EStory {
@@ -96,14 +97,7 @@ function codexRecords() {
 async function downloadAndRunCollector(request: APIRequestContext, outputDir: string) {
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
-  const policy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
-  const policyUpdate = await request.patch(`${E2E_API_BASE}/api/policy`, {
-    data: {
-      expected_version: policy.policy_version,
-      enrichment_mode: 'enabled'
-    }
-  });
-  expect(policyUpdate.ok()).toBeTruthy();
+  await enableEnrichment(request);
   const zipPath = join(outputDir, 'agent-observer-windows.zip');
   const packageResponse = await request.get(`${E2E_API_BASE}/api/client-package/windows`);
   expect(packageResponse.ok()).toBeTruthy();
@@ -140,13 +134,13 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   expect((await riskResponse.json()).signals.length).toBeGreaterThan(0);
 
   await page.goto('/');
-  await expect(page.getByLabel('观测信号运营台')).toContainText('观测信号队列');
-  await expect(page.getByText(/错误指纹/).first()).toBeVisible();
-  await expect(page.getByLabel('用量和风险')).toContainText('有效用量');
-  await page.getByRole('button', { name: /会话查询 输入与响应/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: '会话查询' })).toBeVisible();
-  await page.getByRole('button', { name: /采集器 状态与策略/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: '采集器' })).toBeVisible();
+  await expect(page.getByTestId('dashboard-page')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('story-queue')).toBeVisible();
+  await expect(page.getByTestId('usage-governance')).toBeVisible();
+  await page.getByTestId('nav-conversations').click();
+  await expect(page.getByTestId('conversation-page')).toBeVisible();
+  await page.getByTestId('nav-collectors').click();
+  await expect(page.getByTestId('collectors-page')).toBeVisible();
   await expect(page.getByText(collectorId).first()).toBeVisible();
 
   const storiesResponse = await request.get(`${E2E_API_BASE}/api/stories?include_hidden=true`);
@@ -165,14 +159,7 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   expect(enrichment.ok()).toBeTruthy();
   execFileSync('cmd.exe', ['/d', '/s', '/c', 'agent-observer.cmd run-once'], { cwd: outputDir, encoding: 'utf-8' });
 
-  const policy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
-  const policyUpdate = await request.patch(`${E2E_API_BASE}/api/policy`, {
-    data: {
-      expected_version: policy.policy_version,
-      enrichment_mode: 'enabled'
-    }
-  });
-  expect(policyUpdate.ok()).toBeTruthy();
+  await enableEnrichment(request);
 
   const validation = await request.post(`${E2E_API_BASE}/api/validation/minimum-experiment`);
   expect(validation.ok()).toBeTruthy();

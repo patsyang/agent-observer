@@ -19,7 +19,7 @@ interface Props {
 
 export function StoryCard({ story, onOpen }: Props) {
   return (
-    <article className="story-card" data-story-key={story.story_key}>
+    <article className="story-card" data-testid="story-card" data-story-key={story.story_key}>
       <div className="story-card__header">
         <div>
           <div className="story-card__badges">
@@ -62,7 +62,7 @@ export function StoryCard({ story, onOpen }: Props) {
       </dl>
 
       <div className="story-card__footer">
-        <button className="compact-button primary" onClick={() => onOpen(story.story_id)}>
+        <button className="compact-button primary" data-testid="open-story" onClick={() => onOpen(story.story_id)}>
           查看信号
           <ArrowRight aria-hidden="true" size={15} />
         </button>

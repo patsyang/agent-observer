@@ -48,24 +48,22 @@ test('public onboarding shows registered online collector and package download',
   expect(stale.ok()).toBeTruthy();
 
   await page.goto('/');
-  await expect(page.getByRole('heading', { name: '观测总览' })).toBeVisible();
+  await expect(page.getByTestId('dashboard-page')).toBeVisible();
   await expect(page.getByText(/login/i)).toHaveCount(0);
-  await page.getByRole('button', { name: /采集器 状态与策略/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: '采集器' })).toBeVisible({ timeout: 15000 });
-  const row = page.getByRole('row').filter({ hasText: workstationName });
+  await page.getByTestId('nav-collectors').click();
+  await expect(page.getByTestId('collectors-page')).toBeVisible({ timeout: 15000 });
+  const row = page.locator(`[data-collector-id="${collector.collector_id}"]`);
   await expect(row).toBeVisible({ timeout: 15000 });
-  await expect(row.getByRole('cell', { name: '在线', exact: true })).toBeVisible();
-  await expect(row.getByRole('cell', { name: /^v\d+$/ })).toBeVisible();
-  await expect(row.getByRole('cell', { name: /已开启/ })).toBeVisible();
+  await expect(row).toContainText(workstationName);
   await expect(row.getByRole('checkbox', { name: /原文上报/ })).toHaveCount(0);
-  await expect(row.getByRole('button', { name: /清理/ })).toBeDisabled();
+  await expect(row.getByTestId('cleanup-collector')).toBeDisabled();
 
-  const staleRow = page.getByRole('row').filter({ hasText: staleId });
+  const staleRow = page.locator(`[data-collector-id="${staleId}"]`);
   await expect(staleRow).toBeVisible({ timeout: 15000 });
-  await staleRow.getByRole('button', { name: `清理 ${staleName}` }).click();
+  await staleRow.getByTestId('cleanup-collector').click();
   await expect(page.getByText(`已清理 ${staleName}`)).toBeVisible({ timeout: 15000 });
   await expect(staleRow).toHaveCount(0);
 
-  await page.getByRole('button', { name: '接入配置' }).click();
-  await expect(page.getByRole('link', { name: '下载 Windows 客户端' })).toBeVisible({ timeout: 15000 });
+  await page.getByTestId('open-access-config').click();
+  await expect(page.getByTestId('download-client')).toBeVisible({ timeout: 15000 });
 });

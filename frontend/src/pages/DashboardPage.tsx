@@ -136,7 +136,7 @@ export function DashboardPage({
   const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
 
   return (
-    <div className="dashboard workbench" aria-label="观测信号运营台">
+    <div className="dashboard workbench" aria-label="观测信号运营台" data-testid="dashboard-page">
       <section className="context-bar">
         <div>
           <strong>观测信号运营台</strong>
@@ -204,7 +204,7 @@ export function DashboardPage({
           </div>
         </aside>
 
-        <section className="panel flush story-workbench" aria-label="观测信号">
+        <section className="panel flush story-workbench" aria-label="观测信号" data-testid="story-queue">
           <div className="panel-header">
             <h2>观测信号队列</h2>
             <span className="badge violet">{formatNumber(state.stories.total ?? activeStories.length)} 条待看</span>

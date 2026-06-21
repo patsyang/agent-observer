@@ -33,11 +33,11 @@ export function CollectorsPage({
       .catch(() => setState('error'));
   }, [loadCollectors]);
 
-  if (state === 'loading') return <section className="panel">正在加载采集器</section>;
-  if (state === 'error') return <section className="panel">采集器状态不可用</section>;
+  if (state === 'loading') return <section className="panel" data-testid="collectors-page">正在加载采集器</section>;
+  if (state === 'error') return <section className="panel" data-testid="collectors-page">采集器状态不可用</section>;
   if (state === 'empty') {
     return (
-      <section className="panel">
+      <section className="panel" data-testid="collectors-page">
         <h2>采集器</h2>
         <p>还没有采集器注册。请从“下载与策略配置”下载 Windows 包并运行 start。</p>
       </section>
@@ -45,7 +45,7 @@ export function CollectorsPage({
   }
 
   return (
-    <section className="panel">
+    <section className="panel" data-testid="collectors-page">
       <h2>采集器</h2>
       <p className="panel-intro">
         这里用于查看本机 collector 接入状态。当前版本固定上传原始输入输出，清理只会从管理列表移除离线或遗留采集器。
@@ -72,7 +72,7 @@ export function CollectorsPage({
         </thead>
         <tbody>
           {collectors.map((collector) => (
-            <tr key={collector.collector_id}>
+            <tr data-collector-id={collector.collector_id} data-testid="collector-row" key={collector.collector_id}>
               <td data-label="采集器">
                 <strong>{collector.display_name}</strong>
                 <small>{collector.collector_id}</small>
@@ -90,6 +90,7 @@ export function CollectorsPage({
                 <button
                   aria-label={`清理 ${collector.display_name}`}
                   className="icon-button"
+                  data-testid="cleanup-collector"
                   disabled={collector.source_status === 'online'}
                   onClick={() => cleanupCollector(collector)}
                 >

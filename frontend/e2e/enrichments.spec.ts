@@ -1,16 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { enableEnrichment } from './support/api';
 import { E2E_API_BASE } from './support/urls';
 
 test('operator requests enrichment and sees result in evidence chain', async ({ page, request }) => {
   const batchId = `e2e-enrichment-${Date.now()}`;
   const summary = `E2E enrichment command failed ${batchId}`;
-  const policyResponse = await request.get(`${E2E_API_BASE}/api/policy`);
-  const policy = await policyResponse.json();
-  if (policy.enrichment_mode !== 'enabled') {
-    await request.patch(`${E2E_API_BASE}/api/policy`, {
-      data: { expected_version: policy.policy_version, enrichment_mode: 'enabled' }
-    });
-  }
+  await enableEnrichment(request);
   await request.post(`${E2E_API_BASE}/api/collectors/register`, {
     data: {
       collector_id: 'collector-e2e-enrichment',
@@ -61,12 +56,12 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
 
   await page.goto('/');
   const storyCard = page.locator(`[data-story-key="${story.story_key}"]`);
-  await expect(storyCard).toContainText('发现 1 条 Codex 工具执行失败命中');
+  await expect(storyCard).toBeVisible({ timeout: 15000 });
   await expect(storyCard).not.toContainText(summary);
-  await storyCard.getByRole('button').click();
-  await expect(page.getByLabel('信号补证操作')).toContainText('工具失败上下文补证');
-  await page.getByRole('button', { name: '补充工具失败上下文' }).click();
-  await expect(page.getByLabel('信号补证操作')).toContainText('补证 排队中');
+  await storyCard.getByTestId('open-story').click();
+  await expect(page.getByTestId('enrichment-panel')).toBeVisible();
+  await page.getByTestId('request-enrichment').click();
+  await expect(page.getByTestId('enrichment-panel').getByRole('status')).toBeVisible();
 
   const detailAfterRequest = await request.get(`${E2E_API_BASE}/api/stories/${story.story_id}`);
   expect((await detailAfterRequest.json()).enrichment_status_summary.status).toBe('pending');
@@ -115,9 +110,9 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
   });
 
   await page.goto('/');
-  await page.locator(`[data-story-key="${story.story_key}"]`).getByRole('button').click();
-  await expect(page.getByLabel('证据链')).toContainText('补证结果');
-  await expect(page.getByLabel('证据链')).toContainText('工具失败上下文补证');
+  await page.locator(`[data-story-key="${story.story_key}"]`).getByTestId('open-story').click();
+  await expect(page.getByTestId('evidence-chain-table')).toBeVisible();
   await expect(page.getByLabel('证据链')).toContainText('命中 1 条失败工具调用');
-  await expect(page.getByLabel('信号详情')).toContainText('补证成功');
+  const detail = await request.get(`${E2E_API_BASE}/api/stories/${story.story_id}`);
+  expect((await detail.json()).enrichment_status_summary.status).toBe('succeeded');
 });

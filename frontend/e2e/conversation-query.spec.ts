@@ -69,14 +69,17 @@ test('operator queries conversations by prompt and response keywords', async ({ 
   expect(ingest.ok()).toBeTruthy();
 
   await page.goto('/');
-  await page.getByRole('button', { name: /会话查询 输入与响应/ }).click();
-  await expect(page.getByRole('heading', { level: 1, name: '会话查询' })).toBeVisible();
-  await page.getByLabel('提交 Prompt').fill(suffix);
-  await page.getByLabel('响应内容').fill('E2E 响应');
-  const row = page.getByRole('row').filter({ hasText: prompt });
+  await page.getByTestId('nav-conversations').click();
+  await expect(page.getByTestId('conversation-page')).toBeVisible();
+  await page.getByTestId('prompt-query').fill(suffix);
+  await page.getByTestId('response-query').fill('E2E 响应');
+  await page.getByTestId('conversation-search').click();
+  const row = page.locator(`[data-conversation-ref="${conversation}"]`);
+  await expect(row).toBeVisible({ timeout: 15000 });
   await expect(row).toContainText(response);
   await row.click();
-  const drawer = page.getByRole('complementary', { name: '会话详情' });
+  const drawer = page.getByTestId('conversation-drawer');
+  await expect(drawer).toBeVisible();
   await expect(drawer).toContainText(prompt);
   await expect(drawer).toContainText(response);
   await expect(drawer).toContainText('88');

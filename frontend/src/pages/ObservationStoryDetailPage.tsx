@@ -82,7 +82,7 @@ export function ObservationStoryDetailPage({
 
   const { enrichmentAvailability, story } = state;
   return (
-    <section className="panel story-detail" aria-label="信号详情">
+    <section className="panel story-detail" aria-label="信号详情" data-testid="story-detail">
       <header className="detail-header">
         <div>
           <h2>{story.conclusion}</h2>
@@ -101,12 +101,13 @@ export function ObservationStoryDetailPage({
       </header>
       <div className="action-row">
         <button
+          data-testid="mark-story-read"
           disabled={story.handling_state !== 'unread'}
           onClick={() => runMutation(() => markRead(story.story_id))}
         >
           标记已读
         </button>
-        <button className="primary" onClick={() => setDialogOpen(true)}>
+        <button className="primary" data-testid="handle-story" onClick={() => setDialogOpen(true)}>
           处理信号
         </button>
       </div>
@@ -152,12 +153,12 @@ export function ObservationStoryDetailPage({
         cancelEnrichment={cancelEnrichment}
         onChanged={reload}
       />
-      <section aria-label="证据链">
+      <section aria-label="证据链" data-testid="evidence-chain">
         <h3>命中内容</h3>
         <p className="panel-intro">以下为本信号命中的内容。点击“查看会话”会打开所属会话的完整输入输出和 token 用量。</p>
         <EvidenceChainTable entries={story.current_snapshot.evidence_chain} onOpenFact={onOpenFact} />
       </section>
-      <section>
+      <section data-testid="story-audit">
         <h3>最近审计</h3>
         <p>{story.recent_audit_summary.latest}</p>
         <ul>

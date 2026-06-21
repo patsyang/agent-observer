@@ -20,7 +20,7 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
   const activityRows = usage.rollups.filter((row) => row.scope === 'activity_tag');
 
   return (
-    <section className="panel flush summary-band" aria-label="使用与风险治理">
+    <section className="panel flush summary-band" aria-label="使用与风险治理" data-testid="usage-governance">
       <div className="panel-header">
         <h2>使用与风险治理</h2>
         <span className="badge gray">确定性汇总</span>
@@ -48,7 +48,7 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
               <p>暂无活动用量。</p>
             ) : (
               activityRows.map((row) => (
-                <p key={row.rollup_id}>
+                <p data-testid={`usage-rollup-${row.activity_tag}`} key={row.rollup_id}>
                   {activityTagLabel(row.activity_tag)}：{formatNumber(row.units)}
                 </p>
               ))
@@ -60,7 +60,7 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
               <p>暂无高风险或敏感对象信号。</p>
             ) : (
               risks.signals.map((signal) => (
-                <p key={`${signal.risk_type}-${signal.object_type}`}>
+                <p data-testid={`risk-signal-${signal.risk_type}-${signal.object_type}`} key={`${signal.risk_type}-${signal.object_type}`}>
                   {riskTypeLabel(signal.risk_type)} / {objectTypeLabel(signal.object_type)}：
                   {formatNumber(signal.count)}，{severityLabel(signal.highest_severity)}
                 </p>

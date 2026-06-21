@@ -43,7 +43,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
 
   return (
     <div className="drawer-backdrop">
-      <aside className="drawer" aria-label="下载与策略配置">
+      <aside className="drawer" aria-label="下载与策略配置" data-testid="access-config-drawer">
         <header className="drawer-header">
           <div>
             <span>接入配置</span>
@@ -90,7 +90,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
               <h3>下载客户端</h3>
               <p>仅下载客户端时不需要保存接入策略。解压后运行同目录的配置和入口文件。</p>
             </div>
-            <a className="primary download-button" href={downloadUrl} download="agent-observer-windows.zip">
+            <a className="primary download-button" data-testid="download-client" href={downloadUrl} download="agent-observer-windows.zip">
               下载 Windows 客户端
             </a>
             <dl className="package-grid">
@@ -136,7 +136,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
               </span>
             </label>
             <div className="drawer-actions">
-              <button className="primary" disabled={saveState === 'saving'} type="submit">
+              <button className="primary" data-testid="save-policy" disabled={saveState === 'saving'} type="submit">
                 {saveState === 'saving' ? '正在保存接入策略' : '保存接入策略'}
               </button>
               <span>保存后影响新下载客户端；在线客户端会在下一次心跳后拉取最新策略。</span>
@@ -145,7 +145,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             {saveState === 'error' && <p role="alert">策略更新失败。请重新打开配置后再试。</p>}
           </section>
 
-          <section className="drawer-section audit-section" aria-label="策略审计">
+          <section className="drawer-section audit-section" aria-label="策略审计" data-testid="access-audit">
             <h3>最近审计</h3>
             <p>{state.audit.latest}</p>
           </section>

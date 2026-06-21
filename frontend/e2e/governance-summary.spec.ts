@@ -83,12 +83,12 @@ test('operator views usage and governance trend after fixture ingestion', async 
   expect(ingest.ok()).toBeTruthy();
 
   await page.goto('/');
-  await expect(page.getByLabel('观测信号运营台')).toBeVisible({ timeout: 15000 });
-  await expect(page.getByRole('region', { name: '用量趋势' })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByLabel('使用与风险治理')).toBeVisible({ timeout: 15000 });
-  await expect(page.locator('.metric').filter({ hasText: '有效用量' })).toBeVisible();
-  await expect(page.locator('.metric').filter({ hasText: '缓存命中' })).toBeVisible();
-  await expect(page.getByLabel('使用与风险治理').getByText(/敏感对象触达 \/ 配置/)).toBeVisible();
+  await expect(page.getByTestId('dashboard-page')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('usage-trend')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('usage-governance')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByTestId('usage-rollup-implementation')).toContainText('120');
+  await expect(page.getByTestId('usage-rollup-bug_fix')).toContainText('40');
+  await expect(page.getByTestId('risk-signal-sensitive_object_touch-configuration')).toContainText('1');
 
   const usage = await request.get(`${E2E_API_BASE}/api/usage/summary`);
   const usageBody = await usage.json();

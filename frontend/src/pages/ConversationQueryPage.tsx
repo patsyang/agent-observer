@@ -106,7 +106,7 @@ export function ConversationQueryPage({
   };
 
   return (
-    <section className="panel conversation-page">
+    <section className="panel conversation-page" data-testid="conversation-page">
       {onBack && (
         <div className="page-actions">
           <button className="compact-button" onClick={onBack} type="button">
@@ -118,12 +118,14 @@ export function ConversationQueryPage({
 
       <div className="conversation-toolbar" aria-label="会话筛选">
         <TextFilter
+          testId="prompt-query"
           label="提交 Prompt"
           onChange={(prompt_query) => updateDraftFilters({ prompt_query })}
           onSubmit={submitSearch}
           value={draftFilters.prompt_query}
         />
         <TextFilter
+          testId="response-query"
           label="响应内容"
           onChange={(response_query) => updateDraftFilters({ response_query })}
           onSubmit={submitSearch}
@@ -142,6 +144,7 @@ export function ConversationQueryPage({
         <button
           aria-label="搜索会话"
           className="icon-button conversation-search-button"
+          data-testid="conversation-search"
           onClick={submitSearch}
           title="搜索会话"
           type="button"
@@ -182,17 +185,20 @@ function TextFilter({
   label,
   onChange,
   onSubmit,
+  testId,
   value,
 }: {
   label: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  testId: string;
   value: string;
 }) {
   return (
     <label className="conversation-inline-field">
       {label}
       <input
+        data-testid={testId}
         value={value}
         onChange={(event) => onChange(event.target.value)}
         onKeyDown={(event) => {
