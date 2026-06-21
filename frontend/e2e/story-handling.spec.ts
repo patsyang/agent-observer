@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('operator handles a story and recurrence returns it with conclusion preserved', async ({ page, request }) => {
   const suffix = Date.now().toString();
@@ -31,8 +32,8 @@ test('operator handles a story and recurrence returns it with conclusion preserv
       }
     ]
   };
-  await expect((await request.post('http://127.0.0.1:8765/api/telemetry/ingest', { data: firstBatch })).ok()).toBeTruthy();
-  const rebuilt = await request.post('http://127.0.0.1:8765/api/stories/rebuild', { data: { reason: 'handling-e2e' } });
+  await expect((await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, { data: firstBatch })).ok()).toBeTruthy();
+  const rebuilt = await request.post(`${E2E_API_BASE}/api/stories/rebuild`, { data: { reason: 'handling-e2e' } });
   const storyId = (await rebuilt.json()).stories.find(
     (story: { story_key: string }) => story.story_key === storyKey
   ).story_id;
@@ -51,12 +52,12 @@ test('operator handles a story and recurrence returns it with conclusion preserv
   await expect(page.getByLabel('信号详情')).toContainText('已处理隐藏，已处理，已知问题');
   await expect(page.getByLabel('信号详情')).toContainText('story_handling_changed by fixed-management-account');
 
-  const handled = await request.get(`http://127.0.0.1:8765/api/stories/${storyId}`);
+  const handled = await request.get(`${E2E_API_BASE}/api/stories/${storyId}`);
   expect((await handled.json()).conclusion_code).toBe('known_issue');
-  const defaultQueue = await request.get('http://127.0.0.1:8765/api/stories');
+  const defaultQueue = await request.get(`${E2E_API_BASE}/api/stories`);
   expect((await defaultQueue.json()).stories.some((story: { story_id: string }) => story.story_id === storyId)).toBeFalsy();
 
-  await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
+  await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       ...firstBatch,
       batch_id: `e2e-handling-${suffix}-002`,
@@ -71,10 +72,10 @@ test('operator handles a story and recurrence returns it with conclusion preserv
       ]
     }
   });
-  await request.post('http://127.0.0.1:8765/api/stories/rebuild', { data: { reason: 'handling-recurrence' } });
+  await request.post(`${E2E_API_BASE}/api/stories/rebuild`, { data: { reason: 'handling-recurrence' } });
   await page.goto('/');
   await expect(page.locator(`[data-story-key="${storyKey}"]`)).toContainText('需复核');
-  const recurrent = await request.get(`http://127.0.0.1:8765/api/stories/${storyId}`);
+  const recurrent = await request.get(`${E2E_API_BASE}/api/stories/${storyId}`);
   const recurrentBody = await recurrent.json();
   expect(recurrentBody.attention_state).toBe('needs_review');
   expect(recurrentBody.conclusion_code).toBe('known_issue');

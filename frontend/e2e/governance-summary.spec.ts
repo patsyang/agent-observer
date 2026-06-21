@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('operator views usage and governance trend after fixture ingestion', async ({ page, request }) => {
   const suffix = Date.now().toString();
   const sessionId = `session-e2e-${suffix}`;
   const conversationId = `conversation-e2e-${suffix}`;
-  const ingest = await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
+  const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: 'e2e-governance-001',
       protocol_version: 'agent-observer-telemetry/v2',
@@ -89,7 +90,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
   await expect(page.locator('.metric').filter({ hasText: '缓存命中' })).toBeVisible();
   await expect(page.getByLabel('使用与风险治理').getByText(/敏感对象触达 \/ 配置/)).toBeVisible();
 
-  const usage = await request.get('http://127.0.0.1:8765/api/usage/summary');
+  const usage = await request.get(`${E2E_API_BASE}/api/usage/summary`);
   const usageBody = await usage.json();
   expect(usageBody.rollups.some((row: { scope: string; scope_value: string; units: number }) => (
     row.scope === 'session' && row.scope_value === sessionId && row.units === 160
@@ -103,7 +104,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
   expect(usageBody.rollups.some((row: { scope: string; scope_value: string; units: number }) => (
     row.scope === 'activity_tag' && row.scope_value === 'bug_fix' && row.units >= 40
   ))).toBeTruthy();
-  const risks = await request.get('http://127.0.0.1:8765/api/risks/summary');
+  const risks = await request.get(`${E2E_API_BASE}/api/risks/summary`);
   const riskBody = await risks.json();
   expect(riskBody.signals[0].object_type).toBe('configuration');
 });

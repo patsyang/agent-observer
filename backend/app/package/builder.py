@@ -2,11 +2,17 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import zipfile
 from pathlib import Path
 
 from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 APP_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SERVER_URL = "http://127.0.0.1:8765"
+
+
+def get_public_server_url() -> str:
+    return os.environ.get("AGENT_OBSERVER_PUBLIC_BASE_URL", DEFAULT_SERVER_URL).rstrip("/")
 
 
 def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dict:
@@ -15,7 +21,7 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
     config_path = out / "agent-observer.config.json"
     package_path = out / "agent-observer-windows.zip"
     config = {
-        "server_url": "http://127.0.0.1:8765",
+        "server_url": get_public_server_url(),
         "collector_id": "windows-collector",
         "state_path": "agent-observer.state.json",
         "telemetry_mode": "safe_probe",

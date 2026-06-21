@@ -3,6 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 interface E2EStory {
   story_id: string;
@@ -95,8 +96,8 @@ function codexRecords() {
 async function downloadAndRunCollector(request: APIRequestContext, outputDir: string) {
   rmSync(outputDir, { recursive: true, force: true });
   mkdirSync(outputDir, { recursive: true });
-  const policy = await (await request.get('http://127.0.0.1:8765/api/policy')).json();
-  const policyUpdate = await request.patch('http://127.0.0.1:8765/api/policy', {
+  const policy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
+  const policyUpdate = await request.patch(`${E2E_API_BASE}/api/policy`, {
     data: {
       expected_version: policy.policy_version,
       enrichment_mode: 'enabled'
@@ -104,7 +105,7 @@ async function downloadAndRunCollector(request: APIRequestContext, outputDir: st
   });
   expect(policyUpdate.ok()).toBeTruthy();
   const zipPath = join(outputDir, 'agent-observer-windows.zip');
-  const packageResponse = await request.get('http://127.0.0.1:8765/api/client-package/windows');
+  const packageResponse = await request.get(`${E2E_API_BASE}/api/client-package/windows`);
   expect(packageResponse.ok()).toBeTruthy();
   writeFileSync(zipPath, await packageResponse.body());
   execFileSync('powershell', ['-NoProfile', '-Command', `Expand-Archive -Force -LiteralPath '${zipPath}' -DestinationPath '${outputDir}'`]);
@@ -128,14 +129,14 @@ async function downloadAndRunCollector(request: APIRequestContext, outputDir: st
 test('release critical flows use packaged collector telemetry and DB-backed validation', async ({ page, request }, testInfo) => {
   const { collectorId, outputDir } = await downloadAndRunCollector(request, testInfo.outputPath('collector-package'));
 
-  const conversationsResponse = await request.get('http://127.0.0.1:8765/api/conversations?window=all');
+  const conversationsResponse = await request.get(`${E2E_API_BASE}/api/conversations?window=all`);
   const conversations = await conversationsResponse.json();
   expect(conversations.conversations.some((item: { hit_count: number; token_usage: { effective_units: number } }) => (
     item.hit_count >= 3 && item.token_usage.effective_units === 140
   ))).toBeTruthy();
-  const usageResponse = await request.get('http://127.0.0.1:8765/api/usage/summary');
+  const usageResponse = await request.get(`${E2E_API_BASE}/api/usage/summary`);
   expect((await usageResponse.json()).totals.effective_units).toBeGreaterThan(0);
-  const riskResponse = await request.get('http://127.0.0.1:8765/api/risks/summary');
+  const riskResponse = await request.get(`${E2E_API_BASE}/api/risks/summary`);
   expect((await riskResponse.json()).signals.length).toBeGreaterThan(0);
 
   await page.goto('/');
@@ -148,24 +149,24 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   await expect(page.getByRole('heading', { level: 1, name: '采集器' })).toBeVisible();
   await expect(page.getByText(collectorId).first()).toBeVisible();
 
-  const storiesResponse = await request.get('http://127.0.0.1:8765/api/stories?include_hidden=true');
+  const storiesResponse = await request.get(`${E2E_API_BASE}/api/stories?include_hidden=true`);
   const stories = (await storiesResponse.json()) as { stories: E2EStory[] };
   const errorStory = stories.stories.find((story) => story.story_key.startsWith('error:'));
   expect(errorStory).toBeTruthy();
   expect(stories.stories.some((story) => story.story_key.startsWith('usage:'))).toBeFalsy();
   const storyId = errorStory!.story_id;
-  const handle = await request.post(`http://127.0.0.1:8765/api/stories/${storyId}/handle`, {
+  const handle = await request.post(`${E2E_API_BASE}/api/stories/${storyId}/handle`, {
     data: { conclusion_code: 'known_issue', note: '已确认需要跟进' }
   });
   expect(handle.ok()).toBeTruthy();
-  const enrichment = await request.post(`http://127.0.0.1:8765/api/stories/${storyId}/enrichments`, {
+  const enrichment = await request.post(`${E2E_API_BASE}/api/stories/${storyId}/enrichments`, {
     data: { capability_id: 'codex_tool_failure_context' }
   });
   expect(enrichment.ok()).toBeTruthy();
   execFileSync('cmd.exe', ['/d', '/s', '/c', 'agent-observer.cmd run-once'], { cwd: outputDir, encoding: 'utf-8' });
 
-  const policy = await (await request.get('http://127.0.0.1:8765/api/policy')).json();
-  const policyUpdate = await request.patch('http://127.0.0.1:8765/api/policy', {
+  const policy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
+  const policyUpdate = await request.patch(`${E2E_API_BASE}/api/policy`, {
     data: {
       expected_version: policy.policy_version,
       enrichment_mode: 'enabled'
@@ -173,7 +174,7 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   });
   expect(policyUpdate.ok()).toBeTruthy();
 
-  const validation = await request.post('http://127.0.0.1:8765/api/validation/minimum-experiment');
+  const validation = await request.post(`${E2E_API_BASE}/api/validation/minimum-experiment`);
   expect(validation.ok()).toBeTruthy();
   const report = await validation.json();
   expect(report.result).toBe('PASS');

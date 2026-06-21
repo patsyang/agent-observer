@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('operator queries conversations by prompt and response keywords', async ({ page, request }) => {
   const suffix = Date.now().toString();
@@ -6,7 +7,7 @@ test('operator queries conversations by prompt and response keywords', async ({ 
   const prompt = `E2E 提交 Prompt ${suffix}`;
   const response = `E2E 响应内容 ${suffix}`;
   const now = new Date().toISOString();
-  const ingest = await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
+  const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: `e2e-conversation-query-${suffix}`,
       protocol_version: 'agent-observer-telemetry/v2',
@@ -80,7 +81,7 @@ test('operator queries conversations by prompt and response keywords', async ({ 
   await expect(drawer).toContainText(response);
   await expect(drawer).toContainText('88');
 
-  const query = await request.get(`http://127.0.0.1:8765/api/conversations?window=all&prompt_query=${suffix}`);
+  const query = await request.get(`${E2E_API_BASE}/api/conversations?window=all&prompt_query=${suffix}`);
   const body = await query.json();
   expect(body.conversations.some((item: { conversation_ref: string; prompt_preview: string }) => (
     item.conversation_ref === conversation && item.prompt_preview === prompt

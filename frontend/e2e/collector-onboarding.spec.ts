@@ -1,9 +1,10 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('public onboarding shows registered online collector and package download', async ({ page, request }) => {
   const suffix = Date.now().toString();
   const workstationName = `e2e-workstation-${suffix}`;
-  const registered = await request.post('http://127.0.0.1:8765/api/collectors/register', {
+  const registered = await request.post(`${E2E_API_BASE}/api/collectors/register`, {
     data: {
       collector_id: `collector-onboarding-${suffix}`,
       display_name: workstationName,
@@ -17,7 +18,7 @@ test('public onboarding shows registered online collector and package download',
   expect(registered.ok()).toBeTruthy();
   const collector = await registered.json();
   const heartbeat = await request.post(
-    `http://127.0.0.1:8765/api/collectors/${collector.collector_id}/heartbeat`,
+    `${E2E_API_BASE}/api/collectors/${collector.collector_id}/heartbeat`,
     {
       data: {
         protocol_version: 'agent-observer-telemetry/v2',
@@ -31,7 +32,7 @@ test('public onboarding shows registered online collector and package download',
   expect(heartbeat.ok()).toBeTruthy();
   const staleId = `stale-e2e-${Date.now()}`;
   const staleName = `Stale E2E collector ${staleId}`;
-  const stale = await request.post('http://127.0.0.1:8765/api/collectors/register', {
+  const stale = await request.post(`${E2E_API_BASE}/api/collectors/register`, {
     data: {
       collector_id: staleId,
       display_name: staleName,

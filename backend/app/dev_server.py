@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.dashboard.service import get_dashboard_summary
@@ -47,7 +48,11 @@ class Handler(BaseHTTPRequestHandler):
         handle_post(self)
 
 
+def get_server_port() -> int:
+    return int(os.environ.get("AGENT_OBSERVER_PORT", "8765"))
+
+
 if __name__ == "__main__":
     with connect() as conn:
         get_dashboard_summary(conn, window="1h")
-    ThreadingHTTPServer(("127.0.0.1", 8765), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", get_server_port()), Handler).serve_forever()

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('operator opens Dashboard story queue and drills into evidence chain', async ({ page, request }) => {
   const suffix = Date.now().toString();
@@ -7,7 +8,7 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
   const conversation = `conversation-e2e-story-${suffix}`;
   const errorFact = `e2e-story-error-${suffix}`;
   const usageFact = `e2e-story-usage-${suffix}`;
-  const ingest = await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
+  const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: `e2e-story-${suffix}`,
       protocol_version: 'agent-observer-telemetry/v2',
@@ -54,7 +55,7 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
     }
   });
   expect(ingest.ok()).toBeTruthy();
-  const rebuilt = await request.post('http://127.0.0.1:8765/api/stories/rebuild', { data: { reason: 'e2e' } });
+  const rebuilt = await request.post(`${E2E_API_BASE}/api/stories/rebuild`, { data: { reason: 'e2e' } });
   expect(rebuilt.ok()).toBeTruthy();
   const storyKey = `error:${signature}`;
 
@@ -78,11 +79,11 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
   await expect(evidenceChain).toContainText('查看会话');
   await expect(evidenceChain.getByRole('cell').first()).not.toContainText(`proj-${errorFact}`);
 
-  const stories = await request.get('http://127.0.0.1:8765/api/stories');
+  const stories = await request.get(`${E2E_API_BASE}/api/stories`);
   const body = await stories.json();
   const story = body.stories.find((item: { story_key: string }) => item.story_key === storyKey);
   expect(story.evidence_refs).toEqual([]);
-  const detail = await request.get(`http://127.0.0.1:8765/api/stories/${story.story_id}`);
+  const detail = await request.get(`${E2E_API_BASE}/api/stories/${story.story_id}`);
   const detailBody = await detail.json();
   expect(detailBody.evidence_refs).toContain(`proj-${errorFact}`);
 });

@@ -1,16 +1,17 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('operator requests enrichment and sees result in evidence chain', async ({ page, request }) => {
   const batchId = `e2e-enrichment-${Date.now()}`;
   const summary = `E2E enrichment command failed ${batchId}`;
-  const policyResponse = await request.get('http://127.0.0.1:8765/api/policy');
+  const policyResponse = await request.get(`${E2E_API_BASE}/api/policy`);
   const policy = await policyResponse.json();
   if (policy.enrichment_mode !== 'enabled') {
-    await request.patch('http://127.0.0.1:8765/api/policy', {
+    await request.patch(`${E2E_API_BASE}/api/policy`, {
       data: { expected_version: policy.policy_version, enrichment_mode: 'enabled' }
     });
   }
-  await request.post('http://127.0.0.1:8765/api/collectors/register', {
+  await request.post(`${E2E_API_BASE}/api/collectors/register`, {
     data: {
       collector_id: 'collector-e2e-enrichment',
       display_name: 'E2E enrichment collector',
@@ -21,7 +22,7 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
       agent_version: '0.2.0'
     }
   });
-  await request.post('http://127.0.0.1:8765/api/collectors/collector-e2e-enrichment/heartbeat', {
+  await request.post(`${E2E_API_BASE}/api/collectors/collector-e2e-enrichment/heartbeat`, {
     data: {
       protocol_version: 'agent-observer-telemetry/v2',
       agent_version: '0.2.0',
@@ -29,7 +30,7 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
       reason_code: 'ok'
     }
   });
-  await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
+  await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: batchId,
       protocol_version: 'agent-observer-telemetry/v2',
@@ -55,7 +56,7 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
       ]
     }
   });
-  const rebuilt = await request.post('http://127.0.0.1:8765/api/stories/rebuild', { data: { reason: 'e2e-enrichment' } });
+  const rebuilt = await request.post(`${E2E_API_BASE}/api/stories/rebuild`, { data: { reason: 'e2e-enrichment' } });
   const story = (await rebuilt.json()).stories.find((item: { story_key: string }) => item.story_key === `error:sig-${batchId}`);
 
   await page.goto('/');
@@ -67,9 +68,9 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
   await page.getByRole('button', { name: '补充工具失败上下文' }).click();
   await expect(page.getByLabel('信号补证操作')).toContainText('补证 排队中');
 
-  const detailAfterRequest = await request.get(`http://127.0.0.1:8765/api/stories/${story.story_id}`);
+  const detailAfterRequest = await request.get(`${E2E_API_BASE}/api/stories/${story.story_id}`);
   expect((await detailAfterRequest.json()).enrichment_status_summary.status).toBe('pending');
-  const nextJobResponse = await request.get('http://127.0.0.1:8765/api/collectors/collector-e2e-enrichment/enrichments/next');
+  const nextJobResponse = await request.get(`${E2E_API_BASE}/api/collectors/collector-e2e-enrichment/enrichments/next`);
   const nextJob = await nextJobResponse.json();
   expect(nextJob.capability_id).toBe('codex_tool_failure_context');
   expect(nextJob.command).toMatchObject({
@@ -78,7 +79,7 @@ test('operator requests enrichment and sees result in evidence chain', async ({ 
     capability_id: 'codex_tool_failure_context'
   });
   expect(nextJob.command.evidence_refs.length).toBeGreaterThan(0);
-  await request.post(`http://127.0.0.1:8765/api/collectors/collector-e2e-enrichment/enrichments/${nextJob.job_id}/result`, {
+  await request.post(`${E2E_API_BASE}/api/collectors/collector-e2e-enrichment/enrichments/${nextJob.job_id}/result`, {
     data: {
       status: 'succeeded',
       summary: '已补充 1 条工具失败上下文，关联 1 个会话。',

@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
+import { E2E_API_BASE } from './support/urls';
 
 test('public access config downloads client and updates policy with audit feedback', async ({ page, request }) => {
-  const before = await request.get('http://127.0.0.1:8765/api/policy');
+  const before = await request.get(`${E2E_API_BASE}/api/policy`);
   expect(before.ok()).toBeTruthy();
   const policy = await before.json();
 
@@ -12,7 +13,7 @@ test('public access config downloads client and updates policy with audit feedba
   await page.getByRole('button', { name: '接入配置' }).click();
   await expect(page.getByRole('heading', { name: 'Windows collector 客户端' })).toBeVisible();
   await expect(page.getByRole('link', { name: '下载 Windows 客户端' })).toBeVisible({ timeout: 15000 });
-  await expect(page.getByText('http://127.0.0.1:8765')).toBeVisible();
+  await expect(page.getByText(`${E2E_API_BASE}`)).toBeVisible();
   await expect(page.getByText(`v${policy.policy_version}`)).toBeVisible();
   await expect(page.getByText(/仅下载客户端时不需要保存接入策略/)).toBeVisible();
 
@@ -25,7 +26,7 @@ test('public access config downloads client and updates policy with audit feedba
   await expect(page.getByRole('status')).toContainText(`接入策略已保存为 v${policy.policy_version + 1}`);
   await expect(page.getByText('最近审计')).toBeVisible();
 
-  const after = await request.get('http://127.0.0.1:8765/api/policy');
+  const after = await request.get(`${E2E_API_BASE}/api/policy`);
   expect(after.ok()).toBeTruthy();
   const updated = await after.json();
   expect(updated.policy_version).toBe(policy.policy_version + 1);

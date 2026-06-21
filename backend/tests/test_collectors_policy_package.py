@@ -268,6 +268,17 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
     assert "enrichment_policy" not in config
 
 
+def test_package_server_url_can_be_overridden_for_e2e(tmp_path, monkeypatch):
+    monkeypatch.setenv("AGENT_OBSERVER_PUBLIC_BASE_URL", "http://127.0.0.1:8766/")
+    with connect(tmp_path / "observer.sqlite") as conn:
+        package = build_windows_package(conn, tmp_path / "packages")
+
+    assert package["server_url"] == "http://127.0.0.1:8766"
+    with zipfile.ZipFile(package["path"]) as archive:
+        config = json.loads(archive.read("agent-observer.config.json"))
+    assert config["server_url"] == "http://127.0.0.1:8766"
+
+
 def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         facts = []
