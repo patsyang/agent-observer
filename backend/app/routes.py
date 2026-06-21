@@ -6,19 +6,18 @@ from app.collectors.service import (
     list_collectors,
     register_collector,
     update_collector_display_name,
-    update_collector_raw_upload,
 )
+from app.conversations.service import get_conversation_for_fact, get_conversation_query, query_conversations
 from app.dashboard.service import get_dashboard_summary
 from app.db.connection import connect
-from app.diagnostics.service import (
-    cancel_diagnostic,
-    get_diagnostic_availability,
-    get_next_collector_diagnostic,
-    record_collector_diagnostic_result,
-    record_diagnostic_result,
-    request_diagnostic,
+from app.evidence_enrichment.service import (
+    cancel_enrichment,
+    get_enrichment_availability,
+    get_next_collector_enrichment,
+    record_collector_enrichment_result,
+    record_enrichment_result,
+    request_enrichment,
 )
-from app.facts.service import get_fact_detail, query_facts
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
@@ -31,10 +30,11 @@ from app.validation.service import run_minimum_validation_experiment
 def register_routes(app, http_exception, file_response) -> None:
     register_health_routes(app)
     register_collector_routes(app, http_exception)
-    register_fact_routes(app, http_exception)
+    register_ingest_routes(app, http_exception)
+    register_conversation_routes(app, http_exception)
     register_policy_routes(app, http_exception)
     register_story_routes(app, http_exception)
-    register_diagnostic_routes(app, http_exception)
+    register_enrichment_routes(app, http_exception)
     register_summary_routes(app)
     register_package_routes(app, file_response)
 
@@ -51,7 +51,10 @@ def register_collector_routes(app, http_exception) -> None:
     @app.post("/api/collectors/register")
     def api_register(payload: dict):
         with connect() as conn:
-            return register_collector(conn, payload)
+            try:
+                return register_collector(conn, payload)
+            except ValueError as exc:
+                raise http_exception(status_code=400, detail=str(exc)) from exc
 
     @app.post("/api/collectors/{collector_id}/heartbeat")
     def api_heartbeat(collector_id: str, payload: dict):
@@ -60,22 +63,14 @@ def register_collector_routes(app, http_exception) -> None:
                 return heartbeat(conn, collector_id, payload)
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="collector not found") from exc
+            except ValueError as exc:
+                raise http_exception(status_code=400, detail=str(exc)) from exc
 
     @app.patch("/api/collectors/{collector_id}/display-name")
     def api_collector_display_name(collector_id: str, payload: dict):
         with connect() as conn:
             try:
                 return update_collector_display_name(conn, collector_id, payload.get("display_name", ""))
-            except LookupError as exc:
-                raise http_exception(status_code=404, detail="collector not found") from exc
-            except ValueError as exc:
-                raise http_exception(status_code=400, detail=str(exc)) from exc
-
-    @app.patch("/api/collectors/{collector_id}/raw-upload")
-    def api_collector_raw_upload(collector_id: str, payload: dict):
-        with connect() as conn:
-            try:
-                return update_collector_raw_upload(conn, collector_id, bool(payload.get("enabled")))
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="collector not found") from exc
             except ValueError as exc:
@@ -95,7 +90,7 @@ def register_collector_routes(app, http_exception) -> None:
                 raise http_exception(status_code=404, detail="collector not found") from exc
 
 
-def register_fact_routes(app, http_exception) -> None:
+def register_ingest_routes(app, http_exception) -> None:
     @app.post("/api/telemetry/ingest")
     def api_ingest(payload: dict):
         with connect() as conn:
@@ -104,18 +99,45 @@ def register_fact_routes(app, http_exception) -> None:
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/facts")
-    def api_facts(quality: str | None = None, fact_type: str | None = None, source: str | None = None, window: str = "1h", include_health: bool = False, limit: int = 50, offset: int = 0, page: int | None = None, page_size: int | None = None, time_basis: str = "occurred"):
-        with connect() as conn:
-            return query_facts(conn, quality=quality, fact_type=fact_type, source=source, window=window, include_health=include_health, limit=limit, offset=offset, page=page, page_size=page_size, time_basis=time_basis)
 
-    @app.get("/api/facts/{fact_id}")
-    def api_fact_detail(fact_id: str):
+def register_conversation_routes(app, http_exception) -> None:
+    @app.get("/api/conversations")
+    def api_conversations(
+        window: str = "1h",
+        start_at: str | None = None,
+        end_at: str | None = None,
+        prompt_query: str | None = None,
+        response_query: str | None = None,
+        page: int = 1,
+        page_size: int = 50,
+    ):
+        with connect() as conn:
+            return query_conversations(
+                conn,
+                window=window,
+                start_at=start_at,
+                end_at=end_at,
+                prompt_query=prompt_query,
+                response_query=response_query,
+                page=page,
+                page_size=page_size,
+            )
+
+    @app.get("/api/conversations/by-fact/{fact_id}")
+    def api_conversation_by_fact(fact_id: str):
         with connect() as conn:
             try:
-                return get_fact_detail(conn, fact_id)
+                return get_conversation_for_fact(conn, fact_id)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="fact not found") from exc
+                raise http_exception(status_code=404, detail="conversation not found") from exc
+
+    @app.get("/api/conversations/{conversation_ref}")
+    def api_conversation_detail(conversation_ref: str):
+        with connect() as conn:
+            try:
+                return get_conversation_query(conn, conversation_ref)
+            except LookupError as exc:
+                raise http_exception(status_code=404, detail="conversation not found") from exc
 
 
 def register_policy_routes(app, http_exception) -> None:
@@ -176,60 +198,67 @@ def register_story_routes(app, http_exception) -> None:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
 
-def register_diagnostic_routes(app, http_exception) -> None:
-    @app.get("/api/stories/{story_id}/diagnostics/availability")
-    def api_diagnostic_availability(story_id: str):
+def register_enrichment_routes(app, http_exception) -> None:
+    @app.get("/api/stories/{story_id}/enrichments/availability")
+    def api_enrichment_availability(story_id: str):
         with connect() as conn:
             try:
-                return get_diagnostic_availability(conn, story_id)
+                return get_enrichment_availability(conn, story_id)
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="story not found") from exc
 
-    @app.post("/api/stories/{story_id}/diagnostics")
-    def api_request_diagnostic(story_id: str, payload: dict):
+    @app.post("/api/stories/{story_id}/enrichments")
+    def api_request_enrichment(story_id: str, payload: dict):
         with connect() as conn:
             try:
-                return request_diagnostic(conn, story_id, payload.get("capability_id", ""))
+                return request_enrichment(conn, story_id, payload.get("capability_id", ""))
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="story not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/api/diagnostics/{job_id}/cancel")
-    def api_cancel_diagnostic(job_id: str):
+    @app.post("/api/enrichments/{job_id}/cancel")
+    def api_cancel_enrichment(job_id: str):
         with connect() as conn:
             try:
-                return cancel_diagnostic(conn, job_id)
+                return cancel_enrichment(conn, job_id)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="diagnostic job not found") from exc
+                raise http_exception(status_code=404, detail="enrichment job not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
-    @app.post("/api/diagnostics/{job_id}/result")
-    def api_diagnostic_result(job_id: str, payload: dict):
+    @app.post("/api/enrichments/{job_id}/result")
+    def api_enrichment_result(job_id: str, payload: dict):
         with connect() as conn:
             try:
-                return record_diagnostic_result(conn, job_id, payload.get("status", ""), payload.get("summary", ""), payload.get("projection"))
+                return record_enrichment_result(
+                    conn,
+                    job_id,
+                    payload.get("status", ""),
+                    payload.get("summary", ""),
+                    payload.get("projection"),
+                    payload.get("redaction"),
+                )
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="diagnostic job not found") from exc
+                raise http_exception(status_code=404, detail="enrichment job not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
-    @app.get("/api/collectors/{collector_id}/diagnostics/next")
-    def api_collector_next_diagnostic(collector_id: str):
+    @app.get("/api/collectors/{collector_id}/enrichments/next")
+    def api_collector_next_enrichment(collector_id: str):
         with connect() as conn:
             try:
-                return get_next_collector_diagnostic(conn, collector_id)
+                return get_next_collector_enrichment(conn, collector_id)
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="collector not found") from exc
 
-    @app.post("/api/collectors/{collector_id}/diagnostics/{job_id}/result")
-    def api_collector_diagnostic_result(collector_id: str, job_id: str, payload: dict):
+    @app.post("/api/collectors/{collector_id}/enrichments/{job_id}/result")
+    def api_collector_enrichment_result(collector_id: str, job_id: str, payload: dict):
         with connect() as conn:
             try:
-                return record_collector_diagnostic_result(conn, collector_id, job_id, payload)
+                return record_collector_enrichment_result(conn, collector_id, job_id, payload)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="diagnostic job not found") from exc
+                raise http_exception(status_code=404, detail="enrichment job not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 

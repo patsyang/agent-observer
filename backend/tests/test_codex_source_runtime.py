@@ -52,7 +52,7 @@ def test_codex_source_template_pairs_call_output_into_command_timeout_fact(tmp_p
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     timeout_fact = next(fact for fact in facts if fact["category"] == "command_timeout")
@@ -210,7 +210,7 @@ def test_v2_file_cursor_prioritizes_live_tail_while_backfill_is_unfinished(tmp_p
     assert live_fact["source_specific"]["priority_stream"] == "live_tail"
 
 
-def test_codex_source_template_uploads_raw_prompt_when_enabled(tmp_path):
+def test_codex_source_template_uploads_raw_prompt_by_default(tmp_path):
     codex_home = tmp_path / ".codex"
     _write_real_shape_session(codex_home)
 
@@ -221,8 +221,7 @@ def test_codex_source_template_uploads_raw_prompt_when_enabled(tmp_path):
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
-        upload_raw=True,
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
@@ -264,7 +263,7 @@ def test_codex_error_signature_groups_same_failure_shape(tmp_path):
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     signatures = {

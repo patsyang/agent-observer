@@ -18,6 +18,6 @@ describe('HandleStoryDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: /^处理$/ }));
 
     expect(onSubmit).toHaveBeenCalledWith({ conclusion_code: 'needs_fix', note: 'Owner assigned' });
-    expect(await screen.findByText(/故事已处理/)).toBeInTheDocument();
+    expect(await screen.findByText(/信号已处理/)).toBeInTheDocument();
   });
 });

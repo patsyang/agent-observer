@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 from app.collector_client.config import load_config
 from app.collector_client.cli import _human_log_line, _post_heartbeat, _state_payload, run
+from app.collector_client.runtime import CommandResult
 
 
 def _write_config(tmp_path, collector_id: str, state_path, interval: int = 30) -> None:
@@ -25,7 +26,7 @@ def _write_config(tmp_path, collector_id: str, state_path, interval: int = 30) -
 def _write_state(state_path, **overrides) -> None:
     state = {
         "running": True,
-        "cursor": {"last_sequence": 2, "last_source_key": ""},
+        "cursor": {"last_sequence": 2, "sources": {}},
         "outbox": [],
         "last_upload_at": None,
         "last_error": None,
@@ -35,19 +36,18 @@ def _write_state(state_path, **overrides) -> None:
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
 
-def test_state_payload_summarizes_cursor_without_recent_source_keys():
+def test_state_payload_summarizes_v2_cursor():
     payload = _state_payload(
         {
             "running": True,
             "cursor": {
                 "last_sequence": 7,
-                "last_source_key": "C:/Users/dev/.codex/sessions/session.jsonl:00001000",
-                "recent_source_keys": ["one", "two"],
+                "sources": {"C:/Users/dev/.codex/sessions/session.jsonl": {"line_no": 1000}},
+                "live_tail_source_keys": ["one", "two"],
             },
             "outbox": [],
             "last_upload_at": "2026-06-20T01:00:00+00:00",
             "last_error": None,
-            "raw_upload_enabled": True,
             "process_heartbeat_at": "2026-06-20T01:00:00+00:00",
         },
         compact=True,
@@ -55,12 +55,12 @@ def test_state_payload_summarizes_cursor_without_recent_source_keys():
 
     expected = {
         "last_sequence": 7,
-        "last_source_key": "session.jsonl:00001000",
-        "recent_source_key_count": 2,
-        "source_file_count": 0,
+        "source_file_count": 1,
+        "live_tail_source_key_count": 2,
     }
     assert payload["cursor_summary"] == expected
     assert "cursor" not in payload
+    assert "raw_upload_enabled" not in payload
 
 
 def test_human_cycle_log_is_concise_and_business_readable():
@@ -69,7 +69,7 @@ def test_human_cycle_log_is_concise_and_business_readable():
             "mode": "cycle",
             "cycle": 12,
             "uploaded": 46,
-            "diagnostics": 1,
+            "enrichments": 1,
             "outbox_backlog": 0,
             "last_cycle_duration_ms": 3100,
             "facts_summary": {
@@ -79,7 +79,7 @@ def test_human_cycle_log_is_concise_and_business_readable():
             "next_cycle_at": "2026-06-20T01:12:37+00:00",
             "cursor": {
                 "last_sequence": 12,
-                "recent_source_keys": ["C:/Users/dev/.codex/sessions/a.jsonl:00000001"],
+                "live_tail_source_keys": ["C:/Users/dev/.codex/sessions/a.jsonl:00000001"],
             },
         }
     )
@@ -166,6 +166,29 @@ def test_start_is_idempotent_when_existing_process_is_alive(tmp_path, monkeypatc
     assert payload["running"] is True
 
 
+def test_start_ignores_fresh_heartbeat_when_process_is_missing(tmp_path, monkeypatch):
+    state_path = tmp_path / "agent-observer.state.json"
+    _write_config(tmp_path, "collector-dead", state_path, interval=15)
+    _write_state(state_path, process_id=12345, process_heartbeat_at=datetime.now(timezone.utc).isoformat())
+    monkeypatch.setattr("app.collector_client.status._process_exists", lambda _value: False)
+    monkeypatch.setenv("AGENT_OBSERVER_START_MAX_CYCLES", "1")
+    monkeypatch.setattr("app.collector_client.runtime._register_collector", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        "app.collector_client.runtime._run_once",
+        lambda *_args, **_kwargs: CommandResult(
+            0,
+            json.dumps({"status": "ok", "facts_summary": {}, "cursor": {"last_sequence": 2, "sources": {}}}),
+        ),
+    )
+
+    result = run(["start"], cwd=tmp_path)
+    payload = json.loads(result.output)
+
+    assert result.code == 0
+    assert payload["mode"] == "stopped"
+    assert payload["running"] is False
+
+
 def test_background_heartbeat_post_does_not_rewrite_state_file(tmp_path, monkeypatch):
     state_path = tmp_path / "agent-observer.state.json"
     _write_config(tmp_path, "collector-heartbeat", state_path)
@@ -180,7 +203,7 @@ def test_background_heartbeat_post_does_not_rewrite_state_file(tmp_path, monkeyp
     state_path.write_text(json.dumps(original_state), encoding="utf-8")
     config, error = load_config(tmp_path)
     assert error is None and config is not None
-    monkeypatch.setattr("app.collector_client.runtime._post_json", lambda *_args, **_kwargs: {"effective_policy": {"upload_raw": True}})
+    monkeypatch.setattr("app.collector_client.runtime._post_json", lambda *_args, **_kwargs: {"effective_policy": {"raw_upload_mode": "always_on"}})
 
     _post_heartbeat(config, dict(original_state), "collecting", "collecting")
 

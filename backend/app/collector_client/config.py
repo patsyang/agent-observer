@@ -19,7 +19,6 @@ class CollectorConfig:
     max_events_per_cycle: int
     upload_batch_size: int
     evidence_mode: str
-    raw_upload_enabled: bool
 
 
 def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
@@ -46,7 +45,6 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
             max_events_per_cycle=int(payload.get("max_events_per_cycle", 100)),
             upload_batch_size=int(payload.get("upload_batch_size", 50)),
             evidence_mode=str(payload.get("evidence_mode", "structured_projection")),
-            raw_upload_enabled=bool(payload.get("raw_upload_enabled", (payload.get("effective_policy") or {}).get("upload_raw", False))),
         ),
         None,
     )

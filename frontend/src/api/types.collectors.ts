@@ -14,6 +14,7 @@ export interface Collector {
   hostname_hash: string;
   windows_username_hash: string;
   agent_type: string;
+  protocol_version: string;
   agent_version: string;
   source_status: SourceStatus;
   reason_code: string;
@@ -24,9 +25,6 @@ export interface Collector {
   last_cycle_duration_ms?: number | null;
   last_error?: string | null;
   outbox_backlog: number;
-  raw_upload_enabled: boolean;
-  raw_upload_override: boolean;
-  raw_upload_source: 'global_policy' | 'collector_override';
 }
 
 export interface CollectorsResponse {
@@ -36,24 +34,21 @@ export interface CollectorsResponse {
 export interface ClientPackageConfig {
   filename: string;
   path: string;
-  config_path: string;
   sha256: string;
+  server_url: string;
+  agent_version: string;
+  protocol_version: string;
 }
 
 export interface EffectivePolicy {
   policy_version: number;
-  template_enabled: boolean;
-  upload_raw: boolean;
-  collection_policy: string;
-  diagnostic_policy: string;
+  raw_upload_mode: 'always_on';
+  enrichment_mode: 'disabled' | 'enabled';
 }
 
 export interface PolicyUpdatePayload {
   expected_version: number;
-  template_enabled: boolean;
-  upload_raw: boolean;
-  collection_policy: string;
-  diagnostic_policy: string;
+  enrichment_mode: 'disabled' | 'enabled';
 }
 
 export interface AuditEvent {

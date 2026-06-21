@@ -10,13 +10,7 @@
   "max_events_per_cycle": 100,
   "upload_batch_size": 50,
   "evidence_mode": "structured_projection",
-  "raw_upload_enabled": true,
   "agent_type": "codex",
-  "effective_policy": {
-    "policy_version": 2,
-    "template_enabled": true,
-    "upload_raw": true,
-    "collection_policy": "codex default local observation",
-    "diagnostic_policy": "whitelist only"
-  }
+  "agent_version": "0.2.0",
+  "protocol_version": "agent-observer-telemetry/v2"
 }

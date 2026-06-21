@@ -3,7 +3,7 @@ from __future__ import annotations
 import sqlite3
 
 from app.stories.common import _loads, _snapshot_hash, _story_id
-from app.stories.evidence import _diagnostic_evidence_entries, _diagnostic_status_summary, _evidence_entries, _usage_summary
+from app.stories.evidence import _enrichment_evidence_entries, _enrichment_status_summary, _evidence_entries, _usage_summary
 from app.stories.presentation import (
     _attention_state,
     _impact_objects,
@@ -12,45 +12,8 @@ from app.stories.presentation import (
     _risk_conclusion,
     _severity_rank,
     _story_metadata,
-    _usage_conclusion,
 )
 from app.stories.repository import _facts_by_ids, _write_story_row
-
-
-def build_usage_stories(conn: sqlite3.Connection, reason: str) -> list[dict]:
-    rows = conn.execute(
-        """
-        select session_id, activity_tag, sum(units) as units, count(*) as fact_count
-        from usage_signals
-        group by session_id, activity_tag
-        having units >= 50 or activity_tag = 'unknown'
-        order by units desc
-        """
-    ).fetchall()
-    return [_usage_story_for_scope(conn, row, reason) for row in rows]
-
-
-def build_usage_stories_for_facts(conn: sqlite3.Connection, fact_ids: list[str], reason: str) -> list[dict]:
-    placeholders = ",".join("?" for _ in fact_ids)
-    scopes = conn.execute(
-        f"select distinct session_id, activity_tag from usage_signals where fact_id in ({placeholders})",
-        fact_ids,
-    ).fetchall()
-    stories = []
-    for scope in scopes:
-        row = conn.execute(
-            """
-            select session_id, activity_tag, sum(units) as units, count(*) as fact_count
-            from usage_signals
-            where session_id = ? and activity_tag = ?
-            group by session_id, activity_tag
-            """,
-            (scope["session_id"], scope["activity_tag"]),
-        ).fetchone()
-        if row is None or not (int(row["units"]) >= 50 or row["activity_tag"] == "unknown"):
-            continue
-        stories.append(_usage_story_for_scope(conn, row, reason))
-    return stories
 
 
 def build_risk_stories(conn: sqlite3.Connection, reason: str) -> list[dict]:
@@ -85,7 +48,7 @@ def build_risk_stories(conn: sqlite3.Connection, reason: str) -> list[dict]:
                 reason,
                 facts,
                 _risk_conclusion(conn, group["risk_type"], group["object_type"], len(group["fact_ids"]), facts),
-                ["核对风险对象、证据投影和是否需要发起白名单补证"],
+                ["核对风险对象、证据投影和是否需要发起本机补证"],
                 85 if group["severity"] == "high" else 70,
             )
         )
@@ -112,29 +75,6 @@ def build_risk_stories_for_facts(conn: sqlite3.Connection, fact_ids: list[str], 
     for group in sorted(groups.values(), key=lambda item: (item["risk_type"], item["object_type"])):
         stories.append(_risk_story_for_group(conn, group["risk_type"], group["object_type"], group["severity"], reason))
     return stories
-
-
-def _usage_story_for_scope(conn: sqlite3.Connection, row: sqlite3.Row, reason: str) -> dict:
-    fact_rows = conn.execute(
-        """
-        select of.*
-        from usage_signals us
-        join observed_facts of on of.fact_id = us.fact_id
-        where us.session_id = ? and us.activity_tag = ?
-        order by of.occurred_at desc, of.fact_id
-        limit 20
-        """,
-        (row["session_id"], row["activity_tag"]),
-    ).fetchall()
-    return _upsert_fact_story(
-        conn,
-        f"usage:{row['session_id']}:{row['activity_tag']}",
-        reason,
-        list(reversed(fact_rows)),
-        _usage_conclusion(row, int(row["fact_count"])),
-        ["判断是否为历史回填、长会话或异常消耗；需要追溯时打开证据链查看关联会话"],
-        min(90, 45 + int(row["units"]) // 10),
-    )
 
 
 def _risk_story_for_group(conn: sqlite3.Connection, risk_type: str, object_type: str, default_severity: str, reason: str) -> dict:
@@ -172,7 +112,7 @@ def _risk_story_for_group(conn: sqlite3.Connection, risk_type: str, object_type:
         reason,
         evidence_facts,
         _risk_conclusion(conn, risk_type, object_type, count, evidence_facts),
-        ["核对风险对象、证据投影和是否需要发起白名单补证"],
+        ["核对风险对象、证据投影和是否需要发起本机补证"],
         85 if severity == "high" else 70,
     )
 
@@ -212,9 +152,9 @@ def _upsert_fact_story(
         evidence_chain.extend(_evidence_entries(conn, fact))
     evidence_refs = sorted(entry["evidence_ref"] for entry in evidence_chain)
     story_id = _story_id(story_key)
-    diagnostic_entries = _diagnostic_evidence_entries(conn, story_id)
-    evidence_chain.extend(diagnostic_entries)
-    evidence_refs = sorted(set(evidence_refs + [entry["evidence_ref"] for entry in diagnostic_entries]))
+    enrichment_entries = _enrichment_evidence_entries(conn, story_id)
+    evidence_chain.extend(enrichment_entries)
+    evidence_refs = sorted(set(evidence_refs + [entry["evidence_ref"] for entry in enrichment_entries]))
     snapshot = {
         "reason": reason,
         "story_key": story_key,
@@ -230,7 +170,7 @@ def _upsert_fact_story(
         "priority_score": priority_score,
         "evidence_refs": evidence_refs,
         "usage_summary": _usage_summary(conn, [fact["fact_id"] for fact in facts]),
-        "diagnostic_status_summary": _diagnostic_status_summary(conn, story_id),
+        "enrichment_status_summary": _enrichment_status_summary(conn, story_id),
         "attention_state": _attention_state(existing, handling, snapshot_hash),
         "current_snapshot": snapshot,
         "snapshot_hash": snapshot_hash,

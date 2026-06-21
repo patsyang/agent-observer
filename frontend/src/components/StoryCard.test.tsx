@@ -11,8 +11,8 @@ const story: ObservationStory = {
   conclusion: 'Codex 命令在 checkout 流程中重复失败，已生成错误指纹。',
   impact_objects: ['checkout workflow'],
   evidence_refs: ['proj-error-001', 'proj-usage-001'],
-  usage_summary: { attributed_units: 55, associated_units: 0, no_usage_reason: null },
-  diagnostic_status_summary: { status: 'none', reason_code: null },
+  usage_summary: { effective_units: 55, no_usage_reason: null },
+  enrichment_status_summary: { status: 'none', reason_code: null },
   handling_state: 'unread',
   conclusion_code: null,
   handling_note: null,
@@ -23,7 +23,7 @@ const story: ObservationStory = {
 };
 
 describe('StoryCard', () => {
-  it('renders a readable story summary without exposing projection ids as primary content', async () => {
+  it('renders a readable signal summary without exposing projection ids as primary content', async () => {
     const onOpen = vi.fn();
     render(<StoryCard story={story} onOpen={onOpen} />);
 
@@ -32,11 +32,11 @@ describe('StoryCard', () => {
     expect(screen.getByText('错误复发')).toBeInTheDocument();
     expect(screen.getByText(/2 条证据投影/)).toBeInTheDocument();
     expect(screen.queryByText(/proj-error-001/)).not.toBeInTheDocument();
-    expect(screen.getByText(/已归因 55/)).toBeInTheDocument();
+    expect(screen.getByText(/有效用量 55/)).toBeInTheDocument();
     expect(screen.getByText(/未读/)).toBeInTheDocument();
     expect(screen.getByText(story.suggested_action)).toBeInTheDocument();
 
-    await userEvent.click(screen.getByRole('button', { name: '处理' }));
+    await userEvent.click(screen.getByRole('button', { name: '查看信号' }));
     expect(onOpen).toHaveBeenCalledWith('story-001');
   });
 

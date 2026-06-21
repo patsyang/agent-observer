@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
 from app.collector_client.config import CollectorConfig
+from app.collector_client.enrichment import run_enrichment
 from app.collector_client.state import load_state, patch_state, save_state
 from app.collector_client.status import (
     _already_running,
@@ -22,6 +23,7 @@ from app.collector_client.status import (
 )
 from app.collector_client.telemetry import collect_facts
 from app.collector_client.transport import _get_json, _hash, _post_json
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 
 Emit = Callable[[str], None]
 
@@ -48,6 +50,8 @@ def _set_running(config: CollectorConfig, running: bool) -> CommandResult:
                 config.server_url,
                 f"/api/collectors/{config.collector_id}/heartbeat",
                 {
+                    "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+                    "agent_version": COLLECTOR_CLIENT_VERSION,
                     "source_status": "offline",
                     "runtime_phase": "stopping",
                     "reason_code": "collector_stopped",
@@ -143,7 +147,6 @@ def _run_once(config: CollectorConfig, heartbeat_reason: str = "run_once_complet
         history_window_days=config.history_window_days,
         max_events=config.max_events_per_cycle,
         cursor=state["cursor"],
-        upload_raw=bool(state.get("raw_upload_enabled", config.raw_upload_enabled)),
     )
     state["outbox"].extend(facts)
     state["runtime_phase"] = "uploading" if state["outbox"] else "idle"
@@ -152,7 +155,7 @@ def _run_once(config: CollectorConfig, heartbeat_reason: str = "run_once_complet
     save_state(config.state_path, state)
     try:
         uploaded = _upload_pending(config, state, heartbeat_reason)
-        diagnostics = _run_pending_diagnostic(config)
+        enrichments = _run_pending_enrichment(config)
     except (OSError, ValueError, urllib.error.URLError) as exc:
         state["last_error"] = str(exc)
         save_state(config.state_path, state)
@@ -169,7 +172,7 @@ def _run_once(config: CollectorConfig, heartbeat_reason: str = "run_once_complet
         {
             "status": "ok",
             "uploaded": uploaded,
-            "diagnostics": diagnostics,
+            "enrichments": enrichments,
             "collector_id": config.collector_id,
             "facts_summary": _facts_summary(facts),
             **_state_payload(state),
@@ -187,6 +190,8 @@ def _upload_pending(config: CollectorConfig, state: dict[str, object], heartbeat
         chunk = list(outbox[: max(1, int(config.upload_batch_size))])
         batch = {
             "batch_id": f"{config.collector_id}-{int(chunk[0]['source_refs']['sequence'])}-{batch_index}",
+            "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+            "agent_version": COLLECTOR_CLIENT_VERSION,
             "collector_id": config.collector_id,
             "source": "codex",
             "cursor": str(chunk[0]["source_refs"]["sequence"]),
@@ -196,13 +201,14 @@ def _upload_pending(config: CollectorConfig, state: dict[str, object], heartbeat
         del outbox[: len(chunk)]
         state["last_upload_at"] = datetime.now(timezone.utc).isoformat()
         save_state(config.state_path, state)
-        heartbeat_result = _send_heartbeat(config, state, "uploading", "uploading")
-        _apply_policy_to_state(state, heartbeat_result.get("effective_policy"))
+        _send_heartbeat(config, state, "uploading", "uploading")
         save_state(config.state_path, state)
-    heartbeat_result = _post_json(
+    _post_json(
         config.server_url,
         f"/api/collectors/{config.collector_id}/heartbeat",
         {
+            "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+            "agent_version": COLLECTOR_CLIENT_VERSION,
             "source_status": "online",
             "runtime_phase": "idle" if heartbeat_reason == "run_once_completed" else "waiting",
             "reason_code": heartbeat_reason,
@@ -211,30 +217,17 @@ def _upload_pending(config: CollectorConfig, state: dict[str, object], heartbeat
             "last_error": state.get("last_error"),
         },
     )
-    _apply_policy_to_state(state, heartbeat_result.get("effective_policy"))
     return upload_count
 
-def _run_pending_diagnostic(config: CollectorConfig) -> int:
+def _run_pending_enrichment(config: CollectorConfig) -> int:
     try:
-        job = _get_json(config.server_url, f"/api/collectors/{config.collector_id}/diagnostics/next")
+        job = _get_json(config.server_url, f"/api/collectors/{config.collector_id}/enrichments/next")
     except (OSError, ValueError, urllib.error.URLError):
         return 0
     if not job or job.get("status") == "none":
         return 0
-    command = job.get("command") or {}
-    if command.get("command_id") != "collect_codex_error_context":
-        result = {"status": "unavailable", "summary": "白名单中不存在该补证能力", "projection": {"reason_code": "missing_capability"}}
-    else:
-        result = {
-            "status": "succeeded",
-            "summary": "客户端完成 Codex 错误上下文白名单补证，已生成结构化结果。",
-            "projection": {
-                "capability_id": job.get("capability_id"),
-                "evidence_ref_count": len(command.get("args", {}).get("evidence_refs", [])),
-                "raw_content_uploaded": False,
-            },
-        }
-    _post_json(config.server_url, f"/api/collectors/{config.collector_id}/diagnostics/{job['job_id']}/result", result)
+    result = run_enrichment(config, job)
+    _post_json(config.server_url, f"/api/collectors/{config.collector_id}/enrichments/{job['job_id']}/result", result)
     return 1
 
 def _register_collector(config: CollectorConfig, state: dict[str, object], phase: str, reason_code: str) -> dict[str, Any]:
@@ -247,7 +240,8 @@ def _register_collector(config: CollectorConfig, state: dict[str, object], phase
             "hostname_hash": _hash(socket.gethostname()),
             "windows_username_hash": _hash(os.environ.get("USERNAME", "local-user")),
             "agent_type": "codex",
-            "agent_version": "0.1.0",
+            "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+            "agent_version": COLLECTOR_CLIENT_VERSION,
             "source_status": "online",
             "runtime_phase": phase,
             "reason_code": reason_code,
@@ -256,7 +250,6 @@ def _register_collector(config: CollectorConfig, state: dict[str, object], phase
             "last_error": state.get("last_error"),
         },
     )
-    _apply_policy_to_state(state, result.get("effective_policy"))
     save_state(config.state_path, state)
     return result
 
@@ -291,7 +284,6 @@ def _send_heartbeat(config: CollectorConfig, state: dict[str, object], phase: st
     state["reason_code"] = reason_code
     save_state(config.state_path, state)
     result = _post_heartbeat(config, state, phase, reason_code)
-    _apply_policy_to_state(state, result.get("effective_policy"))
     save_state(config.state_path, state)
     return result
 
@@ -300,6 +292,8 @@ def _post_heartbeat(config: CollectorConfig, state: dict[str, object], phase: st
         config.server_url,
         f"/api/collectors/{config.collector_id}/heartbeat",
         {
+            "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+            "agent_version": COLLECTOR_CLIENT_VERSION,
             "source_status": "online",
             "runtime_phase": phase,
             "reason_code": reason_code,
@@ -308,10 +302,6 @@ def _post_heartbeat(config: CollectorConfig, state: dict[str, object], phase: st
             "last_error": state.get("last_error"),
         },
     )
-
-def _apply_policy_to_state(state: dict[str, object], policy: object) -> None:
-    if isinstance(policy, dict) and "upload_raw" in policy:
-        state["raw_upload_enabled"] = bool(policy["upload_raw"])
 
 def _sleep_while_running(config: CollectorConfig, emit: Emit | None = None) -> bool:
     remaining = max(0, int(config.collection_interval_seconds))

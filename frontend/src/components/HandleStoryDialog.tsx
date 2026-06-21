@@ -34,8 +34,8 @@ export function HandleStoryDialog({ onCancel, onSubmit }: Props) {
   }
 
   return (
-    <section className="dialog" role="dialog" aria-label="处理故事">
-      <h3>处理故事</h3>
+    <section className="dialog" role="dialog" aria-label="处理信号">
+      <h3>处理信号</h3>
       <label>
         结论
         <select value={conclusionCode} onChange={(event) => setConclusionCode(event.target.value as HandleStoryPayload['conclusion_code'])}>
@@ -53,7 +53,7 @@ export function HandleStoryDialog({ onCancel, onSubmit }: Props) {
       </label>
       {status === 'validation_error' && <p role="alert">处理前必须选择结构化结论。</p>}
       {status === 'server_error' && <p role="alert">处理失败。请检查备注后重试。</p>}
-      {status === 'success' && <p>故事已处理。</p>}
+      {status === 'success' && <p>信号已处理。</p>}
       <div className="dialog-actions">
         <button onClick={onCancel}>取消</button>
         <button className="primary" disabled={status === 'submitting'} onClick={submit}>

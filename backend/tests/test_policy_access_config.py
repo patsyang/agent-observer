@@ -10,10 +10,14 @@ from app.collectors.service import (
     list_collectors,
     register_collector,
     update_collector_display_name,
-    update_collector_raw_upload,
 )
 from app.db.connection import connect
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
+
+CLIENT_PROTOCOL = {
+    "protocol_version": "agent-observer-telemetry/v2",
+    "agent_version": "0.2.0",
+}
 
 
 def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_path):
@@ -23,46 +27,39 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
             conn,
             {
                 "expected_version": initial["policy_version"],
-                "template_enabled": False,
-                "upload_raw": True,
-                "collection_policy": "codex deterministic events only",
-                "diagnostic_policy": "queue whitelist diagnostics when offline",
+                "enrichment_mode": "disabled",
             },
         )
         audit = recent_audit(conn)
 
     assert updated["policy_version"] == initial["policy_version"] + 1
-    assert updated["template_enabled"] is False
-    assert updated["upload_raw"] is True
+    assert updated["raw_upload_mode"] == "always_on"
+    assert updated["enrichment_mode"] == "disabled"
     assert audit["events"][0]["action"] == "policy_changed"
     assert audit["events"][0]["actor"] == "fixed-management-account"
     assert audit["events"][0]["metadata"] == {
         "after_version": 2,
         "before_version": 1,
+        "enrichment_mode": "disabled",
         "reason_code": "operator_policy_update",
-        "template_enabled": False,
-        "upload_raw": True,
+        "raw_upload_mode": "always_on",
     }
 
 
-def test_policy_update_requires_current_version_and_accepts_raw_text(tmp_path):
+def test_policy_update_requires_current_version_and_rejects_unknown_fields(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         with pytest.raises(ValueError, match="policy_version_conflict"):
-            update_effective_policy(conn, {"expected_version": 99, "collection_policy": "codex only"})
+            update_effective_policy(conn, {"expected_version": 99})
 
-        updated = update_effective_policy(
-            conn,
-            {
-                "expected_version": 1,
-                "collection_policy": "raw log prompt token collection",
-                "diagnostic_policy": "whitelist only",
-            },
-        )
+        with pytest.raises(ValueError, match="unsupported_enrichment_mode"):
+            update_effective_policy(conn, {"expected_version": 1, "enrichment_mode": "custom text"})
 
-    assert updated["collection_policy"] == "raw log prompt token collection"
+        with pytest.raises(ValueError, match="unsupported_policy_field"):
+            update_effective_policy(conn, {"expected_version": 1, "unknown_policy": False, "enrichment_mode": "enabled"})
 
 
-def test_online_collector_raw_upload_override_is_returned_on_heartbeat(tmp_path):
+
+def test_collector_policy_no_longer_exposes_raw_upload_override_state(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         registered = register_collector(
             conn,
@@ -72,24 +69,26 @@ def test_online_collector_raw_upload_override_is_returned_on_heartbeat(tmp_path)
                 "hostname": "raw-host",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
+                **CLIENT_PROTOCOL,
             },
         )
-        heartbeat(conn, registered["collector_id"], {"source_status": "online", "reason_code": "start_running"})
-
-        updated = update_collector_raw_upload(conn, registered["collector_id"], True)
+        heartbeat(
+            conn,
+            registered["collector_id"],
+            {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"},
+        )
         heartbeat_result = heartbeat(
             conn,
             registered["collector_id"],
-            {"source_status": "online", "reason_code": "start_running"},
+            {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"},
         )
         collector = list_collectors(conn)[0]
 
-    assert updated["raw_upload_enabled"] is True
-    assert updated["raw_upload_override"] is True
-    assert heartbeat_result["effective_policy"]["upload_raw"] is True
-    assert heartbeat_result["effective_policy"]["raw_upload_source"] == "collector_override"
-    assert collector["raw_upload_enabled"] is True
-    assert collector["raw_upload_override"] is True
+    assert heartbeat_result["effective_policy"]["raw_upload_mode"] == "always_on"
+    assert "raw_upload_enabled" not in heartbeat_result["effective_policy"]
+    assert "raw_upload_source" not in heartbeat_result["effective_policy"]
+    assert "raw_upload_enabled" not in collector
+    assert "raw_upload_override" not in collector
 
 
 def test_display_label_change_writes_fixed_account_audit(tmp_path):
@@ -100,7 +99,7 @@ def test_display_label_change_writes_fixed_account_audit(tmp_path):
                 "hostname": "policy-host",
                 "windows_username": "synthetic-user",
                 "agent_type": "codex",
-                "agent_version": "0.1.0",
+                **CLIENT_PROTOCOL,
             },
         )
         collector = update_collector_display_name(conn, registered["collector_id"], "Workbench collector")
@@ -125,7 +124,7 @@ def test_delete_collector_removes_management_row_and_writes_audit(tmp_path):
                 "hostname": "stale-host",
                 "windows_username": "synthetic-user",
                 "agent_type": "codex",
-                "agent_version": "0.1.0",
+                **CLIENT_PROTOCOL,
                 "source_status": "offline",
                 "reason_code": "heartbeat_stale",
             },

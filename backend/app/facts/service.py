@@ -75,6 +75,8 @@ def query_facts(
         current_page = page_offset // page_limit + 1
     clauses: list[str] = []
     params: list[str] = []
+    clauses.append("fact_type != ?")
+    params.append("usage")
     if quality:
         clauses.append("quality = ?")
         params.append(quality)

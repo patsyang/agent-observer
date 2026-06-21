@@ -7,16 +7,16 @@ import { AccessConfigDrawer } from './AccessConfigDrawer';
 const packageConfig = {
   filename: 'agent-observer-windows.zip',
   path: 'data/packages/agent-observer-windows.zip',
-  config_path: 'data/packages/agent-observer.config.json',
-  sha256: 'abcdef1234567890'
+  sha256: 'abcdef1234567890',
+  server_url: 'http://127.0.0.1:8765',
+  agent_version: '0.2.0',
+  protocol_version: 'agent-observer-telemetry/v2'
 };
 
 const policy = {
   policy_version: 1,
-  template_enabled: true,
-  upload_raw: false,
-  collection_policy: 'codex default local observation',
-  diagnostic_policy: 'whitelist only'
+  raw_upload_mode: 'always_on' as const,
+  enrichment_mode: 'enabled' as const
 };
 
 const audit = {
@@ -27,12 +27,12 @@ const audit = {
 describe('AccessConfigDrawer', () => {
   it('loads package, policy, saves changes and displays audit feedback', async () => {
     const user = userEvent.setup();
-    const savePolicy = vi.fn(async () => ({ ...policy, policy_version: 2, template_enabled: false, upload_raw: true }));
+    const savePolicy = vi.fn(async () => ({ ...policy, policy_version: 2, enrichment_mode: 'disabled' as const }));
     const loadAudit = vi
       .fn()
       .mockResolvedValueOnce(audit)
       .mockResolvedValueOnce({
-        latest: 'policy_changed by fixed-management-account at 2026-06-19T00:00:00+00:00',
+        latest: '接入策略已保存，时间 2026-06-19T00:00:00+00:00',
         events: []
       });
 
@@ -48,30 +48,27 @@ describe('AccessConfigDrawer', () => {
     );
 
     expect(await screen.findByText('Windows collector 客户端')).toBeInTheDocument();
-    expect(screen.getByText('策略开关')).toBeInTheDocument();
+    expect(screen.getByText('采集内容')).toBeInTheDocument();
     expect(screen.getByText('v1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '下载 Windows 客户端' })).toHaveAttribute(
       'href',
       '/api/client-package/windows'
     );
 
-    await user.click(screen.getByLabelText('启用 Codex 来源模板'));
-    expect(screen.getByText(/仅下载客户端时不需要点击/)).toBeInTheDocument();
-    expect(screen.getByText(/在线客户端可在采集器管理中单独开关/)).toBeInTheDocument();
-    await user.click(screen.getByLabelText('客户端下载默认上传原文'));
-    await user.clear(screen.getByLabelText('采集策略'));
-    await user.type(screen.getByLabelText('采集策略'), 'codex deterministic events only');
-    await user.click(screen.getByRole('button', { name: '保存策略' }));
+    expect(screen.getByText(/仅下载客户端时不需要保存接入策略/)).toBeInTheDocument();
+    expect(screen.getByText('0.2.0')).toBeInTheDocument();
+    expect(screen.getByText('agent-observer-telemetry/v2')).toBeInTheDocument();
+    expect(screen.queryByRole('checkbox', { name: '默认上传原始输入输出' })).not.toBeInTheDocument();
+    expect(screen.getByText(/当前版本固定上传完整 Prompt 和响应内容/)).toBeInTheDocument();
+    await user.click(screen.getByLabelText('允许本机补证任务'));
+    await user.click(screen.getByRole('button', { name: '保存接入策略' }));
 
     await waitFor(() => expect(savePolicy).toHaveBeenCalled());
     expect(savePolicy).toHaveBeenCalledWith({
       expected_version: 1,
-      template_enabled: false,
-      upload_raw: true,
-      collection_policy: 'codex deterministic events only',
-      diagnostic_policy: 'whitelist only'
+      enrichment_mode: 'disabled'
     });
-    expect(await screen.findByText('策略已保存为 v2')).toBeInTheDocument();
-    expect(screen.getByText(/policy_changed by fixed-management-account/)).toBeInTheDocument();
+    expect(await screen.findByText('接入策略已保存为 v2')).toBeInTheDocument();
+    expect(screen.getByText(/接入策略已保存，时间/)).toBeInTheDocument();
   });
 });

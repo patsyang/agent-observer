@@ -10,7 +10,7 @@ from app.package.builder import build_windows_package
 from backend.tests.test_collectors_policy_package import _write_codex_fixture
 
 
-def _prepare_packaged_collector(tmp_path, extract_name: str, *, raw_upload: bool = False):
+def _prepare_packaged_collector(tmp_path, extract_name: str):
     package_path = tmp_path / "agent-observer-windows.zip"
     with connect(tmp_path / "observer.sqlite") as conn:
         build_windows_package(conn, tmp_path)
@@ -21,12 +21,9 @@ def _prepare_packaged_collector(tmp_path, extract_name: str, *, raw_upload: bool
 
     config_path = extract_dir / "agent-observer.config.json"
     config = json.loads(config_path.read_text(encoding="utf-8"))
-    config["collector_id"] = "package-raw-test" if raw_upload else "package-test"
+    config["collector_id"] = "package-test"
     config["collection_interval_seconds"] = 0
     config["codex_home"] = str(extract_dir / ".codex")
-    if raw_upload:
-        config["raw_upload_enabled"] = True
-        config["effective_policy"]["upload_raw"] = True
     config_path.write_text(json.dumps(config), encoding="utf-8")
     _write_codex_fixture(extract_dir / ".codex")
     return extract_dir
@@ -37,11 +34,11 @@ def _install_fake_transport(monkeypatch, calls: list[tuple[str, str]], uploaded_
         calls.append(("POST", path))
         if path == "/api/telemetry/ingest":
             uploaded_batches.append(payload)
-        return {"status": "ok", "effective_policy": {"upload_raw": True, "raw_upload_source": "collector_override"}}
+        return {"status": "ok", "effective_policy": {"raw_upload_mode": "always_on"}}
 
     def fake_get(_server_url: str, path: str) -> dict[str, object]:
         calls.append(("GET", path))
-        if path.endswith("/diagnostics/next"):
+        if path.endswith("/enrichments/next"):
             return {"status": "none"}
         return {"enabled": True}
 
@@ -70,7 +67,21 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
 
     calls: list[tuple[str, str]] = []
     uploaded_batches: list[dict[str, object]] = []
+    register_payloads: list[dict[str, object]] = []
+    heartbeat_payloads: list[dict[str, object]] = []
     _install_fake_transport(monkeypatch, calls, uploaded_batches)
+
+    def fake_post_with_payload(_server_url: str, path: str, payload: dict[str, object]) -> dict[str, object]:
+        calls.append(("POST", path))
+        if path == "/api/collectors/register":
+            register_payloads.append(payload)
+        if path.endswith("/heartbeat"):
+            heartbeat_payloads.append(payload)
+        if path == "/api/telemetry/ingest":
+            uploaded_batches.append(payload)
+        return {"status": "ok", "effective_policy": {"raw_upload_mode": "always_on"}}
+
+    monkeypatch.setattr("app.collector_client.runtime._post_json", fake_post_with_payload)
 
     doctor = run(["doctor"], cwd=extract_dir)
     assert doctor.code == 0
@@ -87,14 +98,20 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
         ("POST", "/api/telemetry/ingest"),
         ("POST", "/api/collectors/package-test/heartbeat"),
         ("POST", "/api/collectors/package-test/heartbeat"),
-        ("GET", "/api/collectors/package-test/diagnostics/next"),
+        ("GET", "/api/collectors/package-test/enrichments/next"),
     ]
+    assert register_payloads[0]["protocol_version"] == "agent-observer-telemetry/v2"
+    assert register_payloads[0]["agent_version"] == "0.2.0"
+    assert all(payload["protocol_version"] == "agent-observer-telemetry/v2" for payload in heartbeat_payloads)
+    assert all(payload["agent_version"] == "0.2.0" for payload in heartbeat_payloads)
     state = json.loads((extract_dir / "agent-observer.state.json").read_text(encoding="utf-8"))
     assert state["outbox"] == []
     assert state["cursor"]["last_sequence"] == 1
-    assert state["raw_upload_enabled"] is True
+    assert "raw_upload_enabled" not in state
     assert state["last_upload_at"]
     batch_items = uploaded_batches[0]["items"]
+    assert uploaded_batches[0]["protocol_version"] == "agent-observer-telemetry/v2"
+    assert uploaded_batches[0]["agent_version"] == "0.2.0"
     assert len(batch_items) >= 2
     assert any("采集器完成一次本机链路自检" in item["summary"] for item in batch_items)
     assert any(item.get("error_signature") for item in batch_items)
@@ -132,15 +149,15 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
     assert calls.count(("POST", "/api/collectors/register")) == 1
     assert calls.count(("POST", "/api/telemetry/ingest")) == 2
     assert calls.count(("POST", "/api/collectors/package-test/heartbeat")) >= 4
-    assert calls.count(("GET", "/api/collectors/package-test/diagnostics/next")) == 2
+    assert calls.count(("GET", "/api/collectors/package-test/enrichments/next")) == 2
     assert any(item.get("raw_content") for batch in uploaded_batches[1:] for item in batch["items"])
 
     stop = json.loads(run(["stop"], cwd=extract_dir).output)
     assert stop["running"] is False
 
 
-def test_packaged_collector_first_run_uses_download_raw_setting(tmp_path, monkeypatch):
-    extract_dir = _prepare_packaged_collector(tmp_path, "unzipped-raw", raw_upload=True)
+def test_packaged_collector_first_run_uploads_raw_content_without_config_switch(tmp_path, monkeypatch):
+    extract_dir = _prepare_packaged_collector(tmp_path, "unzipped-raw")
 
     calls: list[tuple[str, str]] = []
     uploaded_batches: list[dict[str, object]] = []
@@ -154,3 +171,85 @@ def test_packaged_collector_first_run_uses_download_raw_setting(tmp_path, monkey
     assert prompt["upload_raw"] is True
     assert prompt["raw_content"]
     assert prompt["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
+
+
+def test_packaged_collector_runs_tool_failure_enrichment_from_local_sessions(tmp_path, monkeypatch):
+    extract_dir = _prepare_packaged_collector(tmp_path, "unzipped-enrichment")
+    session_path = extract_dir / ".codex" / "sessions" / "session-package.jsonl"
+    with session_path.open("a", encoding="utf-8") as handle:
+        handle.write(
+            "\n"
+            + "\n".join(
+                json.dumps(record)
+                for record in [
+                    {
+                        "timestamp": "2026-06-18T10:04:00+00:00",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call",
+                            "name": "exec_command",
+                            "call_id": "call-enrichment-001",
+                            "arguments": json.dumps({"command": "npm test -- broken.spec.ts", "workdir": "D:/workspace/app"}),
+                        },
+                        "conversation_id": "conversation-package",
+                        "session_id": "session-package",
+                    },
+                    {
+                        "timestamp": "2026-06-18T10:05:00+00:00",
+                        "type": "response_item",
+                        "payload": {
+                            "type": "function_call_output",
+                            "call_id": "call-enrichment-001",
+                            "output": "Exit code: 1\nWall time: 2.4 seconds\nstderr: assertion failed",
+                        },
+                        "conversation_id": "conversation-package",
+                        "session_id": "session-package",
+                    },
+                ]
+            )
+        )
+
+    result_payloads: list[dict[str, object]] = []
+    next_calls = 0
+
+    def fake_get(_server_url: str, path: str) -> dict[str, object]:
+        nonlocal next_calls
+        if path.endswith("/enrichments/next"):
+            next_calls += 1
+            if next_calls == 1:
+                return {
+                    "job_id": "enrichment-job-001",
+                    "collector_id": "package-test",
+                    "capability_id": "codex_tool_failure_context",
+                    "status": "pending",
+                    "command": {
+                        "command_id": "collect_codex_tool_failure_context",
+                        "story_id": "story-001",
+                        "capability_id": "codex_tool_failure_context",
+                        "evidence_refs": [{"conversation_ref": "conversation-package"}],
+                    },
+                }
+            return {"status": "none"}
+        return {"enabled": True}
+
+    def fake_post(_server_url: str, path: str, payload: dict[str, object]) -> dict[str, object]:
+        if path.endswith("/enrichments/enrichment-job-001/result"):
+            result_payloads.append(payload)
+        return {"status": "ok", "effective_policy": {"raw_upload_mode": "always_on"}}
+
+    monkeypatch.setattr("app.collector_client.cli._get_json", fake_get)
+    monkeypatch.setattr("app.collector_client.runtime._get_json", fake_get)
+    monkeypatch.setattr("app.collector_client.runtime._post_json", fake_post)
+
+    result = run(["run-once"], cwd=extract_dir)
+
+    assert result.code == 0
+    assert result_payloads
+    payload = result_payloads[0]
+    projection = payload["projection"]
+    assert payload["status"] == "succeeded"
+    assert projection["output_schema"] == "tool_failure_context.v1"
+    assert projection["matched_failures"][0]["exit_code"] == 1
+    assert projection["matched_failures"][0]["call_id"] == "call-enrichment-001"
+    assert projection["matched_failures"][0]["command_excerpt"] == "npm test -- broken.spec.ts"
+    assert projection["redaction"]["raw_content_uploaded"] is False

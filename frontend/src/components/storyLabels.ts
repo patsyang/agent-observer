@@ -19,15 +19,16 @@ export function handlingStateLabel(value: string): string {
   return labels[value] ?? value;
 }
 
-export function diagnosticStatusLabel(value: string): string {
+export function enrichmentStatusLabel(value: string): string {
   const labels: Record<string, string> = {
-    none: '暂无诊断',
-    pending: '诊断排队中',
-    running: '诊断执行中',
-    succeeded: '诊断成功',
-    failed: '诊断失败',
-    expired: '诊断已过期',
-    canceled: '诊断已取消',
+    none: '暂无补证',
+    pending: '补证排队中',
+    running: '补证执行中',
+    succeeded: '补证成功',
+    failed: '补证失败',
+    expired: '补证已过期',
+    canceled: '补证已取消',
+    cancelled: '补证已取消',
   };
   return labels[value] ?? value;
 }
@@ -44,22 +45,19 @@ export function conclusionCodeLabel(value: string): string {
 
 export function storyKindLabel(storyKey: string): string {
   if (storyKey.startsWith('command_timeout:')) return '命令超时';
-  if (storyKey.startsWith('usage:')) return '用量异常';
   if (storyKey.startsWith('risk:sensitive_object_touch')) return '敏感对象触达';
   if (storyKey.startsWith('risk:high_risk_operation')) return '高风险操作';
   if (storyKey.startsWith('risk:')) return '风险信号';
   if (storyKey.startsWith('error:')) return '错误复发';
-  return '观察故事';
+  return '观测信号';
 }
 
 export function usageSummaryText(summary: {
-  attributed_units: number;
-  associated_units: number;
+  effective_units: number;
   no_usage_reason: string | null;
 }): string {
   if (summary.no_usage_reason) return summary.no_usage_reason;
-  if (summary.attributed_units > 0) return `已归因 ${formatUnits(summary.attributed_units)}，关联 ${formatUnits(summary.associated_units)}`;
-  return `仅关联 ${formatUnits(summary.associated_units)}，未做硬分摊`;
+  return `有效用量 ${formatUnits(summary.effective_units)}`;
 }
 
 export function compactListSummary(items: string[], noun: string): string {
@@ -81,7 +79,7 @@ export function storyEvidenceSummary(options: {
   occurrence_count?: number;
 }): string {
   if (options.latest_summary) return options.latest_summary;
-  if (options.occurrence_count && options.occurrence_count > 0) return `${formatNumber(options.occurrence_count)} 条事实证据`;
+  if (options.occurrence_count && options.occurrence_count > 0) return `${formatNumber(options.occurrence_count)} 条命中内容`;
   return evidenceSummary(options.evidence_refs);
 }
 

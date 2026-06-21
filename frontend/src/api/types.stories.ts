@@ -2,26 +2,25 @@ export type HandlingState = 'unread' | 'read' | 'handled';
 export type AttentionState = 'active' | 'handled_hidden' | 'needs_review';
 
 export interface StoryUsageSummary {
-  attributed_units: number;
-  associated_units: number;
+  effective_units: number;
   no_usage_reason: string | null;
 }
 
-export interface DiagnosticStatusSummary {
+export interface EnrichmentStatusSummary {
   status: string;
   reason_code: string | null;
 }
 
-export type DiagnosticCapabilityState = 'available' | 'queueable' | 'unavailable';
+export type EnrichmentCapabilityState = 'available' | 'queueable' | 'unavailable';
 
-export interface DiagnosticCapability {
+export interface EnrichmentCapability {
   capability_id: string;
   label: string;
-  state: DiagnosticCapabilityState;
+  state: EnrichmentCapabilityState;
   reason_code: string | null;
 }
 
-export interface DiagnosticJob {
+export interface EnrichmentJob {
   job_id: string;
   story_id?: string;
   capability_id: string;
@@ -29,10 +28,10 @@ export interface DiagnosticJob {
   reason_code?: string | null;
 }
 
-export interface DiagnosticAvailability {
+export interface EnrichmentAvailability {
   story_id?: string;
-  active_job?: DiagnosticJob | null;
-  capabilities: DiagnosticCapability[];
+  active_job?: EnrichmentJob | null;
+  capabilities: EnrichmentCapability[];
 }
 
 export interface ObservationStory {
@@ -42,7 +41,7 @@ export interface ObservationStory {
   impact_objects: string[];
   evidence_refs: string[];
   usage_summary: StoryUsageSummary;
-  diagnostic_status_summary: DiagnosticStatusSummary;
+  enrichment_status_summary: EnrichmentStatusSummary;
   handling_state: HandlingState;
   conclusion_code: string | null;
   handling_note: string | null;

@@ -61,13 +61,12 @@ export function factTypeLabel(type: string): string {
     tool_call: '工具调用',
     tool_failure: '工具失败',
     tool_result: '工具结果',
-    usage: '用量事实',
-    risk: '风险事实',
+    risk: '风险命中',
     high_risk_operation: '高风险操作',
     sensitive_touch: '敏感触达',
     sensitive_object_touch: '敏感触达',
-    diagnostic: '诊断事实',
-    diagnostic_result: '补证结果',
+    enrichment: '补证命中',
+    enrichment_result: '补证结果',
     unknown: '低证据事件',
     uncategorized: '低证据事件',
   };
@@ -85,7 +84,7 @@ export function qualityLabel(quality: string): string {
 
 export function localizedSummary(summary: string): string {
   if (summary.startsWith('Windows collector fixture heartbeat') && summary.endsWith('host summary')) {
-    return '采集器完成一次安全白名单自检，状态、游标和 outbox 已结构化上报。';
+    return '采集器完成一次安全自检，状态、游标和 outbox 已结构化上报。';
   }
   return summary;
 }
@@ -98,10 +97,6 @@ export function severityLabel(severity: string): string {
     unknown: '未知风险',
   };
   return labels[severity] ?? severity;
-}
-
-export function usageKindLabel(kind: string): string {
-  return kind === 'attributed' ? '已归因' : '关联';
 }
 
 export function activityTagLabel(value: string): string {
@@ -158,19 +153,25 @@ export function qualitySummary(data: FactsResponse): string {
 }
 
 export function latestFactTitle(fact: FactsResponse['facts'][number] | undefined): string {
-  if (!fact) return '暂无事实';
-  const raw = fact.raw_available ? '已上传原文' : '未上传原文';
-  return `最近上报：${factTypeLabel(fact.category || fact.fact_type)}，${qualityLabel(fact.quality)}可信，${raw}`;
+  if (!fact) return '暂无命中';
+  return factTypeLabel(fact.category || fact.fact_type);
 }
 
 export function queueSummary(activeCount: number): string {
-  return activeCount > 0 ? `${formatCount(activeCount, '个故事待处理')}` : '暂无待处理故事';
+  return activeCount > 0 ? `${formatCount(activeCount, '个信号待处理')}` : '暂无待处理信号';
 }
 
 export function emptyUsage(window: TimeWindow): UsageSummary {
   return {
     window,
-    totals: { associated_units: 0, attributed_units: 0, unknown_units: 0 },
+    totals: {
+      effective_units: 0,
+      unknown_units: 0,
+      cached_input_units: 0,
+      input_token_units: 0,
+      cache_hit_rate: 0
+    },
+    trend: [],
     rollups: []
   };
 }

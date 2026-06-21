@@ -14,6 +14,8 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
             conn,
             {
                 "batch_id": "dashboard-summary-001",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-dashboard",
                 "source": "codex",
                 "cursor": "1",
@@ -55,6 +57,8 @@ def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):
             conn,
             {
                 "batch_id": "dashboard-backfill-001",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-dashboard",
                 "source": "codex",
                 "cursor": "backfill",
@@ -69,7 +73,9 @@ def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):
                         "occurred_at": old_observed_at,
                         "span": "session:backfill",
                         "raw_hash": "hash-dashboard-backfill",
-                        "projection": {"role": "user", "content_length": 12},
+                        "projection": {"role": "user", "content_length": 12, "prompt_text": "历史 Prompt 刚刚完成回填。"},
+                        "upload_raw": True,
+                        "raw_content": "历史 Prompt 刚刚完成回填。",
                         "source_refs": {"conversation_ref": "conv-dashboard-backfill"},
                         "source_specific": {"codex_event_type": "message"},
                     }

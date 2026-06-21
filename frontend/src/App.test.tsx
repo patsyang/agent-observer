@@ -12,8 +12,17 @@ describe('App shell', () => {
         if (url.endsWith('/api/collectors')) {
           return Response.json({ collectors: [] });
         }
-        if (url.includes('/api/facts')) {
-          return Response.json({ facts: [] });
+        if (url.includes('/api/dashboard/summary')) {
+          return Response.json({
+            window: '1h',
+            collectors: { total: 0, online: 0, degraded: 0, offline: 0, items: [] },
+            facts: { total: 0, items: [] },
+            stories: { total: 0, items: [] },
+            risks: { total: 0, top: [] }
+          });
+        }
+        if (url.includes('/api/conversations')) {
+          return Response.json({ conversations: [], total: 0, page: 1, page_size: 50, has_more: false, window: '1h' });
         }
         if (url.includes('/api/stories')) {
           return Response.json({ stories: [] });
@@ -22,7 +31,14 @@ describe('App shell', () => {
           return Response.json({
             window: '24h',
             rollups: [],
-            totals: { associated_units: 0, attributed_units: 0, unknown_units: 0 }
+            trend: [],
+            totals: {
+              effective_units: 0,
+              unknown_units: 0,
+              cached_input_units: 0,
+              input_token_units: 0,
+              cache_hit_rate: 0
+            }
           });
         }
         if (url.includes('/api/risks/summary')) {
@@ -31,10 +47,8 @@ describe('App shell', () => {
         if (url.endsWith('/api/policy')) {
           return Response.json({
             policy_version: 1,
-            template_enabled: true,
-            upload_raw: false,
-            collection_policy: 'codex default local observation',
-            diagnostic_policy: 'whitelist only'
+            raw_upload_mode: 'always_on',
+            enrichment_mode: 'enabled'
           });
         }
         if (url.endsWith('/api/audit/recent')) {
@@ -43,8 +57,10 @@ describe('App shell', () => {
         return Response.json({
           filename: 'agent-observer-windows.zip',
           path: 'data/packages/agent-observer-windows.zip',
-          config_path: 'data/packages/agent-observer.config.json',
-          sha256: '1234567890abcdef'
+          sha256: '1234567890abcdef',
+          server_url: 'http://127.0.0.1:8765',
+          agent_version: '0.2.0',
+          protocol_version: 'agent-observer-telemetry/v2'
         });
       })
     );

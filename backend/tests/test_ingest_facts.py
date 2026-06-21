@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from app.db.connection import connect
 from app.facts.service import get_fact_detail, query_facts
 from app.ingest.service import ingest_telemetry
@@ -10,6 +12,8 @@ from app.ingest.service import ingest_telemetry
 def _batch(batch_id: str = "batch-001") -> dict:
     return {
         "batch_id": batch_id,
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
         "collector_id": "collector-codex",
         "source": "codex",
         "cursor": "cursor-001",
@@ -76,6 +80,9 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
         error_count = conn.execute("select count(*) from error_signatures").fetchone()[0]
         usage_count = conn.execute("select count(*) from usage_signals").fetchone()[0]
         risk_count = conn.execute("select count(*) from risk_signals").fetchone()[0]
+        stored_batch = conn.execute(
+            "select protocol_version, agent_version from telemetry_batches where batch_id = 'batch-001'"
+        ).fetchone()
 
     assert result == {"batch_id": "batch-001", "accepted": 2, "duplicates": 0}
     assert facts["total"] == 2
@@ -94,6 +101,17 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
     assert error_count == 1
     assert usage_count == 1
     assert risk_count == 1
+    assert stored_batch["protocol_version"] == "agent-observer-telemetry/v2"
+    assert stored_batch["agent_version"] == "0.2.0"
+
+
+def test_ingest_rejects_batch_without_protocol(tmp_path):
+    batch = _batch()
+    batch.pop("protocol_version")
+
+    with connect(tmp_path / "observer.sqlite") as conn:
+        with pytest.raises(ValueError, match="unsupported_collector_protocol"):
+            ingest_telemetry(conn, batch)
 
 
 def test_duplicate_batch_is_idempotent(tmp_path):
@@ -109,9 +127,11 @@ def test_duplicate_batch_is_idempotent(tmp_path):
     assert projection_count == 3
 
 
-def test_duplicate_raw_enabled_upload_enriches_existing_projection(tmp_path):
-    raw_off = {
+def test_content_fact_requires_raw_content(tmp_path):
+    missing_raw = {
         "batch_id": "raw-off-batch",
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
         "collector_id": "collector-codex",
         "source": "codex",
         "cursor": "raw-off",
@@ -122,7 +142,7 @@ def test_duplicate_raw_enabled_upload_enriches_existing_projection(tmp_path):
                 "category": "codex_prompt",
                 "quality": "high",
                 "severity": "low",
-                "summary": "记录到 Codex 用户 Prompt，原文上报未开启。",
+                "summary": "记录到 Codex 用户 Prompt，原始内容未上传。",
                 "occurred_at": "2026-06-18T10:00:00+00:00",
                 "span": "session:prompt",
                 "raw_hash": "hash-prompt-001",
@@ -132,44 +152,15 @@ def test_duplicate_raw_enabled_upload_enriches_existing_projection(tmp_path):
             }
         ],
     }
-    raw_on = {
-        **raw_off,
-        "batch_id": "raw-on-batch",
-        "cursor": "raw-on",
-        "items": [
-            {
-                **raw_off["items"][0],
-                "summary": "记录到 Codex 用户 Prompt，已上传原始内容。",
-                "raw_hash": "hash-prompt-001-raw",
-                "projection": {
-                    "role": "user",
-                    "content_length": 12,
-                    "raw_content_uploaded": True,
-                    "prompt_text": "查看原始 Prompt",
-                },
-                "upload_raw": True,
-                "raw_content": '{"payload":{"content":[{"text":"查看原始 Prompt"}]}}',
-            }
-        ],
-    }
 
     with connect(tmp_path / "observer.sqlite") as conn:
-        first = ingest_telemetry(conn, raw_off)
-        second = ingest_telemetry(conn, raw_on)
-        detail = get_fact_detail(conn, "prompt-event-001")
+        with pytest.raises(ValueError, match="raw_content_required"):
+            ingest_telemetry(conn, missing_raw)
         fact_count = conn.execute("select count(*) from observed_facts").fetchone()[0]
         projection_count = conn.execute("select count(*) from evidence_projections").fetchone()[0]
 
-    assert first["accepted"] == 1
-    assert second == {"batch_id": "raw-on-batch", "accepted": 0, "duplicates": 1}
-    assert fact_count == 1
-    assert projection_count == 1
-    assert detail["fact"]["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
-    assert detail["evidence_projection"]["upload_raw"] is True
-    assert detail["evidence_projection"]["raw_content"] == '{"payload":{"content":[{"text":"查看原始 Prompt"}]}}'
-    assert detail["evidence_projection"]["projection_json"]["prompt_text"] == "查看原始 Prompt"
-    assert detail["fact"]["content_preview"] == "Prompt: 查看原始 Prompt"
-    assert detail["fact"]["raw_status"] == "已上传原文"
+    assert fact_count == 0
+    assert projection_count == 0
 
 
 def test_source_event_id_is_idempotent_per_collector(tmp_path):

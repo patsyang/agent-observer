@@ -5,6 +5,7 @@ import sqlite3
 import hashlib
 from datetime import UTC, datetime
 
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
 
 
@@ -17,6 +18,7 @@ def _json(value: dict | None) -> str:
 
 
 def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
+    _validate_batch_protocol(batch)
     batch_id = batch["batch_id"]
     collector_id = batch["collector_id"]
     source = batch.get("source", "codex")
@@ -27,6 +29,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     now = _now()
 
     for item in batch.get("items", []):
+        _validate_required_raw_content(item)
         source_event_id = item["source_event_id"]
         existing = conn.execute(
             "select fact_id from observed_facts where collector_id = ? and source_event_id = ?",
@@ -81,10 +84,21 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     conn.execute(
         """
         insert or replace into telemetry_batches (
-          batch_id, collector_id, source, cursor, accepted_count, duplicate_count, created_at
-        ) values (?, ?, ?, ?, ?, ?, ?)
+          batch_id, collector_id, source, protocol_version, agent_version,
+          cursor, accepted_count, duplicate_count, created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (batch_id, collector_id, source, cursor, accepted, duplicates, now),
+        (
+            batch_id,
+            collector_id,
+            source,
+            batch["protocol_version"],
+            batch["agent_version"],
+            cursor,
+            accepted,
+            duplicates,
+            now,
+        ),
     )
     conn.commit()
     if affected_fact_ids:
@@ -92,6 +106,19 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
 
         update_stories_for_facts(conn, affected_fact_ids, reason="telemetry_ingest")
     return {"batch_id": batch_id, "accepted": accepted, "duplicates": duplicates}
+
+
+def _validate_batch_protocol(batch: dict) -> None:
+    if batch.get("protocol_version") != COLLECTOR_PROTOCOL_VERSION:
+        raise ValueError("unsupported_collector_protocol")
+    if batch.get("agent_version") != COLLECTOR_CLIENT_VERSION:
+        raise ValueError("unsupported_collector_version")
+
+
+def _validate_required_raw_content(item: dict) -> None:
+    if item.get("fact_type") == "content" or item.get("category") in {"codex_prompt", "codex_message", "codex_reasoning"}:
+        if not _has_raw_content(item):
+            raise ValueError("raw_content_required")
 
 
 def _enrich_existing_raw_projection(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:
@@ -258,6 +285,8 @@ def _list_projection_preview(item: dict) -> dict:
 
 def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:
     if error := item.get("error_signature"):
+        signature_key = error["signature_key"]
+        category = error.get("category", item.get("category", "error"))
         conn.execute(
             """
             insert into error_signatures (
@@ -268,21 +297,29 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
               occurrences = error_signatures.occurrences + 1
             """,
             (
-                error["signature_key"],
+                signature_key,
                 fact_id,
-                error.get("category", item.get("category", "error")),
+                category,
                 item["occurred_at"],
                 item["occurred_at"],
             ),
+        )
+        conn.execute(
+            """
+            insert or ignore into error_signature_facts (
+              signature_key, fact_id, category, occurred_at
+            ) values (?, ?, ?, ?)
+            """,
+            (signature_key, fact_id, category, item["occurred_at"]),
         )
     if usage := item.get("usage"):
         conn.execute(
             """
             insert into usage_signals (
-              signal_id, fact_id, scope, units, activity_tag, usage_kind,
+              signal_id, fact_id, scope, units, activity_tag,
               session_id, conversation_id, project_ref, account_ref
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"usage-{fact_id}",
@@ -290,7 +327,6 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
                 usage.get("scope", "unknown"),
                 int(usage.get("units", 0)),
                 usage.get("activity_tag", "unknown"),
-                usage.get("usage_kind", "associated"),
                 usage.get("session_id", "unknown"),
                 usage.get("conversation_id", "unknown"),
                 usage.get("project_ref", "unknown"),

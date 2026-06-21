@@ -10,6 +10,8 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
   const ingest = await request.post('http://127.0.0.1:8765/api/telemetry/ingest', {
     data: {
       batch_id: `e2e-story-${suffix}`,
+      protocol_version: 'agent-observer-telemetry/v2',
+      agent_version: '0.2.0',
       collector_id: 'collector-codex',
       source: 'codex',
       cursor: `cursor-story-${suffix}`,
@@ -35,14 +37,13 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
           category: 'usage',
           quality: 'high',
           severity: 'low',
-          summary: 'E2E attributed story usage',
+          summary: 'E2E story usage',
           occurred_at: new Date().toISOString(),
           span: 'conversation:e2e-story',
           raw_hash: 'hash-e2e-story-usage',
           projection: { activity_tag: 'bug_fix', units: 64 },
           usage: {
             units: 64,
-            usage_kind: 'attributed',
             activity_tag: 'bug_fix',
             conversation_id: conversation
           },
@@ -59,22 +60,22 @@ test('operator opens Dashboard story queue and drills into evidence chain', asyn
 
   await page.goto('/');
   const storyCard = page.locator(`[data-story-key="${storyKey}"]`);
-  await expect(storyCard).toContainText('发现 1 次 Codex 工具执行失败');
-  await expect(storyCard).toContainText('已归因 64');
+  await expect(storyCard).toContainText('发现 1 条 Codex 工具执行失败命中');
+  await expect(storyCard).toContainText('没有用量证据');
   await expect(storyCard).not.toContainText(summary);
   await storyCard.getByRole('button').click();
-  await expect(page.getByLabel('故事详情')).toContainText('故事类型：错误复发');
+  await expect(page.getByLabel('信号详情')).toContainText('信号类型：错误复发');
   const evidenceChain = page.getByLabel('证据链');
   await expect(evidenceChain.getByRole('table')).toBeVisible();
-  await expect(evidenceChain).toContainText('真实证据');
+  await expect(evidenceChain).toContainText('命中内容');
   await expect(evidenceChain).toContainText('类型 / 来源');
   await expect(evidenceChain).toContainText('可信度 / 原文');
   await expect(evidenceChain).toContainText('操作');
   await expect(evidenceChain).toContainText('Codex 错误');
   await expect(evidenceChain).toContainText(summary);
-  await expect(evidenceChain).toContainText('用量 64 token，活动 缺陷修复');
+  await expect(evidenceChain).not.toContainText('用量 64 token，活动 缺陷修复');
   await expect(evidenceChain).toContainText('未上传原文，可查看摘要和字段');
-  await expect(evidenceChain).toContainText('查看事实');
+  await expect(evidenceChain).toContainText('查看会话');
   await expect(evidenceChain.getByRole('cell').first()).not.toContainText(`proj-${errorFact}`);
 
   const stories = await request.get('http://127.0.0.1:8765/api/stories');

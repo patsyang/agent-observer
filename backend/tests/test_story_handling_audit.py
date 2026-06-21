@@ -12,6 +12,8 @@ from app.stories.service import get_story_detail, handle_story, list_stories, ma
 def _story_batch(batch_id: str = "batch-handling-001", summary: str = "Checkout workflow failed repeatedly") -> dict:
     return {
         "batch_id": batch_id,
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
         "collector_id": "collector-codex",
         "source": "codex",
         "cursor": f"cursor-{batch_id}",

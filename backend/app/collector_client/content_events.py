@@ -10,15 +10,14 @@ def content_fact(common: dict, record: dict) -> dict:
     role = identity["role"]
     content_text = identity["content_text"]
     category = identity["category"]
-    raw_enabled = bool(common.get("upload_raw"))
     projection = {
         "role": role,
         "record_type": _top_type(record),
         "payload_type": payload_type,
         "content_length": len(content_text),
-        "raw_content_uploaded": raw_enabled,
+        "raw_content_uploaded": True,
     }
-    if raw_enabled and content_text:
+    if content_text:
         projection["prompt_text" if category == "codex_prompt" else "content_text"] = content_text
     return {
         **common,
@@ -26,7 +25,7 @@ def content_fact(common: dict, record: dict) -> dict:
         "category": category,
         "quality": "high" if content_text else "low",
         "severity": "low",
-        "summary": f"记录到 {_content_label(category)}，{'已上传原始内容' if raw_enabled else '原文上报未开启'}。",
+        "summary": f"记录到 {_content_label(category)}，已上传原始内容。",
         "projection": projection,
     }
 

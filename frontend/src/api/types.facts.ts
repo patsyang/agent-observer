@@ -41,12 +41,3 @@ export interface EvidenceProjection {
   upload_raw: boolean;
   raw_content: string | null;
 }
-
-export interface FactDetail {
-  fact: ObservedFact;
-  evidence_projection: EvidenceProjection;
-  evidence_projections: EvidenceProjection[];
-  sensitive_matches?: Array<Record<string, unknown>>;
-  source_refs: Record<string, unknown>;
-  source_specific_json: Record<string, unknown>;
-}

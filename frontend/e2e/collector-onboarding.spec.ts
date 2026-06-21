@@ -10,14 +10,23 @@ test('public onboarding shows registered online collector and package download',
       hostname: workstationName,
       windows_username: 'synthetic-user',
       agent_type: 'codex',
-      agent_version: '0.1.0'
+      protocol_version: 'agent-observer-telemetry/v2',
+      agent_version: '0.2.0'
     }
   });
   expect(registered.ok()).toBeTruthy();
   const collector = await registered.json();
   const heartbeat = await request.post(
     `http://127.0.0.1:8765/api/collectors/${collector.collector_id}/heartbeat`,
-    { data: { source_status: 'online', reason_code: 'online', outbox_backlog: 0 } }
+    {
+      data: {
+        protocol_version: 'agent-observer-telemetry/v2',
+        agent_version: '0.2.0',
+        source_status: 'online',
+        reason_code: 'online',
+        outbox_backlog: 0
+      }
+    }
   );
   expect(heartbeat.ok()).toBeTruthy();
   const staleId = `stale-e2e-${Date.now()}`;
@@ -29,7 +38,8 @@ test('public onboarding shows registered online collector and package download',
       hostname: 'stale-e2e-workstation',
       windows_username: 'synthetic-user',
       agent_type: 'codex',
-      agent_version: '0.1.0',
+      protocol_version: 'agent-observer-telemetry/v2',
+      agent_version: '0.2.0',
       source_status: 'offline',
       reason_code: 'heartbeat_stale'
     }
@@ -45,7 +55,8 @@ test('public onboarding shows registered online collector and package download',
   await expect(row).toBeVisible({ timeout: 15000 });
   await expect(row.getByRole('cell', { name: '在线', exact: true })).toBeVisible();
   await expect(row.getByRole('cell', { name: /^v\d+$/ })).toBeVisible();
-  await expect(row.getByRole('checkbox', { name: /原文上报/ })).toBeEnabled();
+  await expect(row.getByRole('cell', { name: /已开启/ })).toBeVisible();
+  await expect(row.getByRole('checkbox', { name: /原文上报/ })).toHaveCount(0);
   await expect(row.getByRole('button', { name: /清理/ })).toBeDisabled();
 
   const staleRow = page.getByRole('row').filter({ hasText: staleId });

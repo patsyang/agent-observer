@@ -17,10 +17,8 @@ def get_effective_policy(conn: sqlite3.Connection) -> dict:
     row = conn.execute("select * from effective_policies where id = 1").fetchone()
     return {
         "policy_version": row["policy_version"],
-        "template_enabled": bool(row["template_enabled"]),
-        "upload_raw": bool(row["upload_raw"]),
-        "collection_policy": row["collection_policy"],
-        "diagnostic_policy": row["diagnostic_policy"],
+        "raw_upload_mode": "always_on",
+        "enrichment_mode": row["enrichment_mode"],
     }
 
 
@@ -31,30 +29,24 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         raise ValueError("expected_version_required")
     if int(expected_version) != current["policy_version"]:
         raise ValueError("policy_version_conflict")
+    if extra_fields := set(payload) - {"expected_version", "enrichment_mode"}:
+        raise ValueError(f"unsupported_policy_field:{sorted(extra_fields)[0]}")
 
     next_policy = {
         "policy_version": current["policy_version"] + 1,
-        "template_enabled": bool(payload.get("template_enabled", current["template_enabled"])),
-        "upload_raw": bool(payload.get("upload_raw", current["upload_raw"])),
-        "collection_policy": _clean_policy_text(payload.get("collection_policy", current["collection_policy"])),
-        "diagnostic_policy": _clean_policy_text(payload.get("diagnostic_policy", current["diagnostic_policy"])),
+        "raw_upload_mode": "always_on",
+        "enrichment_mode": _enrichment_mode(payload.get("enrichment_mode", current["enrichment_mode"])),
     }
     conn.execute(
         """
         update effective_policies
         set policy_version = ?,
-            template_enabled = ?,
-            upload_raw = ?,
-            collection_policy = ?,
-            diagnostic_policy = ?
+            enrichment_mode = ?
         where id = 1
         """,
         (
             next_policy["policy_version"],
-            int(next_policy["template_enabled"]),
-            int(next_policy["upload_raw"]),
-            next_policy["collection_policy"],
-            next_policy["diagnostic_policy"],
+            next_policy["enrichment_mode"],
         ),
     )
     _write_audit(
@@ -65,8 +57,8 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         {
             "before_version": current["policy_version"],
             "after_version": next_policy["policy_version"],
-            "template_enabled": next_policy["template_enabled"],
-            "upload_raw": next_policy["upload_raw"],
+            "raw_upload_mode": next_policy["raw_upload_mode"],
+            "enrichment_mode": next_policy["enrichment_mode"],
             "reason_code": "operator_policy_update",
         },
     )
@@ -92,20 +84,30 @@ def recent_audit(conn: sqlite3.Connection, limit: int = 5) -> dict:
     ]
     latest = events[0] if events else None
     return {
-        "latest": f"{latest['action']} by {latest['actor']} at {latest['created_at']}" if latest else "暂无审计记录",
+        "latest": _audit_summary(latest) if latest else "暂无审计记录",
         "events": events,
     }
+
+
+def _audit_summary(event: dict) -> str:
+    labels = {
+        "policy_changed": "接入策略已保存",
+        "display_label_changed": "采集器显示名已更新",
+        "collector_removed": "采集器已移除",
+    }
+    action = labels.get(str(event.get("action")), "策略记录已更新")
+    return f"{action}，时间 {event['created_at']}"
 
 
 def write_management_audit(conn: sqlite3.Connection, object_type: str, object_id: str, action: str, metadata: dict) -> None:
     _write_audit(conn, object_type, object_id, action, metadata)
 
 
-def _clean_policy_text(value: object) -> str:
-    text = " ".join(str(value).split()).strip()
-    if not text:
-        raise ValueError("policy_text_required")
-    return text[:240]
+def _enrichment_mode(value: object) -> str:
+    mode = str(value or "").strip()
+    if mode not in {"disabled", "enabled"}:
+        raise ValueError("unsupported_enrichment_mode")
+    return mode
 
 
 def _write_audit(conn: sqlite3.Connection, object_type: str, object_id: str, action: str, metadata: dict) -> None:

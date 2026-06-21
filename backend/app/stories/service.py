@@ -7,8 +7,8 @@ import sqlite3
 from app.collector_client.command_context import command_error_projection
 from app.stories.common import _loads, _snapshot_hash, _story_id, _window_cutoff
 from app.stories.evidence import (
-    _diagnostic_evidence_entries,
-    _diagnostic_status_summary,
+    _enrichment_evidence_entries,
+    _enrichment_status_summary,
     _enrich_evidence_chain,
     _evidence_entries,
     _primary_projection,
@@ -17,8 +17,6 @@ from app.stories.evidence import (
 from app.stories.fact_stories import (
     build_risk_stories,
     build_risk_stories_for_facts,
-    build_usage_stories,
-    build_usage_stories_for_facts,
 )
 from app.stories.handling import handle_story, mark_story_read
 from app.stories.presentation import (
@@ -43,6 +41,7 @@ from app.stories.repository import (
 
 def rebuild_stories(conn: sqlite3.Connection, reason: str = "manual") -> dict:
     stories = []
+    _remove_usage_stories(conn)
     command_timeout_stories = _build_command_timeout_stories(conn, reason)
     stories.extend(command_timeout_stories)
     error_story_ids: list[str] = []
@@ -55,7 +54,6 @@ def rebuild_stories(conn: sqlite3.Connection, reason: str = "manual") -> dict:
         if story:
             error_story_ids.append(story["story_id"])
         stories.append(story)
-    stories.extend(build_usage_stories(conn, reason))
     risk_stories = build_risk_stories(conn, reason)
     stories.extend(risk_stories)
     _remove_stale_error_stories(conn, error_story_ids)
@@ -67,6 +65,7 @@ def rebuild_stories(conn: sqlite3.Connection, reason: str = "manual") -> dict:
 
 def update_stories_for_facts(conn: sqlite3.Connection, fact_ids: list[str], reason: str = "telemetry_ingest") -> dict:
     fact_ids = sorted({fact_id for fact_id in fact_ids if fact_id})
+    _remove_usage_stories(conn)
     if not fact_ids:
         return {"reason": reason, "updated": 0, "stories": []}
     facts = _facts_by_ids(conn, fact_ids)
@@ -75,7 +74,6 @@ def update_stories_for_facts(conn: sqlite3.Connection, fact_ids: list[str], reas
     for signatures in _affected_error_signature_groups(conn, fact_ids):
         if not _is_command_timeout_signature(conn, signatures):
             stories.append(_build_signature_story(conn, signatures, reason))
-    stories.extend(build_usage_stories_for_facts(conn, fact_ids, reason))
     stories.extend(build_risk_stories_for_facts(conn, fact_ids, reason))
     conn.commit()
     public_stories = [story for story in stories if story]
@@ -98,6 +96,8 @@ def list_stories(
     if not include_hidden:
         clauses.append("attention_state in ('active', 'needs_review')")
     if queue == "actionable":
+        clauses.append("story_key not like 'usage:%'")
+    else:
         clauses.append("story_key not like 'usage:%'")
     cutoff = _window_cutoff(window)
     if cutoff:
@@ -125,6 +125,8 @@ def list_stories(
 def get_story_detail(conn: sqlite3.Connection, story_id: str) -> dict:
     row = conn.execute("select * from observation_stories where story_id = ?", (story_id,)).fetchone()
     if row is None:
+        raise LookupError(story_id)
+    if str(row["story_key"]).startswith("usage:"):
         raise LookupError(story_id)
     story = _row_to_story(conn, row, include_evidence_refs=True)
     snapshot = _loads(row["current_snapshot_json"])
@@ -160,7 +162,7 @@ def _build_command_timeout_stories(conn: sqlite3.Connection, reason: str) -> lis
         if not projection:
             continue
         workflow = str(projection.get("workflow") or "unknown")
-        run_id = str(projection.get("run_id") or ("legacy-timeout" if workflow == "unknown" else "unknown"))
+        run_id = str(projection.get("run_id") or "unknown")
         groups.setdefault((workflow, run_id), []).append(row)
     stories = []
     for (workflow, run_id), facts in sorted(groups.items()):
@@ -221,6 +223,7 @@ def _write_command_timeout_story(
         "source_refs": [_loads(fact["source_refs_json"]) for fact in facts],
         "command_context": latest_projection,
     }
+
     snapshot_hash = _snapshot_hash(snapshot)
     existing = conn.execute("select snapshot_hash, attention_state from observation_stories where story_id = ?", (story_id,)).fetchone()
     handling = conn.execute("select * from story_handling_states where story_id = ?", (story_id,)).fetchone()
@@ -240,7 +243,7 @@ def _write_command_timeout_story(
         "priority_score": 100,
         "evidence_refs": sorted(entry["evidence_ref"] for entry in evidence_chain),
         "usage_summary": _usage_summary(conn, [fact["fact_id"] for fact in facts]),
-        "diagnostic_status_summary": _diagnostic_status_summary(conn, story_id),
+        "enrichment_status_summary": _enrichment_status_summary(conn, story_id),
         "attention_state": _attention_state(existing, handling, snapshot_hash),
         "current_snapshot": snapshot,
         "snapshot_hash": snapshot_hash,
@@ -302,23 +305,16 @@ def _command_timeout_from_raw(conn: sqlite3.Connection, fact_id: str) -> dict:
     }
 
 def _build_signature_story(conn: sqlite3.Connection, signatures: list[sqlite3.Row], reason: str) -> dict:
-    facts_by_id: dict[str, sqlite3.Row] = {}
-    for signature in signatures:
-        error_fact = conn.execute("select * from observed_facts where fact_id = ?", (signature["fact_id"],)).fetchone()
-        if error_fact is None:
-            continue
-        conversation_ref = _loads(error_fact["source_refs_json"]).get("conversation_ref")
-        for fact in _related_facts(conn, conversation_ref, error_fact["fact_id"]):
-            facts_by_id[fact["fact_id"]] = fact
-    if not facts_by_id:
+    hit_facts = _signature_hit_facts(conn, signatures)
+    if not hit_facts:
         return {}
-    facts = sorted(facts_by_id.values(), key=lambda fact: (fact["occurred_at"], fact["fact_id"]))
+    facts = sorted(hit_facts, key=lambda fact: (fact["occurred_at"], fact["fact_id"]))
     signature = _signature_summary(signatures)
     evidence_chain = []
     for fact in facts:
         evidence_chain.extend(_evidence_entries(conn, fact))
-    diagnostic_entries = _diagnostic_evidence_entries(conn, _story_id(f"error:{signature['signature_key']}"))
-    evidence_chain.extend(diagnostic_entries)
+    enrichment_entries = _enrichment_evidence_entries(conn, _story_id(f"error:{signature['signature_key']}"))
+    evidence_chain.extend(enrichment_entries)
     evidence_refs = sorted(entry["evidence_ref"] for entry in evidence_chain)
     usage_summary = _usage_summary(conn, [fact["fact_id"] for fact in facts])
     impact_objects = _impact_objects(conn, facts)
@@ -345,11 +341,11 @@ def _build_signature_story(conn: sqlite3.Connection, signatures: list[sqlite3.Ro
         "priority_score": _priority_score(signature, facts),
         "evidence_refs": evidence_refs,
         "usage_summary": usage_summary,
-        "diagnostic_status_summary": _diagnostic_status_summary(conn, story_id),
+        "enrichment_status_summary": _enrichment_status_summary(conn, story_id),
         "attention_state": attention_state,
         "current_snapshot": snapshot,
         "snapshot_hash": snapshot_hash,
-        "conclusion": _error_conclusion(signature),
+        "conclusion": _error_conclusion(signature, len(facts)),
         "impact_objects": impact_objects,
         "suggested_action": "查看证据链并选择处理结论",
     }
@@ -370,12 +366,42 @@ def _signature_summary(signatures: list[sqlite3.Row]) -> dict:
     }
 
 
+def _signature_hit_facts(conn: sqlite3.Connection, signatures: list[sqlite3.Row]) -> list[sqlite3.Row]:
+    signature_keys = [signature["signature_key"] for signature in signatures]
+    placeholders = ",".join("?" for _ in signature_keys)
+    rows = conn.execute(
+        f"""
+        select distinct of.*
+        from error_signature_facts esf
+        join observed_facts of on of.fact_id = esf.fact_id
+        where esf.signature_key in ({placeholders})
+        order by of.occurred_at, of.fact_id
+        """,
+        signature_keys,
+    ).fetchall()
+    if rows:
+        return rows
+    fact_ids = [signature["fact_id"] for signature in signatures]
+    return _facts_by_ids(conn, fact_ids)
+
+
 def _affected_error_signature_groups(conn: sqlite3.Connection, fact_ids: list[str]) -> list[list[sqlite3.Row]]:
     placeholders = ",".join("?" for _ in fact_ids)
     affected = conn.execute(
-        f"select * from error_signatures where category != 'command_timeout' and fact_id in ({placeholders})",
+        f"""
+        select distinct es.*
+        from error_signature_facts esf
+        join error_signatures es on es.signature_key = esf.signature_key
+        where es.category != 'command_timeout'
+          and esf.fact_id in ({placeholders})
+        """,
         fact_ids,
     ).fetchall()
+    if not affected:
+        affected = conn.execute(
+            f"select * from error_signatures where category != 'command_timeout' and fact_id in ({placeholders})",
+            fact_ids,
+        ).fetchall()
     if not affected:
         return []
     groups: dict[str, list[sqlite3.Row]] = {}
@@ -409,3 +435,7 @@ def _signature_rows_for_canonical(conn: sqlite3.Connection, signature_key: str) 
         """,
         (signature_key,),
     ).fetchall()
+
+
+def _remove_usage_stories(conn: sqlite3.Connection) -> None:
+    conn.execute("delete from observation_stories where story_key like 'usage:%'")

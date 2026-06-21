@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
 
 from app.collector_client.config import CollectorConfig
 from app.collector_client.state import load_state
@@ -38,7 +37,6 @@ def _state_payload(state: dict[str, object], *, compact: bool = False) -> dict[s
         "runtime_phase": state.get("runtime_phase", "idle"),
         "reason_code": state.get("reason_code"),
         "source_status": state.get("source_status"),
-        "raw_upload_enabled": bool(state.get("raw_upload_enabled", False)),
         "process_id": state.get("process_id"),
         "started_at": state.get("started_at"),
         "process_heartbeat_at": state.get("process_heartbeat_at"),
@@ -54,24 +52,16 @@ def _state_payload(state: dict[str, object], *, compact: bool = False) -> dict[s
 
 def _cursor_payload(cursor: object) -> dict[str, object]:
     if not isinstance(cursor, dict):
-        return {"last_sequence": 0, "last_source_key": "", "recent_source_key_count": 0}
-    recent = cursor.get("recent_source_keys")
-    recent_count = len(recent) if isinstance(recent, list) else 0
+        return {"last_sequence": 0, "source_file_count": 0, "live_tail_source_key_count": 0}
     sources = cursor.get("sources")
     source_count = len(sources) if isinstance(sources, dict) else 0
+    live_tail = cursor.get("live_tail_source_keys")
+    live_tail_count = len(live_tail) if isinstance(live_tail, list) else 0
     return {
         "last_sequence": int(cursor.get("last_sequence") or 0),
-        "last_source_key": _short_source_key(str(cursor.get("last_source_key") or "")),
-        "recent_source_key_count": recent_count,
         "source_file_count": source_count,
+        "live_tail_source_key_count": live_tail_count,
     }
-
-def _short_source_key(source_key: str) -> str:
-    if not source_key:
-        return ""
-    path, _, suffix = source_key.rpartition(":")
-    name = Path(path).name if path else source_key
-    return f"{name}:{suffix}" if suffix else name
 
 def _facts_summary(facts: list[dict]) -> dict[str, object]:
     by_type: dict[str, int] = {}
@@ -94,10 +84,7 @@ def _source_keys_from_fact(fact: dict) -> list[str]:
     return [key for key in keys if key]
 
 def _load_configured_state(config: CollectorConfig) -> dict[str, object]:
-    state = load_state(config.state_path)
-    if "raw_upload_enabled" not in state:
-        state["raw_upload_enabled"] = config.raw_upload_enabled
-    return state
+    return load_state(config.state_path)
 
 def _already_running(state: dict[str, object], config: CollectorConfig) -> bool:
     if not state.get("running"):
@@ -108,14 +95,14 @@ def _already_running(state: dict[str, object], config: CollectorConfig) -> bool:
 def _liveness(state: dict[str, object], interval_seconds: int) -> str:
     if not bool(state.get("running")):
         return "stopped"
+    if not _process_exists(state.get("process_id")):
+        return "stale_state"
     heartbeat = _parse_datetime(state.get("process_heartbeat_at"))
     if not heartbeat:
         return "unknown"
     max_age = max(STALE_HEARTBEAT_GRACE_SECONDS, int(interval_seconds) * 2 + STALE_HEARTBEAT_GRACE_SECONDS)
     if datetime.now(timezone.utc) - heartbeat > timedelta(seconds=max_age):
-        if _process_exists(state.get("process_id")):
-            return "busy"
-        return "stale_state"
+        return "busy"
     return "alive"
 
 def _liveness_message(liveness: str) -> str:

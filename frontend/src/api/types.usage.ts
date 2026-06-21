@@ -1,26 +1,32 @@
 import type { TimeWindow } from './types.facts';
 
-export type UsageKind = 'associated' | 'attributed';
-
 export interface UsageRollup {
   rollup_id: string;
   window: string;
   scope: 'total' | 'session' | 'conversation' | 'project' | 'account' | 'activity_tag';
   scope_value: string;
   units: number;
-  usage_kind: UsageKind;
   activity_tag: string;
-  additive: boolean;
   evidence_refs: string[];
 }
 
 export interface UsageSummary {
   window: string;
   rollups: UsageRollup[];
-  totals: {
-    associated_units: number;
-    attributed_units: number;
+  trend: Array<{
+    bucket: string;
+    effective_units: number;
     unknown_units: number;
+    cached_input_units: number;
+    input_token_units: number;
+    cache_hit_rate: number;
+  }>;
+  totals: {
+    effective_units: number;
+    unknown_units: number;
+    cached_input_units: number;
+    input_token_units: number;
+    cache_hit_rate: number;
   };
 }
 

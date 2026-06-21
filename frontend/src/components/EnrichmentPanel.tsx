@@ -1,30 +1,30 @@
 import { useState } from 'react';
 import { Search, X } from 'lucide-react';
 
-import type { DiagnosticAvailability, DiagnosticJob } from '../api/types';
+import type { EnrichmentAvailability, EnrichmentJob } from '../api/types';
 
 interface Props {
   storyId: string;
-  availability: DiagnosticAvailability;
-  requestDiagnostic: (storyId: string, capabilityId: string) => Promise<DiagnosticJob>;
-  cancelDiagnostic: (jobId: string) => Promise<DiagnosticJob>;
+  availability: EnrichmentAvailability;
+  requestEnrichment: (storyId: string, capabilityId: string) => Promise<EnrichmentJob>;
+  cancelEnrichment: (jobId: string) => Promise<EnrichmentJob>;
   onChanged?: () => Promise<void>;
 }
 
 type MutationState = 'idle' | 'submitting' | 'success' | 'error';
 
-export function DiagnosticPanel({ storyId, availability, requestDiagnostic, cancelDiagnostic, onChanged }: Props) {
-  const [activeJob, setActiveJob] = useState<DiagnosticJob | null>(availability.active_job ?? null);
+export function EnrichmentPanel({ storyId, availability, requestEnrichment, cancelEnrichment, onChanged }: Props) {
+  const [activeJob, setActiveJob] = useState<EnrichmentJob | null>(availability.active_job ?? null);
   const [mutationState, setMutationState] = useState<MutationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
   return (
-    <section aria-label="诊断操作">
-      <h3>诊断</h3>
+    <section aria-label="信号补证操作">
+      <h3>信号补证</h3>
       {activeJob && (
-        <div className="diagnostic-status">
+        <div className="enrichment-status">
           <p>
-            诊断 {diagnosticJobStatusLabel(activeJob.status)}
+            补证 {enrichmentJobStatusLabel(activeJob.status)}
             {activeJob.reason_code ? `，${reasonCodeLabel(activeJob.reason_code)}` : ''}
           </p>
           {activeJob.status === 'queued' && (
@@ -35,11 +35,11 @@ export function DiagnosticPanel({ storyId, availability, requestDiagnostic, canc
           )}
         </div>
       )}
-      <ul className="diagnostic-list">
+      <ul className="enrichment-list">
         {availability.capabilities.map((capability) => (
           <li key={capability.capability_id}>
-            <div className="diagnostic-item__main">
-              <strong>{capabilityLabel(capability.capability_id, capability.label)}</strong>
+            <div className="enrichment-item__main">
+              <strong>{capability.label}</strong>
               <span>
                 {capabilityStateLabel(capability.state)}
                 {capability.reason_code ? `，${reasonCodeLabel(capability.reason_code)}` : ''}
@@ -47,11 +47,11 @@ export function DiagnosticPanel({ storyId, availability, requestDiagnostic, canc
             </div>
             <button
               className="compact-button primary"
-              disabled={capability.state === 'unavailable' || mutationState === 'submitting'}
+              disabled={Boolean(activeJob) || capability.state === 'unavailable' || mutationState === 'submitting'}
               onClick={() => runRequest(capability.capability_id)}
             >
               <Search aria-hidden="true" size={15} />
-              补充上下文
+              补充工具失败上下文
             </button>
           </li>
         ))}
@@ -64,14 +64,14 @@ export function DiagnosticPanel({ storyId, availability, requestDiagnostic, canc
     setMutationState('submitting');
     setMessage(null);
     try {
-      const job = await requestDiagnostic(storyId, capabilityId);
+      const job = await requestEnrichment(storyId, capabilityId);
       setActiveJob(job);
       setMutationState('success');
-      setMessage(`诊断 ${diagnosticJobStatusLabel(job.status)}`);
+      setMessage(`补证 ${enrichmentJobStatusLabel(job.status)}`);
       await onChanged?.();
     } catch {
       setMutationState('error');
-      setMessage('诊断请求失败。请确认采集器和策略允许后重试。');
+      setMessage('补证请求失败。请确认采集器在线且策略允许后重试。');
     }
   }
 
@@ -79,24 +79,16 @@ export function DiagnosticPanel({ storyId, availability, requestDiagnostic, canc
     setMutationState('submitting');
     setMessage(null);
     try {
-      const job = await cancelDiagnostic(jobId);
+      const job = await cancelEnrichment(jobId);
       setActiveJob(job);
       setMutationState('success');
-      setMessage(`诊断 ${diagnosticJobStatusLabel(job.status)}`);
+      setMessage(`补证 ${enrichmentJobStatusLabel(job.status)}`);
       await onChanged?.();
     } catch {
       setMutationState('error');
-      setMessage('取消诊断失败。只有排队中的诊断可以取消。');
+      setMessage('取消补证失败。只有排队中的补证任务可以取消。');
     }
   }
-}
-
-function capabilityLabel(capabilityId: string, fallback: string): string {
-  const labels: Record<string, string> = {
-    codex_error_context: 'Codex 错误上下文',
-    codex_locked_source: '锁定数据源检查'
-  };
-  return labels[capabilityId] ?? fallback;
 }
 
 function capabilityStateLabel(state: string): string {
@@ -108,7 +100,7 @@ function capabilityStateLabel(state: string): string {
   return labels[state] ?? state;
 }
 
-function diagnosticJobStatusLabel(status: string): string {
+function enrichmentJobStatusLabel(status: string): string {
   const labels: Record<string, string> = {
     queued: '已排队',
     pending: '排队中',

@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -11,8 +11,8 @@ const detail: ObservationStoryDetail = {
   conclusion: 'Codex command failed repeatedly in checkout workflow',
   impact_objects: ['checkout workflow'],
   evidence_refs: ['proj-error-001', 'proj-risk-001'],
-  usage_summary: { attributed_units: 55, associated_units: 0, no_usage_reason: null },
-  diagnostic_status_summary: { status: 'none', reason_code: null },
+  usage_summary: { effective_units: 55, no_usage_reason: null },
+  enrichment_status_summary: { status: 'none', reason_code: null },
   handling_state: 'unread',
   conclusion_code: null,
   handling_note: null,
@@ -61,40 +61,40 @@ const detail: ObservationStoryDetail = {
 };
 
 describe('ObservationStoryDetailPage', () => {
-  const diagnosticProps = {
-    loadDiagnosticAvailability: async () => ({
+  const enrichmentProps = {
+    loadEnrichmentAvailability: async () => ({
       capabilities: [
         {
-          capability_id: 'codex_error_context',
-          label: 'Collect Codex error context',
+          capability_id: 'codex_tool_failure_context',
+          label: '工具失败上下文补证',
           state: 'available' as const,
           reason_code: null
         }
       ]
     }),
-    requestDiagnostic: async () => ({
-      job_id: 'diag-job-001',
+    requestEnrichment: async () => ({
+      job_id: 'enrichment-job-001',
       status: 'pending',
-      capability_id: 'codex_error_context'
+      capability_id: 'codex_tool_failure_context'
     }),
-    cancelDiagnostic: async () => ({
-      job_id: 'diag-job-001',
+    cancelEnrichment: async () => ({
+      job_id: 'enrichment-job-001',
       status: 'cancelled',
-      capability_id: 'codex_error_context'
+      capability_id: 'codex_tool_failure_context'
     })
   };
 
-  it('renders story detail evidence chain, usage, diagnostic state and audit summary', async () => {
+  it('renders signal detail hit list, enrichment state and audit summary', async () => {
     const loadStoryDetail = vi.fn(async () => detail);
-    const loadDiagnosticAvailability = vi.fn(diagnosticProps.loadDiagnosticAvailability);
+    const loadEnrichmentAvailability = vi.fn(enrichmentProps.loadEnrichmentAvailability);
     const openFact = vi.fn();
     render(
       <ObservationStoryDetailPage
         storyId="story-001"
         loadStoryDetail={loadStoryDetail}
-        loadDiagnosticAvailability={loadDiagnosticAvailability}
-        requestDiagnostic={diagnosticProps.requestDiagnostic}
-        cancelDiagnostic={diagnosticProps.cancelDiagnostic}
+        loadEnrichmentAvailability={loadEnrichmentAvailability}
+        requestEnrichment={enrichmentProps.requestEnrichment}
+        cancelEnrichment={enrichmentProps.cancelEnrichment}
         markRead={async () => detail}
         handleStory={async () => detail}
         onOpenFact={openFact}
@@ -104,7 +104,7 @@ describe('ObservationStoryDetailPage', () => {
 
     expect(await screen.findByText(detail.conclusion)).toBeInTheDocument();
     const evidenceChain = screen.getByLabelText('证据链');
-    expect(evidenceChain).toHaveTextContent('真实证据');
+    expect(evidenceChain).toHaveTextContent('命中内容');
     expect(evidenceChain).toHaveTextContent('类型 / 来源');
     expect(evidenceChain).toHaveTextContent('可信度 / 原文');
     expect(evidenceChain).toHaveTextContent('Codex 错误');
@@ -116,18 +116,19 @@ describe('ObservationStoryDetailPage', () => {
     expect(evidenceChain).toHaveTextContent('高可信');
     expect(evidenceChain).toHaveTextContent('已上传原文');
     expect(evidenceChain).toHaveTextContent('待补证');
-    expect(screen.getByRole('cell', { name: /Codex 错误/ })).toBeInTheDocument();
-    await userEvent.click(screen.getAllByRole('button', { name: '查看事实' })[0]);
+    const errorRow = screen.getByRole('row', { name: /Codex 错误/ });
+    expect(errorRow).toBeInTheDocument();
+    await userEvent.click(within(errorRow).getByRole('button', { name: '查看会话' }));
     expect(openFact).toHaveBeenCalledWith('event-error-001');
-    const summary = screen.getByLabelText('故事摘要');
-    expect(summary).toHaveTextContent(/已归因 55，关联 0/);
-    expect(summary).toHaveTextContent(/暂无诊断/);
+    const summary = screen.getByLabelText('信号摘要');
+    expect(summary).toHaveTextContent(/有效用量 55/);
+    expect(summary).toHaveTextContent(/暂无补证/);
     expect(screen.getByText(/暂无审计记录/)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
-    await userEvent.click(screen.getByRole('button', { name: '补充上下文' }));
-    expect(await screen.findByRole('status')).toHaveTextContent(/诊断 排队中/);
+    await userEvent.click(screen.getByRole('button', { name: '补充工具失败上下文' }));
+    expect(await screen.findByRole('status')).toHaveTextContent(/补证 排队中/);
     expect(loadStoryDetail).toHaveBeenCalledTimes(2);
-    expect(loadDiagnosticAvailability).toHaveBeenCalledTimes(2);
+    expect(loadEnrichmentAvailability).toHaveBeenCalledTimes(2);
   });
 
   it('requires structured conclusion before handling and renders refreshed audit state', async () => {
@@ -153,7 +154,7 @@ describe('ObservationStoryDetailPage', () => {
       <ObservationStoryDetailPage
         storyId="story-001"
         loadStoryDetail={async () => detail}
-        {...diagnosticProps}
+        {...enrichmentProps}
         markRead={async () => detail}
         handleStory={async () => handled}
         onBack={() => {}}
@@ -161,7 +162,7 @@ describe('ObservationStoryDetailPage', () => {
     );
 
     await screen.findByText(detail.conclusion);
-    await userEvent.click(screen.getByRole('button', { name: /处理故事/ }));
+    await userEvent.click(screen.getByRole('button', { name: /处理信号/ }));
     await userEvent.click(screen.getByRole('button', { name: /^处理$/ }));
     expect(screen.getByRole('alert')).toHaveTextContent(/必须选择结构化结论/);
 

@@ -8,6 +8,8 @@ test('operator handles a story and recurrence returns it with conclusion preserv
   const occurredAt = new Date().toISOString();
   const firstBatch = {
     batch_id: `e2e-handling-${suffix}-001`,
+    protocol_version: 'agent-observer-telemetry/v2',
+    agent_version: '0.2.0',
     collector_id: 'collector-codex',
     source: 'codex',
     cursor: `cursor-e2e-handling-${suffix}-001`,
@@ -37,17 +39,17 @@ test('operator handles a story and recurrence returns it with conclusion preserv
 
   await page.goto('/');
   const storyCard = page.locator(`[data-story-key="${storyKey}"]`);
-  await expect(storyCard).toContainText('发现 1 次 Codex 工具执行失败');
+  await expect(storyCard).toContainText('发现 1 条 Codex 工具执行失败命中');
   await expect(storyCard).not.toContainText(summary);
   await storyCard.getByRole('button').click();
-  await page.getByRole('button', { name: /处理故事/ }).click();
+  await page.getByRole('button', { name: /处理信号/ }).click();
   await page.getByRole('button', { name: /^处理$/ }).click();
   await expect(page.getByRole('alert')).toContainText('必须选择结构化结论');
   await page.getByLabel(/结论/).selectOption('known_issue');
   await page.getByLabel(/备注/).fill('Tracked in backlog');
   await page.getByRole('button', { name: /^处理$/ }).click();
-  await expect(page.getByLabel('故事详情')).toContainText('已处理隐藏，已处理，已知问题');
-  await expect(page.getByLabel('故事详情')).toContainText('story_handling_changed by fixed-management-account');
+  await expect(page.getByLabel('信号详情')).toContainText('已处理隐藏，已处理，已知问题');
+  await expect(page.getByLabel('信号详情')).toContainText('story_handling_changed by fixed-management-account');
 
   const handled = await request.get(`http://127.0.0.1:8765/api/stories/${storyId}`);
   expect((await handled.json()).conclusion_code).toBe('known_issue');

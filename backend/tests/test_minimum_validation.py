@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from app.db.connection import connect
 from app.collectors.service import heartbeat, register_collector
-from app.diagnostics.service import record_diagnostic_result, request_diagnostic
+from app.evidence_enrichment.service import record_enrichment_result, request_enrichment
 from app.ingest.service import ingest_telemetry
 from app.policy import update_effective_policy
 from app.stories.service import handle_story
@@ -13,6 +13,11 @@ from app.validation.service import (
     run_minimum_validation_experiment,
 )
 
+CLIENT_PROTOCOL = {
+    "protocol_version": "agent-observer-telemetry/v2",
+    "agent_version": "0.2.0",
+}
+
 
 def _validation_batch(
     *,
@@ -22,7 +27,7 @@ def _validation_batch(
     categories = [
         ("validation-error-recurring", "error", "codex_error", "high", "high", "Recurring checkout command failure"),
         ("validation-low-evidence", "unknown", "uncategorized", "low", "low", "Low evidence retry candidate"),
-        ("validation-diagnostic", "diagnostic", "diagnostic_result", "high", "medium", "Diagnostic result feedback needed"),
+        ("validation-enrichment", "enrichment", "enrichment_result", "high", "medium", "Enrichment result feedback needed"),
         ("validation-usage", "usage", "usage", "high", "low", "High usage session with deterministic label"),
         ("validation-risk", "risk", "high_risk_operation", "high", "medium", "High-risk workspace command"),
         ("validation-sensitive", "risk", "sensitive_touch", "high", "high", "Sensitive configuration touched"),
@@ -49,7 +54,6 @@ def _validation_batch(
         if fact_type == "usage":
             item["usage"] = {
                 "units": 90,
-                "usage_kind": "attributed",
                 "activity_tag": "implementation",
                 "session_id": "session-validation",
                 "conversation_id": "conversation-validation",
@@ -63,6 +67,8 @@ def _validation_batch(
         items.append(item)
     return {
         "batch_id": "batch-validation-001",
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
         "collector_id": "collector-codex",
         "source": "codex",
         "cursor": "cursor-validation-001",
@@ -88,15 +94,15 @@ def test_minimum_validation_stops_synthetic_sample_before_release_pass(tmp_path)
     assert {row["category"] for row in report["sample_coverage"]} == {
         "error_recurrence",
         "low_evidence_fact",
-        "diagnostic_feedback",
-        "usage_anomaly",
+        "enrichment_feedback",
+        "usage_signal",
         "high_risk_operation",
         "sensitive_object_touch",
     }
     assert all(row["covered"] for row in report["sample_coverage"])
     assert report["flow_coverage"].keys() == set(FLOW_IDS)
     assert report["acceptance_coverage"].keys() == set(ACCEPTANCE_IDS)
-    assert report["data_handling_review"]["raw_upload_mode"] == "policy_controlled"
+    assert report["data_handling_review"]["raw_upload_mode"] == "always_on"
     assert output_path.exists()
 
 
@@ -118,9 +124,10 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
                 "display_name": "Codex collector",
                 "hostname": "validation-host",
                 "windows_username": "validation-user",
+                **CLIENT_PROTOCOL,
             },
         )
-        heartbeat(conn, "collector-codex", {"source_status": "online", "reason_code": "start_running"})
+        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"})
         ingest_telemetry(
             conn,
             _validation_batch(validation_sample="documented_7_day_local_sample", occurred_at=dates),
@@ -128,16 +135,13 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
         rebuild_stories(conn, reason="minimum-validation")
         story_id = conn.execute("select story_id from observation_stories order by rowid limit 1").fetchone()["story_id"]
         handle_story(conn, story_id, "known_issue", "已确认需要跟进")
-        job = request_diagnostic(conn, story_id, "codex_error_context")
-        record_diagnostic_result(conn, job["job_id"], "succeeded", "补证结果已回流")
+        job = request_enrichment(conn, story_id, "codex_tool_failure_context")
+        record_enrichment_result(conn, job["job_id"], "succeeded", "补证结果已回流")
         update_effective_policy(
             conn,
             {
                 "expected_version": 1,
-                "template_enabled": True,
-                "upload_raw": False,
-                "collection_policy": "codex default local observation",
-                "diagnostic_policy": "whitelist only",
+                "enrichment_mode": "enabled",
             },
         )
         report = run_minimum_validation_experiment(conn, output_path)
@@ -151,8 +155,8 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
     assert {row["category"] for row in report["sample_coverage"]} == {
         "error_recurrence",
         "low_evidence_fact",
-        "diagnostic_feedback",
-        "usage_anomaly",
+        "enrichment_feedback",
+        "usage_signal",
         "high_risk_operation",
         "sensitive_object_touch",
     }
@@ -161,7 +165,7 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
     assert report["acceptance_coverage"].keys() == set(ACCEPTANCE_IDS)
     assert all(item["covered"] for item in report["flow_coverage"].values())
     assert all(item["covered"] for item in report["acceptance_coverage"].values())
-    assert report["data_handling_review"]["raw_upload_mode"] == "policy_controlled"
+    assert report["data_handling_review"]["raw_upload_mode"] == "always_on"
     assert output_path.exists()
 
 
@@ -204,23 +208,21 @@ def test_minimum_validation_qualifies_real_local_codex_template_without_fixture_
                 "display_name": "Codex collector",
                 "hostname": "validation-host",
                 "windows_username": "validation-user",
+                **CLIENT_PROTOCOL,
             },
         )
-        heartbeat(conn, "collector-codex", {"source_status": "online", "reason_code": "start_running"})
+        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"})
         ingest_telemetry(conn, batch)
         rebuild_stories(conn, reason="minimum-validation")
         story_id = conn.execute("select story_id from observation_stories order by rowid limit 1").fetchone()["story_id"]
         handle_story(conn, story_id, "known_issue", "已确认需要跟进")
-        job = request_diagnostic(conn, story_id, "codex_error_context")
-        record_diagnostic_result(conn, job["job_id"], "succeeded", "补证结果已回流")
+        job = request_enrichment(conn, story_id, "codex_tool_failure_context")
+        record_enrichment_result(conn, job["job_id"], "succeeded", "补证结果已回流")
         update_effective_policy(
             conn,
             {
                 "expected_version": 1,
-                "template_enabled": True,
-                "upload_raw": False,
-                "collection_policy": "codex default local observation",
-                "diagnostic_policy": "whitelist only",
+                "enrichment_mode": "enabled",
             },
         )
         report = run_minimum_validation_experiment(conn, output_path)

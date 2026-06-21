@@ -1,23 +1,6 @@
 from __future__ import annotations
 
-from app.dev_server import _facts_query_options, _stories_query_options
-
-
-def test_dev_server_forwards_fact_window_and_health_filters():
-    options = _facts_query_options("/api/facts?quality=low&window=1h&include_health=false&time_basis=ingested")
-
-    assert options == {
-        "quality": "low",
-        "fact_type": None,
-        "source": None,
-        "window": "1h",
-        "include_health": False,
-        "limit": 50,
-        "offset": 0,
-        "page": None,
-        "page_size": 50,
-        "time_basis": "ingested",
-    }
+from app.dev_server import _conversations_query_options, _path_part, _stories_query_options
 
 
 def test_dev_server_forwards_story_window_and_queue_filters():
@@ -30,3 +13,20 @@ def test_dev_server_forwards_story_window_and_queue_filters():
         "page": 1,
         "page_size": 20,
     }
+
+
+def test_dev_server_forwards_conversation_filters_and_decodes_path_refs():
+    options = _conversations_query_options(
+        "/api/conversations?window=all&prompt_query=hello&response_query=world&start_at=2026-06-21T01%3A00%3A00.000Z"
+    )
+
+    assert options == {
+        "window": "all",
+        "start_at": "2026-06-21T01:00:00.000Z",
+        "end_at": None,
+        "prompt_query": "hello",
+        "response_query": "world",
+        "page": 1,
+        "page_size": 50,
+    }
+    assert _path_part("/api/conversations/ref%3Aconversation-1", 3) == "ref:conversation-1"

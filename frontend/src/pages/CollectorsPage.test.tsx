@@ -13,15 +13,13 @@ function collector(status: Collector['source_status']): Collector {
     hostname_hash: 'host-hash',
     windows_username_hash: 'user-hash',
     agent_type: 'codex',
-    agent_version: '0.1.0',
+    protocol_version: 'agent-observer-telemetry/v2',
+    agent_version: '0.2.0',
     source_status: status,
     reason_code: status,
     policy_version: 1,
     last_heartbeat_at: '2026-06-18T00:00:00Z',
-    outbox_backlog: status === 'degraded' ? 5 : 0,
-    raw_upload_enabled: false,
-    raw_upload_override: false,
-    raw_upload_source: 'global_policy'
+    outbox_backlog: status === 'degraded' ? 5 : 0
   };
 }
 
@@ -33,12 +31,6 @@ describe('CollectorsPage', () => {
           collectors: sourceStatuses.map(collector)
         })}
         deleteCollector={async () => ({ collector_id: 'collector-offline', removed: true, reason_code: 'operator_cleanup' })}
-        updateRawUpload={async () => ({
-          collector_id: 'collector-online',
-          raw_upload_enabled: true,
-          raw_upload_override: true,
-          raw_upload_source: 'collector_override'
-        })}
       />
     );
 
@@ -61,12 +53,6 @@ describe('CollectorsPage', () => {
       <CollectorsPage
         loadCollectors={async () => ({ collectors: [collector('online'), collector('offline')] })}
         deleteCollector={deleteCollector}
-        updateRawUpload={async () => ({
-          collector_id: 'collector-online',
-          raw_upload_enabled: true,
-          raw_upload_override: true,
-          raw_upload_source: 'collector_override'
-        })}
       />
     );
 
@@ -80,31 +66,17 @@ describe('CollectorsPage', () => {
     expect(screen.queryByRole('button', { name: /停止/ })).not.toBeInTheDocument();
   });
 
-  it('toggles raw upload only for online collectors', async () => {
-    const user = userEvent.setup();
-    const updateRawUpload = vi.fn(async () => ({
-      collector_id: 'collector-online',
-      raw_upload_enabled: true,
-      raw_upload_override: true,
-      raw_upload_source: 'collector_override'
-    }));
-
+  it('shows raw upload as fixed enabled without per-collector toggles', async () => {
     render(
       <CollectorsPage
         loadCollectors={async () => ({ collectors: [collector('online'), collector('offline')] })}
         deleteCollector={async () => ({ collector_id: 'collector-offline', removed: true, reason_code: 'operator_cleanup' })}
-        updateRawUpload={updateRawUpload}
       />
     );
 
     expect(await screen.findByText('Collector online')).toBeInTheDocument();
-    const rawUploadSwitches = screen.getAllByRole('checkbox', { name: /原文上报/ });
-    expect(rawUploadSwitches[0]).toBeEnabled();
-    expect(rawUploadSwitches[1]).toBeDisabled();
-    await user.click(rawUploadSwitches[0]);
-
-    expect(updateRawUpload).toHaveBeenCalledWith('collector-online', true);
-    expect(await screen.findByText('Collector online 已开启原文上报')).toBeInTheDocument();
-    expect(rawUploadSwitches[0]).toBeChecked();
+    expect(screen.queryByRole('checkbox', { name: /原文上报/ })).not.toBeInTheDocument();
+    expect(screen.getAllByText('已开启').length).toBe(2);
+    expect(screen.getAllByText('固定策略').length).toBe(2);
   });
 });

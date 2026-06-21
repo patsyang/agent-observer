@@ -53,7 +53,8 @@ def test_register_reuses_collector_and_returns_policy(tmp_path):
             "hostname": "workstation-a",
             "windows_username": "dev-user",
             "agent_type": "codex",
-            "agent_version": "0.1.0",
+            "protocol_version": "agent-observer-telemetry/v2",
+            "agent_version": "0.2.0",
         }
         first = register_collector(conn, payload)
         second = register_collector(conn, payload)
@@ -67,16 +68,65 @@ def test_register_reuses_collector_and_returns_policy(tmp_path):
     assert collectors[0]["windows_username_hash"] != "dev-user"
 
 
-def test_collector_list_reports_effective_raw_upload_policy(tmp_path):
+def test_register_rejects_stale_collector_version(tmp_path):
+    with connect(tmp_path / "observer.sqlite") as conn:
+        try:
+            register_collector(
+                conn,
+                {
+                    "hostname": "workstation-a",
+                    "windows_username": "dev-user",
+                    "agent_type": "codex",
+                    "protocol_version": "agent-observer-telemetry/v2",
+                    "agent_version": "0.1.0",
+                },
+            )
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            error = ""
+
+    assert error == "unsupported_collector_version"
+
+
+def test_existing_collector_heartbeat_rejects_unsupported_protocol(tmp_path):
+    with connect(tmp_path / "observer.sqlite") as conn:
+        registered = register_collector(
+            conn,
+            {
+                "collector_id": "collector-existing",
+                "hostname": "workstation-a",
+                "windows_username": "dev-user",
+                "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+            },
+        )
+        try:
+            heartbeat(
+                conn,
+                registered["collector_id"],
+                {
+                    "agent_version": "0.1.0",
+                    "source_status": "online",
+                    "reason_code": "start_running",
+                },
+            )
+        except ValueError as exc:
+            error = str(exc)
+        else:
+            error = ""
+
+    assert error == "unsupported_collector_protocol"
+
+
+def test_collector_list_does_not_expose_raw_upload_override_state(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         update_effective_policy(
             conn,
             {
                 "expected_version": 1,
-                "template_enabled": True,
-                "upload_raw": True,
-                "collection_policy": "collect codex source with raw evidence",
-                "diagnostic_policy": "whitelist diagnostics",
+                "enrichment_mode": "enabled",
             },
         )
         registered = register_collector(
@@ -86,20 +136,25 @@ def test_collector_list_reports_effective_raw_upload_policy(tmp_path):
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
             },
         )
         collectors = list_collectors(conn)
-        heartbeat(conn, registered["collector_id"], {"source_status": "online", "reason_code": "start_running"})
-        from app.collectors.service import update_collector_raw_upload
+        heartbeat(
+            conn,
+            registered["collector_id"],
+            {
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+                "source_status": "online",
+                "reason_code": "start_running",
+            },
+        )
 
-        updated = update_collector_raw_upload(conn, registered["collector_id"], False)
-
-    assert collectors[0]["raw_upload_enabled"] is True
-    assert collectors[0]["raw_upload_override"] is False
-    assert collectors[0]["raw_upload_source"] == "global_policy"
-    assert updated["raw_upload_enabled"] is False
-    assert updated["raw_upload_override"] is True
-    assert updated["raw_upload_source"] == "collector_override"
+    assert "raw_upload_enabled" not in collectors[0]
+    assert "raw_upload_override" not in collectors[0]
+    assert "raw_upload_source" not in collectors[0]
 
 
 def test_heartbeat_persists_all_source_status_reasons(tmp_path):
@@ -110,6 +165,8 @@ def test_heartbeat_persists_all_source_status_reasons(tmp_path):
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
             },
         )
         collector_id = registered["collector_id"]
@@ -119,6 +176,8 @@ def test_heartbeat_persists_all_source_status_reasons(tmp_path):
                 collector_id,
                 {
                     "source_status": status,
+                    "protocol_version": "agent-observer-telemetry/v2",
+                    "agent_version": "0.2.0",
                     "reason_code": status,
                     "outbox_backlog": 2 if status == "outbox_backlog" else 0,
                 },
@@ -137,9 +196,20 @@ def test_stale_heartbeat_is_reported_offline_without_deleting_collector(tmp_path
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
             },
         )
-        heartbeat(conn, registered["collector_id"], {"source_status": "online", "reason_code": "start_running"})
+        heartbeat(
+            conn,
+            registered["collector_id"],
+            {
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+                "source_status": "online",
+                "reason_code": "start_running",
+            },
+        )
         conn.execute(
             "update collectors set last_heartbeat_at = '2026-06-18T00:00:00+00:00' where collector_id = ?",
             (registered["collector_id"],),
@@ -158,6 +228,9 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
 
     assert package["filename"] == "agent-observer-windows.zip"
     assert package["sha256"]
+    assert package["server_url"] == "http://127.0.0.1:8765"
+    assert package["agent_version"] == "0.2.0"
+    assert package["protocol_version"] == "agent-observer-telemetry/v2"
     with zipfile.ZipFile(package["path"]) as archive:
         names = set(archive.namelist())
         assert "agent-observer.cmd" in names
@@ -167,7 +240,17 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
         assert "app/collector_client/runtime.py" in names
         assert "app/collector_client/source_reader.py" in names
         assert "app/collector_client/fact_mapper.py" in names
+        assert "app/collector_client/version.py" in names
+        source_text = "\n".join(
+            archive.read(name).decode("utf-8")
+            for name in names
+            if name.startswith("app/collector_client/") and name.endswith(".py")
+        )
         config = json.loads(archive.read("agent-observer.config.json"))
+    assert "associated_units" not in source_text
+    assert "attributed_units" not in source_text
+    assert "usage_kind" not in source_text
+    assert "additive" not in source_text
     assert config["server_url"] == "http://127.0.0.1:8765"
     assert config["collector_id"] == "windows-collector"
     assert config["history_window_days"] == 7
@@ -176,8 +259,13 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
     assert config["max_events_per_cycle"] == 100
     assert config["upload_batch_size"] == 50
     assert config["evidence_mode"] == "structured_projection"
-    assert config["raw_upload_enabled"] is False
-    assert config["effective_policy"]["policy_version"] == 1
+    assert "raw_upload_enabled" not in config
+    assert config["agent_version"] == "0.2.0"
+    assert config["protocol_version"] == "agent-observer-telemetry/v2"
+    assert "effective_policy" not in config
+    assert "template_enabled" not in config
+    assert "collection_policy" not in config
+    assert "enrichment_policy" not in config
 
 
 def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
@@ -185,6 +273,8 @@ def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
         facts = []
         batch = {
             "batch_id": "collector-package-test-1",
+            "protocol_version": "agent-observer-telemetry/v2",
+            "agent_version": "0.2.0",
             "collector_id": "package-test",
             "source": "codex",
             "cursor": "1",

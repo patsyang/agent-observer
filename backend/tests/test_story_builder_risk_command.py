@@ -54,6 +54,8 @@ def test_sensitive_risk_story_surfaces_object_in_impact_and_evidence(tmp_path):
             conn,
             {
                 "batch_id": "batch-sensitive-risk",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-codex",
                 "source": "codex",
                 "cursor": "cursor-sensitive-risk",
@@ -80,13 +82,15 @@ def test_sensitive_risk_ignores_auth_status_without_secret_value(tmp_path):
         ingest_telemetry(
             conn,
             {
-                "batch_id": "batch-sensitive-legacy",
+                "batch_id": "batch-sensitive-auth-status",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-codex",
                 "source": "codex",
-                "cursor": "cursor-sensitive-legacy",
+                "cursor": "cursor-sensitive-auth-status",
                 "items": [
                     _sensitive_item(
-                        "sensitive-legacy-auth",
+                        "sensitive-auth-status",
                         {
                             "object_type": "credential",
                             "category_count": 1,
@@ -110,6 +114,8 @@ def test_sensitive_risk_without_explainable_hit_is_not_promoted_to_story(tmp_pat
             conn,
             {
                 "batch_id": "batch-sensitive-unexplained",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-codex",
                 "source": "codex",
                 "cursor": "cursor-sensitive-unexplained",
@@ -132,6 +138,8 @@ def test_command_timeout_story_uses_workflow_run_id_not_conversation_group(tmp_p
             conn,
             {
                 "batch_id": "batch-command-timeout",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-codex",
                 "source": "codex",
                 "cursor": "cursor-command-timeout",
@@ -183,6 +191,8 @@ def test_ingest_updates_command_timeout_story_without_full_rebuild(tmp_path, mon
             conn,
             {
                 "batch_id": "batch-command-timeout-incremental",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
                 "collector_id": "collector-codex",
                 "source": "codex",
                 "cursor": "cursor-command-timeout-incremental",
@@ -218,18 +228,20 @@ def test_ingest_updates_command_timeout_story_without_full_rebuild(tmp_path, mon
     assert "from error_signatures where category != 'command_timeout' order by signature_key" not in normalized_sql
 
 
-def test_legacy_hashed_error_signatures_are_grouped_into_one_story(tmp_path):
+def test_hashed_error_signatures_are_grouped_into_one_story(tmp_path):
     batch = {
-        "batch_id": "batch-legacy-signatures",
+        "batch_id": "batch-hashed-signatures",
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
         "collector_id": "collector-codex",
         "source": "codex",
-        "cursor": "cursor-legacy",
+        "cursor": "cursor-hashed-signatures",
         "items": [],
     }
     for index, suffix in enumerate(("06a0f807", "49a470b1"), start=1):
         batch["items"].append(
             {
-                "source_event_id": f"legacy-error-{index}",
+                "source_event_id": f"hashed-error-{index}",
                 "fact_type": "error",
                 "category": "codex_error",
                 "quality": "high",
@@ -237,13 +249,13 @@ def test_legacy_hashed_error_signatures_are_grouped_into_one_story(tmp_path):
                 "summary": "Codex function_call_output failed",
                 "occurred_at": f"2026-06-18T10:0{index}:00+00:00",
                 "span": f"event:{index}",
-                "raw_hash": f"hash-legacy-{index}",
+                "raw_hash": f"hash-error-{index}",
                 "projection": {"tool": "function_call_output", "exit_code": 1},
                 "error_signature": {
                     "signature_key": f"codex_error:function_call_output:response_item:1:{suffix}",
                     "category": "codex_error",
                 },
-                "source_refs": {"conversation_ref": "conversation-legacy"},
+                "source_refs": {"conversation_ref": "conversation-hashed-signatures"},
                 "source_specific": {"codex_event_type": "function_call_output"},
             }
         )
@@ -256,7 +268,7 @@ def test_legacy_hashed_error_signatures_are_grouped_into_one_story(tmp_path):
     assert [story["story_key"] for story in error_stories] == [
         "error:codex_error:function_call_output:response_item:1:function_call_output"
     ]
-    assert "2 次 Codex 工具执行失败" in error_stories[0]["conclusion"]
+    assert "2 条 Codex 工具执行失败命中" in error_stories[0]["conclusion"]
 
 
 def test_handled_story_recurrence_moves_attention_to_needs_review(tmp_path):

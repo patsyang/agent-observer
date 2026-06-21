@@ -40,8 +40,7 @@ def test_collector_collapses_duplicate_codex_message_projections(tmp_path):
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
-        upload_raw=True,
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     content_facts = [fact for fact in facts if fact["category"] == "codex_message"]

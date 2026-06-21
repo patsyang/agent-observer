@@ -5,7 +5,6 @@ import { Metric } from '../components/Metric';
 import { StoryCard } from '../components/StoryCard';
 import { TimeWindowTabs } from '../components/TimeWindowTabs';
 import { formatNumber } from '../utils/numberFormat';
-import { DashboardInvestigationSummary, type FactJumpFilters } from './DashboardInvestigationSummary';
 import {
   collectorRuntimeLabel,
   emptyUsage,
@@ -17,6 +16,7 @@ import {
   sumBacklog,
 } from './dashboardLabels';
 import { UsageGovernanceSummary } from './UsageGovernanceSummary';
+import { UsageTrendChart } from './UsageTrendChart';
 
 interface Props {
   loadDashboardSummary: (window: TimeWindow) => Promise<DashboardSummary>;
@@ -24,7 +24,6 @@ interface Props {
   loadUsageSummary: (window: TimeWindow) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindow) => Promise<RiskSummary>;
   onOpenStory: (storyId: string) => void;
-  onOpenFacts?: (filters: FactJumpFilters) => void;
 }
 
 type LoadState =
@@ -54,7 +53,6 @@ export function DashboardPage({
   loadRiskSummary,
   loadStories,
   loadUsageSummary,
-  onOpenFacts,
   onOpenStory
 }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
@@ -116,7 +114,7 @@ export function DashboardPage({
     return (
       <section className="panel">
         <h2>正在加载观测数据</h2>
-        <p>读取采集器、事实、故事队列和治理指标。</p>
+        <p>读取采集器、会话信号和用量趋势。</p>
       </section>
     );
   }
@@ -138,11 +136,11 @@ export function DashboardPage({
   const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
 
   return (
-    <div className="dashboard workbench" aria-label="观察故事运营台">
+    <div className="dashboard workbench" aria-label="观测信号运营台">
       <section className="context-bar">
         <div>
-          <strong>观察故事运营台</strong>
-          <span>默认只看最近 1 小时；故事队列只放需要人工处理的错误、风险和补证事项。</span>
+          <strong>观测信号运营台</strong>
+          <span>默认只看最近 1 小时；信号队列只放需要人工判断的错误、风险和补证事项。</span>
         </div>
         <div className="context-actions">
           <TimeWindowTabs value={window} onChange={setWindow} />
@@ -153,7 +151,7 @@ export function DashboardPage({
         </div>
         <div className="mini-grid">
           <Mini label="当前采集器" value={latestCollector?.display_name ?? '未注册'} />
-          <Mini label="最近事实" value={latestFactTitle(latestFact)} />
+          <Mini label="最近命中" value={latestFactTitle(latestFact)} />
           <Mini label="最近心跳" value={formatDateTime(latestCollector?.last_heartbeat_at)} />
         </div>
       </section>
@@ -164,10 +162,12 @@ export function DashboardPage({
           value={`${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
           note="在线 / 总数"
         />
-        <Metric label="事实" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口事实总数" />
-        <Metric label="待处理故事" value={formatNumber(state.stories.total ?? activeStories.length)} note="active / needs_review" />
+        <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
+        <Metric label="待处理信号" value={formatNumber(state.stories.total ?? activeStories.length)} note="active / needs_review" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
       </section>
+
+      <UsageTrendChart usage={state.usage} />
 
       <div className="workbench-grid">
         <aside className="panel flush workbench-side" aria-label="观测上下文">
@@ -179,7 +179,7 @@ export function DashboardPage({
           </div>
           <div className="panel-body">
             <div className="context-stack">
-              <Mini label="事实质量" value={qualitySummary(state.facts)} />
+              <Mini label="命中质量" value={qualitySummary(state.facts)} />
               <Mini label="待传 outbox" value={formatNumber(sumBacklog(state.collectors))} />
               <Mini label="重点队列" value={queueSummary(activeStories.length)} />
             </div>
@@ -204,35 +204,28 @@ export function DashboardPage({
           </div>
         </aside>
 
-        <section className="panel flush story-workbench" aria-label="观察故事">
+        <section className="panel flush story-workbench" aria-label="观测信号">
           <div className="panel-header">
-            <h2>观察故事队列</h2>
+            <h2>观测信号队列</h2>
             <span className="badge violet">{formatNumber(state.stories.total ?? activeStories.length)} 条待看</span>
           </div>
-          <p className="panel-intro">每条故事都应该能回答：发生了什么、影响谁、为什么值得处理、下一步怎么做。</p>
+          <p className="panel-intro">每条信号都应能下钻到命中内容和所属会话，而不是宽泛聚合。</p>
           <div className="panel-body">
             {activeStories.length === 0 ? (
-              <p>当前没有需要人工处理的故事；请确认 collector 已运行并有 Codex 会话事实入库。</p>
+              <p>当前没有需要人工处理的信号；请确认 collector 已运行并有 Codex 会话内容入库。</p>
             ) : (
               <div className="story-list">
                 {activeStories.map((story) => (
                   <StoryCard key={story.story_id} story={story} onOpen={onOpenStory} />
                 ))}
-                {state.stories.has_more && <div className="list-footer">更多故事请进入分页列表继续查看。</div>}
+                {state.stories.has_more && <div className="list-footer">更多信号请进入分页列表继续查看。</div>}
               </div>
             )}
           </div>
         </section>
 
-        <aside className="side-stack" aria-label="证据、用量和风险">
-        <DashboardInvestigationSummary
-          facts={state.facts}
-          onOpenFacts={onOpenFacts}
-          risks={state.risks}
-          usage={state.usage}
-          window={window}
-        />
-        <UsageGovernanceSummary usage={state.usage} risks={state.risks} />
+        <aside className="side-stack" aria-label="用量和风险">
+          <UsageGovernanceSummary usage={state.usage} risks={state.risks} />
         </aside>
       </div>
     </div>

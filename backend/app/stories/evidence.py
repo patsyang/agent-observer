@@ -83,70 +83,80 @@ def _evidence_entry_by_ref(conn: sqlite3.Connection, evidence_ref: str) -> dict 
         if fact is None:
             return None
         return next((entry for entry in _evidence_entries(conn, fact) if entry["evidence_ref"] == evidence_ref), None)
-    diagnostic = conn.execute(
-        "select result_id, status, summary, created_at from diagnostic_results where result_id = ?",
+    enrichment = conn.execute(
+        "select result_id, status, summary, output_schema, projection_json, created_at from enrichment_results where result_id = ?",
         (evidence_ref,),
     ).fetchone()
-    if diagnostic is None:
+    if enrichment is None:
         return None
     return {
-        "evidence_ref": diagnostic["result_id"],
+        "evidence_ref": enrichment["result_id"],
         "fact_id": None,
-        "category": "diagnostic_result",
-        "summary": diagnostic["summary"],
-        "quality": "high" if diagnostic["status"] == "succeeded" else "low",
-        "occurred_at": diagnostic["created_at"],
-        "fact_type": "diagnostic",
-        "source_event_type": "diagnostic_result",
-        "source_label": "白名单补证结果",
-        "content_preview": diagnostic["summary"],
+        "category": "enrichment_result",
+        "summary": enrichment["summary"],
+        "quality": "high" if enrichment["status"] == "succeeded" else "low",
+        "occurred_at": enrichment["created_at"],
+        "fact_type": "enrichment",
+        "source_event_type": "enrichment_result",
+        "source_label": _enrichment_source_label(enrichment["output_schema"]),
+        "content_preview": _enrichment_preview(enrichment["summary"], _loads(enrichment["projection_json"])),
         "raw_available": False,
         "raw_status": "补证摘要",
     }
 
-def _diagnostic_evidence_entries(conn: sqlite3.Connection, story_id: str) -> list[dict]:
+def _enrichment_evidence_entries(conn: sqlite3.Connection, story_id: str) -> list[dict]:
     rows = conn.execute(
-        "select result_id, status, summary, created_at from diagnostic_results where story_id = ? order by created_at",
+        "select result_id, status, summary, output_schema, projection_json, created_at from enrichment_results where story_id = ? order by created_at",
         (story_id,),
     ).fetchall()
     return [
         {
             "evidence_ref": row["result_id"],
             "fact_id": None,
-            "category": "diagnostic_result",
+            "category": "enrichment_result",
             "summary": row["summary"],
             "quality": "high" if row["status"] == "succeeded" else "low",
             "occurred_at": row["created_at"],
-            "fact_type": "diagnostic",
-            "source_event_type": "diagnostic_result",
-            "source_label": "白名单补证结果",
-            "content_preview": row["summary"],
+            "fact_type": "enrichment",
+            "source_event_type": "enrichment_result",
+            "source_label": _enrichment_source_label(row["output_schema"]),
+            "content_preview": _enrichment_preview(row["summary"], _loads(row["projection_json"])),
             "raw_available": False,
             "raw_status": "补证摘要",
         }
         for row in rows
     ]
 
-def _diagnostic_status_summary(conn: sqlite3.Connection, story_id: str) -> dict:
+def _enrichment_status_summary(conn: sqlite3.Connection, story_id: str) -> dict:
     row = conn.execute(
-        "select status, reason_code from diagnostic_jobs where story_id = ? order by rowid desc limit 1",
+        "select status, reason_code from enrichment_jobs where story_id = ? order by rowid desc limit 1",
         (story_id,),
     ).fetchone()
     if row is None:
         return {"status": "none", "reason_code": None}
     return {"status": row["status"], "reason_code": row["reason_code"]}
 
+def _enrichment_source_label(output_schema: str) -> str:
+    if output_schema == "tool_failure_context.v1":
+        return "工具失败上下文补证"
+    return "本机补证结果"
+
+def _enrichment_preview(summary: str, projection: dict) -> str:
+    failures = projection.get("matched_failures")
+    conversations = projection.get("matched_conversations")
+    if isinstance(failures, list) and failures:
+        conversation_count = len(conversations) if isinstance(conversations, list) else 0
+        return f"{summary} 命中 {len(failures)} 条失败工具调用，关联 {conversation_count} 个会话。"
+    return summary
+
 def _usage_summary(conn: sqlite3.Connection, fact_ids: list[str]) -> dict:
     if not fact_ids:
-        return {"attributed_units": 0, "associated_units": 0, "no_usage_reason": "没有关联用量证据"}
+        return {"effective_units": 0, "no_usage_reason": "没有用量证据"}
     placeholders = ",".join("?" for _ in fact_ids)
-    rows = conn.execute(f"select usage_kind, units from usage_signals where fact_id in ({placeholders})", fact_ids).fetchall()
-    attributed = sum(row["units"] for row in rows if row["usage_kind"] == "attributed")
-    associated = sum(row["units"] for row in rows if row["usage_kind"] == "associated")
+    rows = conn.execute(f"select units from usage_signals where fact_id in ({placeholders})", fact_ids).fetchall()
     return {
-        "attributed_units": attributed,
-        "associated_units": associated,
-        "no_usage_reason": None if rows else "没有关联用量证据",
+        "effective_units": sum(row["units"] for row in rows),
+        "no_usage_reason": None if rows else "没有用量证据",
     }
 
 def _risk_evidence_fields(projection_json: dict, raw_content: str | None = None) -> dict:

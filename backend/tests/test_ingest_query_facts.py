@@ -8,6 +8,7 @@ from app.ingest.service import ingest_telemetry
 
 
 def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
+    prompt_text = f"Prompt {event_id}"
     value = {
         "source_event_id": event_id,
         "fact_type": "content",
@@ -18,7 +19,9 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
         "occurred_at": occurred_at,
         "span": f"session:{event_id}",
         "raw_hash": f"hash-{event_id}",
-        "projection": {"role": "user", "content_length": 12},
+        "projection": {"role": "user", "content_length": len(prompt_text), "prompt_text": prompt_text},
+        "upload_raw": True,
+        "raw_content": prompt_text,
         "source_refs": {
             "conversation_ref": f"conv-{event_id}",
             "session_ref": f"session-{event_id}",
@@ -31,7 +34,15 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
 
 
 def _batch(batch_id: str, items: list[dict]) -> dict:
-    return {"batch_id": batch_id, "collector_id": "collector-codex", "source": "codex", "cursor": batch_id, "items": items}
+    return {
+        "batch_id": batch_id,
+        "protocol_version": "agent-observer-telemetry/v2",
+        "agent_version": "0.2.0",
+        "collector_id": "collector-codex",
+        "source": "codex",
+        "cursor": batch_id,
+        "items": items,
+    }
 
 
 def test_query_facts_filters_time_window_and_hides_health_by_default(tmp_path):
@@ -73,7 +84,7 @@ def test_query_facts_filters_time_window_and_hides_health_by_default(tmp_path):
 
     assert [fact["fact_id"] for fact in default_result["facts"]] == ["recent-prompt-001"]
     assert default_result["total"] == 1
-    assert default_result["facts"][0]["content_preview"] == "用户 Prompt，长度 12 字符，未上传原文"
+    assert default_result["facts"][0]["content_preview"] == "Prompt: Prompt recent-prompt-001"
     assert {fact["fact_id"] for fact in health_result["facts"]} == {"recent-prompt-001", "recent-health-001"}
     assert {fact["fact_id"] for fact in all_result["facts"]} >= {"recent-prompt-001", "recent-health-001", "old-error-001"}
 
@@ -115,6 +126,32 @@ def test_query_facts_defaults_to_recent_event_time_not_backfill_ingest_time(tmp_
 
     assert result["time_basis"] == "occurred"
     assert [fact["fact_id"] for fact in result["facts"]] == ["recent-event"]
+
+
+def test_query_facts_hides_usage_even_when_requested(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            _batch(
+                "batch-hide-usage",
+                [
+                    _fact(
+                        "usage-hidden",
+                        now.isoformat(),
+                        fact_type="usage",
+                        category="usage",
+                        summary="用量事实不进入用户事实查询。",
+                        projection={"activity_tag": "codex_turn", "units": 99},
+                        usage={"units": 99, "activity_tag": "codex_turn"},
+                    )
+                ],
+            ),
+        )
+        result = query_facts(conn, window="1h", include_health=True, fact_type="usage")
+
+    assert result["total"] == 0
+    assert result["facts"] == []
 
 
 def test_ingest_populates_indexable_source_reference_columns(tmp_path):
@@ -217,7 +254,7 @@ def test_low_evidence_preview_uses_event_shape_instead_of_generic_boilerplate(tm
                         fact_type="unknown",
                         category="uncategorized",
                         quality="low",
-                        summary="Codex 会话出现未归类但来源合法的低证据事件，已保留为事实查询候选。",
+                        summary="Codex 会话出现未归类但来源合法的低证据事件，已保留为低证据命中候选。",
                         projection={
                             "payload_type": "response_item",
                             "observed_keys": ["timestamp", "type", "payload"],
@@ -231,7 +268,7 @@ def test_low_evidence_preview_uses_event_shape_instead_of_generic_boilerplate(tm
 
     preview = result["facts"][0]["content_preview"]
     assert preview == "未归类 Codex 事件：事件类型 response_item，可用字段 type, content, role"
-    assert "事实查询候选" not in preview
+    assert "低证据命中候选" not in preview
 
 
 def test_ingest_stores_raw_evidence_when_projection_upload_raw_is_enabled(tmp_path):

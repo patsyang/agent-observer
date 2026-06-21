@@ -7,10 +7,11 @@ from datetime import UTC, datetime, timedelta
 
 
 MANIFEST = {
-    "codex_error_context": {
-        "label": "Collect Codex error context",
-        "command_id": "collect_codex_error_context",
-        "template": "codex.error_context.v1",
+    "codex_tool_failure_context": {
+        "label": "工具失败上下文补证",
+        "command_id": "collect_codex_tool_failure_context",
+        "template": "tool_failure_context.v1",
+        "output_schema": "tool_failure_context.v1",
     }
 }
 TERMINAL_STATUSES = {"succeeded", "failed", "expired", "unavailable", "cancelled"}
@@ -28,8 +29,9 @@ def _loads(value: str) -> dict:
     return json.loads(value or "{}")
 
 
-def get_diagnostic_availability(conn: sqlite3.Connection, story_id: str) -> dict:
+def get_enrichment_availability(conn: sqlite3.Connection, story_id: str) -> dict:
     _story_row(conn, story_id)
+    expire_enrichments(conn)
     active_job = _active_job(conn, story_id)
     return {
         "story_id": story_id,
@@ -38,23 +40,28 @@ def get_diagnostic_availability(conn: sqlite3.Connection, story_id: str) -> dict
     }
 
 
-def request_diagnostic(conn: sqlite3.Connection, story_id: str, capability_id: str) -> dict:
+def request_enrichment(conn: sqlite3.Connection, story_id: str, capability_id: str) -> dict:
     if capability_id not in MANIFEST:
         raise ValueError("missing_capability")
     _story_row(conn, story_id)
+    expire_enrichments(conn)
+    if active_job := _active_job(conn, story_id):
+        if active_job["capability_id"] == capability_id:
+            return _job_payload(conn, active_job["job_id"])
+        raise ValueError("active_enrichment_exists")
     capability = _capability_state(conn, story_id, capability_id)
     if capability["state"] == "unavailable":
-        raise ValueError(capability["reason_code"] or "diagnostic_unavailable")
+        raise ValueError(capability["reason_code"] or "enrichment_unavailable")
     status = "queued" if capability["state"] == "queueable" else "pending"
     now = _now()
     expires_at = (datetime.now(UTC) + timedelta(minutes=15)).replace(microsecond=0).isoformat()
     command = _command(conn, story_id, capability_id)
     collector_id = _collector_id(conn, story_id)
-    job_count = conn.execute("select count(*) from diagnostic_jobs where story_id = ?", (story_id,)).fetchone()[0]
+    job_count = conn.execute("select count(*) from enrichment_jobs where story_id = ?", (story_id,)).fetchone()[0]
     job_id = hashlib.sha256(f"{story_id}:{capability_id}:{now}:{job_count}".encode("utf-8")).hexdigest()[:24]
     conn.execute(
         """
-        insert into diagnostic_jobs (
+        insert into enrichment_jobs (
           job_id, story_id, collector_id, capability_id, status, command_json, reason_code,
           requested_by, requested_at, expires_at, updated_at
         ) values (?, ?, ?, ?, ?, ?, ?, 'fixed-management-account', ?, ?, ?)
@@ -72,25 +79,26 @@ def request_diagnostic(conn: sqlite3.Connection, story_id: str, capability_id: s
             now,
         ),
     )
-    _update_story_diagnostic(conn, story_id, status, capability["reason_code"])
+    _update_story_enrichment(conn, story_id, status, capability["reason_code"])
     _write_audit(
         conn,
         story_id,
-        "diagnostic_requested",
+        "enrichment_requested",
         {"capability_id": capability_id, "job_id": job_id, "after_status": status, "reason_code": capability["reason_code"]},
     )
     conn.commit()
     return _job_payload(conn, job_id)
 
 
-def get_next_collector_diagnostic(conn: sqlite3.Connection, collector_id: str) -> dict:
+def get_next_collector_enrichment(conn: sqlite3.Connection, collector_id: str) -> dict:
     collector = conn.execute("select * from collectors where collector_id = ?", (collector_id,)).fetchone()
     if collector is None:
         raise LookupError(collector_id)
+    expire_enrichments(conn)
     now = _now()
     row = conn.execute(
         """
-        select * from diagnostic_jobs
+        select * from enrichment_jobs
         where status in ('pending', 'queued')
           and (collector_id is null or collector_id = ?)
           and expires_at >= ?
@@ -102,60 +110,68 @@ def get_next_collector_diagnostic(conn: sqlite3.Connection, collector_id: str) -
     if row is None:
         return {"status": "none", "collector_id": collector_id}
     conn.execute(
-        "update diagnostic_jobs set status = 'running', collector_id = ?, updated_at = ? where job_id = ?",
+        "update enrichment_jobs set status = 'running', collector_id = ?, updated_at = ? where job_id = ?",
         (collector_id, now, row["job_id"]),
     )
-    _update_story_diagnostic(conn, row["story_id"], "running", None)
-    _write_audit(conn, row["story_id"], "diagnostic_started", {"job_id": row["job_id"], "collector_id": collector_id})
+    _update_story_enrichment(conn, row["story_id"], "running", None)
+    _write_audit(conn, row["story_id"], "enrichment_started", {"job_id": row["job_id"], "collector_id": collector_id})
     conn.commit()
     return _job_payload(conn, row["job_id"])
 
 
-def record_collector_diagnostic_result(conn: sqlite3.Connection, collector_id: str, job_id: str, payload: dict) -> dict:
+def record_collector_enrichment_result(conn: sqlite3.Connection, collector_id: str, job_id: str, payload: dict) -> dict:
     job = _job_row(conn, job_id)
     if job["collector_id"] and job["collector_id"] != collector_id:
         raise ValueError("collector_mismatch")
-    return record_diagnostic_result(
+    return record_enrichment_result(
         conn,
         job_id,
         payload.get("status", ""),
         payload.get("summary", ""),
         payload.get("projection"),
+        payload.get("redaction"),
     )
 
 
-def cancel_diagnostic(conn: sqlite3.Connection, job_id: str) -> dict:
+def cancel_enrichment(conn: sqlite3.Connection, job_id: str) -> dict:
     job = _job_row(conn, job_id)
     if job["status"] not in {"pending", "queued"}:
         raise ValueError("cannot_cancel")
     now = _now()
-    conn.execute("update diagnostic_jobs set status = 'cancelled', updated_at = ? where job_id = ?", (now, job_id))
-    _update_story_diagnostic(conn, job["story_id"], "cancelled", "operator_cancelled")
+    conn.execute("update enrichment_jobs set status = 'cancelled', updated_at = ? where job_id = ?", (now, job_id))
+    _update_story_enrichment(conn, job["story_id"], "cancelled", "operator_cancelled")
     _write_audit(
         conn,
         job["story_id"],
-        "diagnostic_cancelled",
+        "enrichment_cancelled",
         {"job_id": job_id, "capability_id": job["capability_id"], "after_status": "cancelled", "reason_code": "operator_cancelled"},
     )
     conn.commit()
     return _job_payload(conn, job_id)
 
 
-def expire_diagnostics(conn: sqlite3.Connection) -> dict:
+def expire_enrichments(conn: sqlite3.Connection) -> dict:
     now = _now()
     rows = conn.execute(
-        "select * from diagnostic_jobs where status in ('pending', 'queued', 'running') and expires_at < ?",
+        "select * from enrichment_jobs where status in ('pending', 'queued', 'running') and expires_at < ?",
         (now,),
     ).fetchall()
     for row in rows:
-        conn.execute("update diagnostic_jobs set status = 'expired', updated_at = ? where job_id = ?", (now, row["job_id"]))
-        _update_story_diagnostic(conn, row["story_id"], "expired", "ttl_expired")
-        _write_audit(conn, row["story_id"], "diagnostic_expired", {"job_id": row["job_id"], "reason_code": "ttl_expired"})
+        conn.execute("update enrichment_jobs set status = 'expired', updated_at = ? where job_id = ?", (now, row["job_id"]))
+        _update_story_enrichment(conn, row["story_id"], "expired", "ttl_expired")
+        _write_audit(conn, row["story_id"], "enrichment_expired", {"job_id": row["job_id"], "reason_code": "ttl_expired"})
     conn.commit()
     return {"expired": len(rows)}
 
 
-def record_diagnostic_result(conn: sqlite3.Connection, job_id: str, status: str, summary: str, projection: dict | None = None) -> dict:
+def record_enrichment_result(
+    conn: sqlite3.Connection,
+    job_id: str,
+    status: str,
+    summary: str,
+    projection: dict | None = None,
+    redaction: dict | None = None,
+) -> dict:
     if status not in {"succeeded", "failed", "unavailable"}:
         raise ValueError("invalid_result_status")
     job = _job_row(conn, job_id)
@@ -163,23 +179,36 @@ def record_diagnostic_result(conn: sqlite3.Connection, job_id: str, status: str,
         raise ValueError("job_already_terminal")
     result_summary = _normalize_result_summary(summary)
     now = _now()
-    result_id = f"diagnostic-result-{job_id}"
+    result_id = f"enrichment-result-{job_id}"
+    output_schema = str((projection or {}).get("output_schema") or MANIFEST[job["capability_id"]]["output_schema"])
     conn.execute(
         """
-        insert into diagnostic_results (
-          result_id, job_id, story_id, status, summary, projection_json, created_at
-        ) values (?, ?, ?, ?, ?, ?, ?)
+        insert into enrichment_results (
+          result_id, job_id, story_id, capability_id, output_schema, status, summary,
+          projection_json, redaction_json, created_at
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (result_id, job_id, job["story_id"], status, result_summary, _dumps(projection or {}), now),
+        (
+            result_id,
+            job_id,
+            job["story_id"],
+            job["capability_id"],
+            output_schema,
+            status,
+            result_summary,
+            _dumps(projection or {}),
+            _dumps(redaction or (projection or {}).get("redaction") or {}),
+            now,
+        ),
     )
-    conn.execute("update diagnostic_jobs set status = ?, updated_at = ? where job_id = ?", (status, now, job_id))
+    conn.execute("update enrichment_jobs set status = ?, updated_at = ? where job_id = ?", (status, now, job_id))
     if status == "succeeded":
-        _append_diagnostic_evidence(conn, job["story_id"], result_id, result_summary)
-    _update_story_diagnostic(conn, job["story_id"], status, None if status == "succeeded" else status)
+        _append_enrichment_evidence(conn, job["story_id"], result_id, result_summary)
+    _update_story_enrichment(conn, job["story_id"], status, None if status == "succeeded" else status)
     _write_audit(
         conn,
         job["story_id"],
-        "diagnostic_result_recorded",
+        "enrichment_result_recorded",
         {"job_id": job_id, "result_id": result_id, "after_status": status, "reason_code": status},
     )
     conn.commit()
@@ -187,9 +216,9 @@ def record_diagnostic_result(conn: sqlite3.Connection, job_id: str, status: str,
 
 
 def _capability_state(conn: sqlite3.Connection, story_id: str, capability_id: str) -> dict:
-    policy = conn.execute("select diagnostic_policy from effective_policies where id = 1").fetchone()
+    policy = conn.execute("select enrichment_mode from effective_policies where id = 1").fetchone()
     manifest = MANIFEST[capability_id]
-    if policy and policy["diagnostic_policy"] == "disabled":
+    if policy and policy["enrichment_mode"] == "disabled":
         state, reason = "unavailable", "policy_denied"
     else:
         collector_id = _collector_id(conn, story_id)
@@ -236,16 +265,65 @@ def _command(conn: sqlite3.Connection, story_id: str, capability_id: str) -> dic
     manifest = MANIFEST[capability_id]
     return {
         "command_id": manifest["command_id"],
-        "template": manifest["template"],
-        "args": {"story_id": story_id, "evidence_refs": json.loads(story["evidence_refs_json"])},
+        "story_id": story_id,
+        "capability_id": capability_id,
+        "evidence_refs": _command_evidence_refs(conn, json.loads(story["evidence_refs_json"])),
     }
 
 
-def _append_diagnostic_evidence(conn: sqlite3.Connection, story_id: str, result_id: str, summary: str) -> None:
+def _command_evidence_refs(conn: sqlite3.Connection, evidence_refs: list[str]) -> list[dict]:
+    resolved = []
+    for evidence_ref in evidence_refs:
+        projection = conn.execute(
+            """
+            select p.projection_id, p.category, p.projection_json,
+                   f.fact_id, f.source_event_id, f.source_refs_json, f.conversation_ref,
+                   f.source_path_hash, f.source_event_type, f.occurred_at
+            from evidence_projections p
+            join observed_facts f on f.fact_id = p.fact_id
+            where p.projection_id = ?
+            limit 1
+            """,
+            (evidence_ref,),
+        ).fetchone()
+        if projection:
+            resolved.append(_command_evidence_ref(projection["projection_id"], projection))
+            continue
+        fact = conn.execute(
+            """
+            select fact_id, category, source_event_id, source_refs_json, conversation_ref,
+                   source_path_hash, source_event_type, occurred_at, '{}' as projection_json
+            from observed_facts
+            where fact_id = ?
+            limit 1
+            """,
+            (evidence_ref,),
+        ).fetchone()
+        if fact:
+            resolved.append(_command_evidence_ref(fact["fact_id"], fact))
+    return resolved
+
+
+def _command_evidence_ref(evidence_ref: str, row: sqlite3.Row) -> dict:
+    source_refs = _loads(row["source_refs_json"])
+    return {
+        "evidence_ref": evidence_ref,
+        "fact_id": row["fact_id"],
+        "category": row["category"],
+        "source_event_id": row["source_event_id"],
+        "source_path_hash": row["source_path_hash"],
+        "source_line": source_refs.get("line"),
+        "conversation_ref": row["conversation_ref"] or source_refs.get("conversation_ref"),
+        "source_event_type": row["source_event_type"],
+        "occurred_at": row["occurred_at"],
+    }
+
+
+def _append_enrichment_evidence(conn: sqlite3.Connection, story_id: str, result_id: str, summary: str) -> None:
     story = _story_row(conn, story_id)
     snapshot = _loads(story["current_snapshot_json"])
     evidence_chain = list(snapshot.get("evidence_chain", []))
-    evidence_chain.append({"evidence_ref": result_id, "category": "diagnostic_result", "summary": summary, "quality": "high"})
+    evidence_chain.append({"evidence_ref": result_id, "category": "enrichment_result", "summary": summary, "quality": "high"})
     snapshot["evidence_chain"] = evidence_chain
     evidence_refs = sorted(set(json.loads(story["evidence_refs_json"]) + [result_id]))
     snapshot_hash = hashlib.sha256(_dumps(snapshot).encode("utf-8")).hexdigest()
@@ -259,16 +337,16 @@ def _append_diagnostic_evidence(conn: sqlite3.Connection, story_id: str, result_
     )
 
 
-def _update_story_diagnostic(conn: sqlite3.Connection, story_id: str, status: str, reason_code: str | None) -> None:
+def _update_story_enrichment(conn: sqlite3.Connection, story_id: str, status: str, reason_code: str | None) -> None:
     conn.execute(
-        "update observation_stories set diagnostic_status_summary_json = ?, updated_at = ? where story_id = ?",
+        "update observation_stories set enrichment_status_summary_json = ?, updated_at = ? where story_id = ?",
         (_dumps({"status": status, "reason_code": reason_code}), _now(), story_id),
     )
 
 
 def _active_job(conn: sqlite3.Connection, story_id: str) -> dict | None:
     row = conn.execute(
-        "select * from diagnostic_jobs where story_id = ? and status in ('pending', 'queued', 'running') order by rowid desc limit 1",
+        "select * from enrichment_jobs where story_id = ? and status in ('pending', 'queued', 'running') order by rowid desc limit 1",
         (story_id,),
     ).fetchone()
     return _job_public(row) if row else None
@@ -299,7 +377,7 @@ def _story_row(conn: sqlite3.Connection, story_id: str) -> sqlite3.Row:
 
 
 def _job_row(conn: sqlite3.Connection, job_id: str) -> sqlite3.Row:
-    row = conn.execute("select * from diagnostic_jobs where job_id = ?", (job_id,)).fetchone()
+    row = conn.execute("select * from enrichment_jobs where job_id = ?", (job_id,)).fetchone()
     if row is None:
         raise LookupError(job_id)
     return row

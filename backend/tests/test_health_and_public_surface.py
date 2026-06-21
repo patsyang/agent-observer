@@ -14,6 +14,8 @@ def test_stack_ref_and_public_surface_without_forbidden_routes(tmp_path):
                 "hostname": "host",
                 "windows_username": "user",
                 "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
             },
         )
 

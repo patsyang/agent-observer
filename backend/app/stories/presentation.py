@@ -131,27 +131,10 @@ def _sensitive_categories_for_fact(conn: sqlite3.Connection, fact_id: str) -> li
         categories.update(_sensitive_categories_for_projection(_loads(row["projection_json"]), row["raw_content"]))
     return sorted(categories)
 
-def _error_conclusion(signature: sqlite3.Row) -> str:
-    occurrences = int(signature["occurrences"])
-    noun = "1 次" if occurrences == 1 else f"{occurrences:,} 次"
-    return f"发现 {noun} Codex 工具执行失败，已生成错误指纹，建议核对是否复发。"
-
-def _usage_conclusion(row: sqlite3.Row, fact_count: int) -> str:
-    units = f"{int(row['units']):,}"
-    activity = _activity_label(str(row["activity_tag"]))
-    if fact_count > 1:
-        return f"历史窗口内发现 {fact_count:,} 个 Codex 用量事件，累计约 {units} token，活动类型为 {activity}。"
-    return f"发现 1 个 Codex 用量事件，约 {units} token，活动类型为 {activity}。"
-
-def _activity_label(value: str) -> str:
-    labels = {
-        "codex_turn": "Codex 对话",
-        "bug_fix": "缺陷修复",
-        "implementation": "实现开发",
-        "test_run": "测试运行",
-        "unknown": "未识别活动",
-    }
-    return labels.get(value, value)
+def _error_conclusion(signature: sqlite3.Row | dict, hit_count: int | None = None) -> str:
+    occurrences = hit_count if hit_count is not None else int(signature["occurrences"])
+    count_text = "1" if occurrences == 1 else f"{occurrences:,}"
+    return f"发现 {count_text} 条 Codex 工具执行失败命中，已记录错误指纹，建议核对是否复发。"
 
 def _risk_type_label(value: str) -> str:
     labels = {
@@ -187,7 +170,7 @@ def _row_to_story(conn: sqlite3.Connection, row: sqlite3.Row, *, include_evidenc
         "priority_score": row["priority_score"],
         "evidence_refs": evidence_refs if include_evidence_refs else [],
         "usage_summary": json.loads(row["usage_summary_json"]),
-        "diagnostic_status_summary": json.loads(row["diagnostic_status_summary_json"]),
+        "enrichment_status_summary": json.loads(row["enrichment_status_summary_json"]),
         "attention_state": row["attention_state"],
         "snapshot_hash": row["snapshot_hash"],
         "conclusion": row["conclusion"],

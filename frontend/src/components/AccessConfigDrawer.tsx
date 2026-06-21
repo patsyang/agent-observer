@@ -14,10 +14,7 @@ interface Props {
   loadPolicy: () => Promise<EffectivePolicy>;
   savePolicy: (policy: {
     expected_version: number;
-    template_enabled: boolean;
-    upload_raw: boolean;
-    collection_policy: string;
-    diagnostic_policy: string;
+    enrichment_mode: 'disabled' | 'enabled';
   }) => Promise<EffectivePolicy>;
   loadAudit: () => Promise<RecentAuditSummary>;
   downloadUrl: string;
@@ -25,10 +22,7 @@ interface Props {
 
 export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy, loadAudit, downloadUrl }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [templateEnabled, setTemplateEnabled] = useState(true);
-  const [uploadRaw, setUploadRaw] = useState(false);
-  const [collectionPolicy, setCollectionPolicy] = useState('');
-  const [diagnosticPolicy, setDiagnosticPolicy] = useState('');
+  const [enrichmentMode, setEnrichmentMode] = useState<'disabled' | 'enabled'>('enabled');
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   useEffect(() => {
@@ -36,10 +30,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
     Promise.all([loadConfig(), loadPolicy(), loadAudit()])
       .then(([packageConfig, policy, audit]) => {
         if (cancelled) return;
-        setTemplateEnabled(policy.template_enabled);
-        setUploadRaw(policy.upload_raw);
-        setCollectionPolicy(policy.collection_policy);
-        setDiagnosticPolicy(policy.diagnostic_policy);
+        setEnrichmentMode(policy.enrichment_mode);
         setState({ status: 'ready', packageConfig, policy, audit });
       })
       .catch(() => {
@@ -66,11 +57,11 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
         <dl className="drawer-meta">
           <div>
             <dt>服务地址</dt>
-            <dd>http://127.0.0.1:8765</dd>
+            <dd>{state.status === 'ready' ? state.packageConfig.server_url : 'http://127.0.0.1:8765'}</dd>
           </div>
           <div>
-            <dt>策略写入</dt>
-            <dd>服务端 effective_policy</dd>
+            <dt>接入策略版本</dt>
+            <dd>{state.status === 'ready' ? `v${formatNumber(state.policy.policy_version)}` : '-'}</dd>
           </div>
         </dl>
       {state.status === 'loading' && <p>正在加载安装包和策略</p>}
@@ -84,10 +75,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             try {
               const policy = await savePolicy({
                 expected_version: state.policy.policy_version,
-                template_enabled: templateEnabled,
-                upload_raw: uploadRaw,
-                collection_policy: collectionPolicy,
-                diagnostic_policy: diagnosticPolicy
+                enrichment_mode: enrichmentMode
               });
               const audit = await loadAudit();
               setState({ status: 'ready', packageConfig: state.packageConfig, policy, audit });
@@ -100,7 +88,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
           <section className="drawer-section hero-section" aria-label="客户端下载">
             <div>
               <h3>下载客户端</h3>
-              <p>仅下载客户端时不需要点击“保存策略”。解压后运行同目录的配置和入口文件。</p>
+              <p>仅下载客户端时不需要保存接入策略。解压后运行同目录的配置和入口文件。</p>
             </div>
             <a className="primary download-button" href={downloadUrl} download="agent-observer-windows.zip">
               下载 Windows 客户端
@@ -111,8 +99,12 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
                 <dd>{state.packageConfig.filename}</dd>
               </div>
               <div>
-                <dt>配置文件</dt>
-                <dd>{state.packageConfig.config_path}</dd>
+                <dt>客户端版本</dt>
+                <dd>{state.packageConfig.agent_version}</dd>
+              </div>
+              <div>
+                <dt>协议版本</dt>
+                <dd>{state.packageConfig.protocol_version}</dd>
               </div>
               <div>
                 <dt>校验摘要</dt>
@@ -121,54 +113,35 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             </dl>
           </section>
 
-          <section className="drawer-section" aria-label="策略开关">
+          <section className="drawer-section" aria-label="采集内容">
             <div className="section-title-row">
-              <h3>策略开关</h3>
-              <span>v{formatNumber(state.policy.policy_version)}</span>
+              <h3>采集内容</h3>
+            </div>
+            <div className="switch-row">
+              <span>
+                <strong>默认上传原始输入输出</strong>
+                <small>当前版本固定上传完整 Prompt 和响应内容，用于会话查询和信号排查；暂不支持关闭。</small>
+              </span>
             </div>
             <label className="switch-row">
               <input
-                aria-label="启用 Codex 来源模板"
+                aria-label="允许本机补证任务"
                 type="checkbox"
-                checked={templateEnabled}
-                onChange={(event) => setTemplateEnabled(event.target.checked)}
+                checked={enrichmentMode === 'enabled'}
+                onChange={(event) => setEnrichmentMode(event.target.checked ? 'enabled' : 'disabled')}
               />
               <span>
-                <strong>启用 Codex 来源模板</strong>
-                <small>采集器按内置 Codex 会话结构生成事实。</small>
+                <strong>允许本机补证任务</strong>
+                <small>开启后服务端可下发内置只读补证任务；客户端不会执行任意命令。</small>
               </span>
-            </label>
-            <label className="switch-row">
-              <input
-                aria-label="客户端下载默认上传原文"
-                type="checkbox"
-                checked={uploadRaw}
-                onChange={(event) => setUploadRaw(event.target.checked)}
-              />
-              <span>
-                <strong>客户端下载默认上传原文</strong>
-                <small>新下载的 Windows 客户端会把该值写入配置；在线客户端可在采集器管理中单独开关。</small>
-              </span>
-            </label>
-          </section>
-
-          <section className="drawer-section" aria-label="策略文本">
-            <h3>策略文本</h3>
-            <label>
-              采集策略
-              <textarea value={collectionPolicy} onChange={(event) => setCollectionPolicy(event.target.value)} />
-            </label>
-            <label>
-              诊断策略
-              <textarea value={diagnosticPolicy} onChange={(event) => setDiagnosticPolicy(event.target.value)} />
             </label>
             <div className="drawer-actions">
               <button className="primary" disabled={saveState === 'saving'} type="submit">
-                {saveState === 'saving' ? '正在保存策略' : '保存策略'}
+                {saveState === 'saving' ? '正在保存接入策略' : '保存接入策略'}
               </button>
-              <span>保存后影响后续采集器拉取的 effective_policy。</span>
+              <span>保存后影响新下载客户端；在线客户端会在下一次心跳后拉取最新策略。</span>
             </div>
-            {saveState === 'saved' && <p role="status">策略已保存为 v{formatNumber(state.policy.policy_version)}</p>}
+            {saveState === 'saved' && <p role="status">接入策略已保存为 v{formatNumber(state.policy.policy_version)}</p>}
             {saveState === 'error' && <p role="alert">策略更新失败。请重新打开配置后再试。</p>}
           </section>
 

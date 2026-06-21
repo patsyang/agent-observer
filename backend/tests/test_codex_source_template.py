@@ -97,8 +97,8 @@ def _write_real_shape_session(codex_home, name: str = "real-shape.jsonl") -> Non
             "payload": {
                 "type": "token_count",
                 "info": {
-                    "last_token_usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
-                    "total_token_usage": {"input_tokens": 100, "output_tokens": 20, "total_tokens": 120},
+                    "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "total_tokens": 120},
+                    "total_token_usage": {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "total_tokens": 120},
                     "model_context_window": 258400,
                 },
                 "rate_limits": {},
@@ -164,7 +164,7 @@ def _write_real_shape_session(codex_home, name: str = "real-shape.jsonl") -> Non
     (sessions / name).write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
 
 
-def test_codex_source_template_extracts_structured_facts_without_raw_content(tmp_path):
+def test_codex_source_template_extracts_structured_facts_with_raw_content_by_default(tmp_path):
     codex_home = tmp_path / ".codex"
     _write_session(codex_home)
 
@@ -175,7 +175,7 @@ def test_codex_source_template_extracts_structured_facts_without_raw_content(tmp
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     categories = {fact["category"] for fact in facts}
@@ -191,7 +191,7 @@ def test_codex_source_template_extracts_structured_facts_without_raw_content(tmp
     message_fact = next(fact for fact in facts if fact["category"] == "codex_message")
     assert message_fact["projection"]["role"] == "unknown"
     assert message_fact["projection"]["content_length"] == 0
-    assert "raw_content" not in message_fact
+    assert "raw_content" in message_fact
     assert all(fact["raw_hash"] for fact in facts)
     assert all(fact["source_refs"]["source_path_hash"] for fact in facts if fact["category"] != "collector_health")
 
@@ -200,18 +200,14 @@ def test_codex_source_template_uses_cursor_and_max_events(tmp_path):
     codex_home = tmp_path / ".codex"
     _write_session(codex_home)
 
+    cursor = {"last_sequence": 0, "sources": {}}
     first = collect_facts(
         "collector-codex",
         1,
         "safe_probe",
         codex_home=codex_home,
         max_events=2,
-        cursor={"last_source_key": ""},
-    )
-    last_key = max(
-        fact["source_refs"].get("source_key", "")
-        for fact in first
-        if fact["category"] != "collector_health"
+        cursor=cursor,
     )
     second = collect_facts(
         "collector-codex",
@@ -219,14 +215,7 @@ def test_codex_source_template_uses_cursor_and_max_events(tmp_path):
         "safe_probe",
         codex_home=codex_home,
         max_events=20,
-        cursor={
-            "last_source_key": last_key,
-            "recent_source_keys": [
-                fact["source_refs"].get("source_key", "")
-                for fact in first
-                if fact["category"] != "collector_health"
-            ],
-        },
+        cursor=cursor,
     )
 
     assert len([fact for fact in first if fact["category"] != "collector_health"]) == 2
@@ -234,6 +223,61 @@ def test_codex_source_template_uses_cursor_and_max_events(tmp_path):
     assert {fact["source_event_id"] for fact in first}.isdisjoint(
         {fact["source_event_id"] for fact in second if fact["category"] != "collector_health"}
     )
+
+
+def test_codex_source_template_groups_records_without_conversation_id_by_session_file(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-06-18T10:00:00+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "输入内容"}],
+            },
+        },
+        {
+            "timestamp": "2026-06-18T10:01:00+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "输出内容"}],
+            },
+        },
+        {
+            "timestamp": "2026-06-18T10:02:00+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "arguments": "{}",
+            },
+        },
+    ]
+    (sessions / "session-without-conversation-id.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records),
+        encoding="utf-8",
+    )
+
+    facts = collect_facts(
+        "collector-codex",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    refs = {
+        fact["source_refs"]["conversation_ref"]
+        for fact in facts
+        if fact["category"] in {"codex_prompt", "codex_message", "tool_call"}
+    }
+    assert len(refs) == 1
 
 
 def test_codex_source_template_prioritizes_recent_sessions_for_first_cycle(tmp_path):
@@ -254,7 +298,7 @@ def test_codex_source_template_prioritizes_recent_sessions_for_first_cycle(tmp_p
         "safe_probe",
         codex_home=codex_home,
         max_events=1,
-        cursor={"last_source_key": ""},
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     first_source_key = next(fact["source_refs"]["source_key"] for fact in facts if fact["category"] != "collector_health")
@@ -279,13 +323,22 @@ def test_codex_source_template_prioritizes_live_tail_when_history_cursor_is_behi
     now = time.time()
     os.utime(active_path, (now, now))
 
+    cursor = {"last_sequence": 0, "sources": {}}
+    collect_facts(
+        "collector-codex",
+        2,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=2,
+        cursor=cursor,
+    )
     facts = collect_facts(
         "collector-codex",
         3,
         "safe_probe",
         codex_home=codex_home,
         max_events=3,
-        cursor={"last_source_key": f"{active_path.as_posix()}:00000002"},
+        cursor=cursor,
     )
 
     business_facts = [fact for fact in facts if fact["category"] != "collector_health"]
@@ -305,16 +358,20 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
         codex_home=codex_home,
         history_window_days=7,
         max_events=20,
-        cursor={"last_source_key": ""},
+        cursor={"last_sequence": 0, "sources": {}},
     )
 
     categories = {fact["category"] for fact in facts}
     assert {"tool_call", "codex_error", "usage", "high_risk_operation", "codex_prompt", "codex_reasoning"} <= categories
     prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
-    assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，原文上报未开启。"
+    assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
     assert prompt_fact["projection"]["content_length"] == len("请检查 Dashboard 为什么看不到原始 Prompt")
-    assert "请检查 Dashboard" not in json.dumps(prompt_fact, ensure_ascii=False)
-    assert any(fact.get("usage", {}).get("units") == 120 for fact in facts)
+    assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
+    assert "请检查 Dashboard" in json.dumps(prompt_fact, ensure_ascii=False)
+    usage_fact = next(fact for fact in facts if fact["category"] == "usage")
+    assert usage_fact["usage"]["units"] == 60
+    assert usage_fact["projection"]["context_total_tokens"] == 120
+    assert usage_fact["projection"]["cached_input_tokens"] == 60
     assert any(fact.get("error_signature", {}).get("signature_key", "").startswith("codex_error:function_call_output") for fact in facts)
     assert any(fact.get("projection", {}).get("command_category") == "test" for fact in facts)
     assert not [fact for fact in facts if fact["category"] == "sensitive_touch"]

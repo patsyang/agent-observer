@@ -14,21 +14,15 @@ const statusLabels: Record<SourceStatus, string> = {
 
 export function CollectorsPage({
   deleteCollector,
-  loadCollectors,
-  updateRawUpload
+  loadCollectors
 }: {
   deleteCollector: (collectorId: string) => Promise<{ collector_id: string; removed: boolean; reason_code: string }>;
   loadCollectors: () => Promise<CollectorsResponse>;
-  updateRawUpload: (
-    collectorId: string,
-    enabled: boolean
-  ) => Promise<{ collector_id: string; raw_upload_enabled: boolean; raw_upload_override: boolean; raw_upload_source: string }>;
 }) {
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
   const [collectors, setCollectors] = useState<Collector[]>([]);
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null);
   const [cleanupError, setCleanupError] = useState<string | null>(null);
-  const [rawMessage, setRawMessage] = useState<string | null>(null);
 
   useEffect(() => {
     loadCollectors()
@@ -54,10 +48,9 @@ export function CollectorsPage({
     <section className="panel">
       <h2>采集器</h2>
       <p className="panel-intro">
-        这里用于查看本机 collector 接入状态。在线客户端可开启或关闭原文上报；清理只会从管理列表移除离线或遗留采集器。
+        这里用于查看本机 collector 接入状态。当前版本固定上传原始输入输出，清理只会从管理列表移除离线或遗留采集器。
       </p>
       {cleanupMessage && <p role="status">{cleanupMessage}</p>}
-      {rawMessage && <p role="status">{rawMessage}</p>}
       {cleanupError && <p role="alert">{cleanupError}</p>}
       <div className="status-legend" aria-label="支持的数据源状态">
         {sourceStatuses.map((status) => (
@@ -90,17 +83,8 @@ export function CollectorsPage({
               <td data-label="原因">{collector.reason_code}</td>
               <td data-label="待传">{formatNumber(collector.outbox_backlog)}</td>
               <td data-label="原文上报">
-                <label className="toggle-cell">
-                  <input
-                    aria-label={`原文上报 ${collector.display_name}`}
-                    checked={collector.raw_upload_enabled}
-                    disabled={collector.source_status !== 'online'}
-                    type="checkbox"
-                    onChange={() => toggleRawUpload(collector)}
-                  />
-                  <span>{collector.raw_upload_enabled ? '已开' : '未开'}</span>
-                </label>
-                <small>{rawSourceText(collector)}</small>
+                <span>已开启</span>
+                <small>固定策略</small>
               </td>
               <td data-label="管理">
                 <button
@@ -132,31 +116,4 @@ export function CollectorsPage({
     }
   }
 
-  async function toggleRawUpload(collector: Collector) {
-    setRawMessage(null);
-    setCleanupError(null);
-    try {
-      const updated = await updateRawUpload(collector.collector_id, !collector.raw_upload_enabled);
-      setCollectors((current) => current.map((item) => (
-        item.collector_id === collector.collector_id
-          ? {
-              ...item,
-              raw_upload_enabled: updated.raw_upload_enabled,
-              raw_upload_override: updated.raw_upload_override,
-              raw_upload_source: updated.raw_upload_source as Collector['raw_upload_source'],
-            }
-          : item
-      )));
-      setRawMessage(`${collector.display_name} 已${updated.raw_upload_enabled ? '开启' : '关闭'}原文上报`);
-    } catch {
-      setCleanupError('原文上报策略更新失败。请确认采集器在线后重试。');
-    }
-  }
-}
-
-function rawSourceText(collector: Collector): string {
-  if (collector.raw_upload_source === 'collector_override' || collector.raw_upload_override) {
-    return '单独配置';
-  }
-  return '跟随全局';
 }

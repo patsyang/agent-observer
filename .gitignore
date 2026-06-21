@@ -35,6 +35,14 @@ node_modules/
 # Runtime logs
 data/runtime/*.err.log
 data/runtime/*.out.log
+backend/*.err.log
+backend/*.out.log
+frontend/*.err.log
+frontend/*.out.log
+vite*.log
+
+# Local runtime inspection scripts
+data/runtime/inspect_*.py
 
 # SQLite runtime files (locks, WAL, backups)
 *.sqlite-shm

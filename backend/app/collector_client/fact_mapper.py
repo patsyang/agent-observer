@@ -29,7 +29,7 @@ from app.collector_client.telemetry_utils import (
 HIGH_RISK_OPERATIONS = {"delete", "remove", "rm", "overwrite", "chmod", "permission_change"}
 
 
-def _health_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool, upload_raw: bool) -> dict:
+def _health_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool) -> dict:
     return {
         "source_event_id": f"{collector_id}-health-{sequence}",
         "fact_type": "collector_health",
@@ -46,12 +46,12 @@ def _health_fact(collector_id: str, sequence: int, observed_at: str, telemetry_m
             "collector_id": collector_id,
             "cursor_sequence": sequence,
             "codex_session_dir_present": source_available,
-            "uploaded_raw_content": upload_raw,
+            "uploaded_raw_content": True,
         },
     }
 
 
-def _source_gap_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool, upload_raw: bool) -> dict:
+def _source_gap_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool) -> dict:
     status = "已检测到 Codex 会话目录，但本轮没有发现新的可投影事件。"
     severity = "low"
     if not source_available:
@@ -63,17 +63,17 @@ def _source_gap_fact(collector_id: str, sequence: int, observed_at: str, telemet
         "category": "collector_source_status",
         "quality": "high",
         "severity": severity,
-        "summary": f"{status} 当前原文上报{'已开启' if upload_raw else '未开启'}。",
+        "summary": f"{status} 当前采集器固定上传原始输入输出。",
         "occurred_at": observed_at,
         "raw_hash": _hash("source-status", collector_id, sequence, observed_at, telemetry_mode, str(source_available)),
         "span": "collector:source-probe",
         "source_refs": {"collector_id": collector_id, "sequence": sequence, "source_key": f"source-status:{sequence}"},
         "source_specific": {"telemetry_mode": telemetry_mode, "probe": "codex_session_dir_presence"},
-        "projection": {"source_kind": "codex_sessions", "source_available": source_available, "raw_content_uploaded": upload_raw},
+        "projection": {"source_kind": "codex_sessions", "source_available": source_available, "raw_content_uploaded": True},
     }
 
 
-def _record_fact(collector_id: str, sequence: int, source_key: str, path: Path, line_number: int, record: dict, upload_raw: bool) -> dict | None:
+def _record_fact(collector_id: str, sequence: int, source_key: str, path: Path, line_number: int, record: dict) -> dict | None:
     payload = _payload(record)
     event_type = _event_type(record, payload)
     occurred_at = _occurred_at(record)
@@ -90,10 +90,9 @@ def _record_fact(collector_id: str, sequence: int, source_key: str, path: Path, 
             "source_template": "codex.local.sessions.v1",
             "validation_sample": record.get("validation_sample"),
         },
-        "upload_raw": upload_raw,
+        "upload_raw": True,
     }
-    if upload_raw:
-        common["raw_content"] = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
+    common["raw_content"] = json.dumps(record, ensure_ascii=False, sort_keys=True, default=str)
     if _is_usage(record):
         return _usage_fact(common, record)
     if _is_error(record):
@@ -135,13 +134,7 @@ def _usage_fact(common: dict, record: dict) -> dict:
     payload = _payload(record)
     info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
     last_usage = info.get("last_token_usage") if isinstance(info.get("last_token_usage"), dict) else {}
-    units = int(
-        record.get("total_tokens")
-        or record.get("tokens")
-        or record.get("units")
-        or last_usage.get("total_tokens")
-        or 0
-    )
+    units = _effective_usage_units(record, last_usage)
     tags = record.get("activity_tags") or record.get("activity_tag") or _activity_tags(record)
     if isinstance(tags, str):
         activity_tag = _clean(tags)
@@ -163,18 +156,40 @@ def _usage_fact(common: dict, record: dict) -> dict:
             "activity_tag": activity_tag,
             "tag_count": len(tags) if isinstance(tags, list) else 1,
             "model_context_window": int(info.get("model_context_window") or 0),
+            "input_tokens": _int(last_usage.get("input_tokens")),
+            "cached_input_tokens": _int(last_usage.get("cached_input_tokens")),
+            "output_tokens": _int(last_usage.get("output_tokens")),
+            "reasoning_output_tokens": _int(last_usage.get("reasoning_output_tokens")),
+            "context_total_tokens": _int(last_usage.get("total_tokens")),
+            "unit_basis": "non_cached_input_plus_output",
         },
         "usage": {
             "scope": "session",
             "units": units,
             "activity_tag": activity_tag,
-            "usage_kind": "attributed" if record.get("attributed") else "associated",
             "session_id": session_id,
             "conversation_id": conversation_id,
             "project_ref": _ref(record.get("project") or "unknown"),
             "account_ref": _ref(record.get("account") or "local"),
         },
     }
+
+def _effective_usage_units(record: dict, last_usage: dict) -> int:
+    explicit = record.get("total_tokens") or record.get("tokens") or record.get("units")
+    if explicit is not None:
+        return _int(explicit)
+    input_tokens = _int(last_usage.get("input_tokens"))
+    cached_input_tokens = _int(last_usage.get("cached_input_tokens"))
+    output_tokens = _int(last_usage.get("output_tokens"))
+    if input_tokens or output_tokens:
+        return max(0, input_tokens - cached_input_tokens) + output_tokens
+    return _int(last_usage.get("total_tokens"))
+
+def _int(value: object) -> int:
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
 
 def _risk_fact(common: dict, record: dict) -> dict | None:
     payload = _payload(record)
@@ -232,7 +247,7 @@ def _low_evidence_fact(common: dict, record: dict) -> dict:
         "category": "uncategorized",
         "quality": "low",
         "severity": "low",
-        "summary": "Codex 会话出现未归类但来源合法的低证据事件，已保留为事实查询候选。",
+        "summary": "Codex 会话出现未归类但来源合法的低证据事件，已保留为低证据命中候选。",
         "projection": {
             "observed_keys": sorted(_safe_key(key) for key in record.keys())[:12],
             "payload_type": _payload_type(record),
@@ -279,14 +294,23 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
 
 def _source_refs(collector_id: str, sequence: int, source_key: str, path: Path, line_number: int, record: dict) -> dict:
     payload = _payload(record)
+    session_ref = record.get("session_id") or record.get("session") or payload.get("id") or path.stem
+    conversation_ref = (
+        record.get("conversation_id")
+        or record.get("conversation")
+        or payload.get("turn_id")
+        or record.get("session_id")
+        or record.get("session")
+        or path.stem
+    )
     return {
         "collector_id": collector_id,
         "sequence": sequence,
         "source_key": source_key,
         "source_path_hash": _hash(path.as_posix())[:16],
         "line": line_number,
-        "conversation_ref": _ref(record.get("conversation_id") or record.get("conversation") or payload.get("turn_id") or source_key),
-        "session_ref": _ref(record.get("session_id") or record.get("session") or payload.get("id") or path.stem),
+        "conversation_ref": _ref(conversation_ref),
+        "session_ref": _ref(session_ref),
     }
 
 def _source_event_id(path_hash: str, line_number: int, event_type: str, occurred_at: str, record: dict) -> str:

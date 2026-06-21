@@ -37,7 +37,7 @@ def run(argv: list[str] | None = None, cwd: Path | None = None, emit: Emit | Non
 
 def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
     if error or config is None:
-        return _json_result(2, {"status": "error", "diagnostic": error})
+        return _json_result(2, {"status": "error", "enrichment": error})
     try:
         _get_json(config.server_url, "/api/policy")
     except (OSError, ValueError, urllib.error.URLError) as exc:
@@ -49,7 +49,7 @@ def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
                 "server_url": config.server_url,
                 "state_path": str(config.state_path),
                 "server_reachable": False,
-                "diagnostic": str(exc),
+                "enrichment": str(exc),
             },
         )
     return _json_result(
@@ -63,7 +63,7 @@ def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
             "codex_sessions_present": (config.codex_home / "sessions").exists(),
             "evidence_mode": config.evidence_mode,
             "server_reachable": True,
-            "diagnostic_pull": True,
+            "enrichment_pull": True,
         },
     )
 
@@ -72,8 +72,7 @@ def _human_log_line(payload: dict[str, object]) -> str:
     mode = str(payload.get("mode") or "")
     now = datetime.now().strftime("%H:%M:%S")
     if mode == "started":
-        raw_status = "开启" if payload.get("raw_upload_enabled") else "关闭"
-        return f"[{now}] 启动 collector: {payload.get('collector_id')}，原文上报: {raw_status}"
+        return f"[{now}] 启动 collector: {payload.get('collector_id')}，原始输入输出上传已启用"
     if mode == "cycle_started":
         return f"[{now}] 第 {payload.get('cycle')} 轮采集开始"
     if mode == "cycle":
@@ -96,11 +95,11 @@ def _human_cycle_line(now: str, payload: dict[str, object]) -> str:
     generated = int(summary.get("generated") or 0)
     type_text = _human_type_counts(types)
     duration_ms = int(payload.get("last_cycle_duration_ms") or 0)
-    diagnostics = int(payload.get("diagnostics") or 0)
+    enrichments = int(payload.get("enrichments") or 0)
     return (
         f"[{now}] 第 {payload.get('cycle')} 轮完成: "
         f"生成 {generated} 条事实，上传 {payload.get('uploaded', 0)} 条"
-        f"{type_text}，补证 {diagnostics}，outbox {payload.get('outbox_backlog', 0)}，耗时 {duration_ms / 1000:.1f}s"
+        f"{type_text}，补证 {enrichments}，outbox {payload.get('outbox_backlog', 0)}，耗时 {duration_ms / 1000:.1f}s"
     )
 
 

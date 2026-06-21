@@ -15,7 +15,6 @@ def load_state(path: Path) -> dict:
     state.setdefault("schema_version", 2)
     state.setdefault("cursor", {})
     state["cursor"].setdefault("last_sequence", 0)
-    state["cursor"].setdefault("last_source_key", "")
     state["cursor"].setdefault("sources", {})
     state["cursor"].setdefault("backfill", {})
     state.setdefault("outbox", [])
@@ -54,7 +53,6 @@ def _default_state() -> dict:
         "source_status": "offline",
         "cursor": {
             "last_sequence": 0,
-            "last_source_key": "",
             "sources": {},
             "backfill": {},
         },

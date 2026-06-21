@@ -5,7 +5,7 @@ import { formatNumber } from '../utils/numberFormat';
 import {
   attentionStateLabel,
   compactListSummary,
-  diagnosticStatusLabel,
+  enrichmentStatusLabel,
   handlingStateLabel,
   storyEvidenceSummary,
   storyKindLabel,
@@ -38,12 +38,8 @@ export function StoryCard({ story, onOpen }: Props) {
           <dd>{compactListSummary(story.impact_objects, '对象')}</dd>
         </div>
         <div>
-          <dt>证据链</dt>
+          <dt>命中内容</dt>
           <dd>{storyEvidenceSummary(story)}</dd>
-        </div>
-        <div>
-          <dt>用量</dt>
-          <dd>{usageSummaryText(story.usage_summary)}</dd>
         </div>
         <div>
           <dt>状态</dt>
@@ -56,14 +52,18 @@ export function StoryCard({ story, onOpen }: Props) {
           <dd>{formatNumber(story.occurrence_count ?? story.evidence_refs.length)} 次</dd>
         </div>
         <div>
+          <dt>用量</dt>
+          <dd>{usageSummaryText(story.usage_summary)}</dd>
+        </div>
+        <div>
           <dt>补证</dt>
-          <dd>{diagnosticStatusLabel(story.diagnostic_status_summary.status)}</dd>
+          <dd>{enrichmentStatusLabel(story.enrichment_status_summary.status)}</dd>
         </div>
       </dl>
 
       <div className="story-card__footer">
         <button className="compact-button primary" onClick={() => onOpen(story.story_id)}>
-          处理
+          查看信号
           <ArrowRight aria-hidden="true" size={15} />
         </button>
       </div>

@@ -40,7 +40,7 @@ def _write_story_row(conn: sqlite3.Connection, story: dict) -> None:
         """
         insert into observation_stories (
           story_id, story_key, priority_score, evidence_refs_json, usage_summary_json,
-          diagnostic_status_summary_json, attention_state, current_snapshot_json, snapshot_hash,
+          enrichment_status_summary_json, attention_state, current_snapshot_json, snapshot_hash,
           conclusion, impact_objects_json, suggested_action, story_type, first_seen_at, last_seen_at,
           last_event_at, occurrence_count, primary_object_type, primary_object_value,
           latest_fact_id, latest_summary, updated_at
@@ -49,7 +49,7 @@ def _write_story_row(conn: sqlite3.Connection, story: dict) -> None:
           priority_score = excluded.priority_score,
           evidence_refs_json = excluded.evidence_refs_json,
           usage_summary_json = excluded.usage_summary_json,
-          diagnostic_status_summary_json = excluded.diagnostic_status_summary_json,
+          enrichment_status_summary_json = excluded.enrichment_status_summary_json,
           attention_state = excluded.attention_state,
           current_snapshot_json = excluded.current_snapshot_json,
           snapshot_hash = excluded.snapshot_hash,
@@ -73,7 +73,7 @@ def _write_story_row(conn: sqlite3.Connection, story: dict) -> None:
             story["priority_score"],
             _dumps(story["evidence_refs"]),
             _dumps(story["usage_summary"]),
-            _dumps(story["diagnostic_status_summary"]),
+            _dumps(story["enrichment_status_summary"]),
             story["attention_state"],
             _dumps(story["current_snapshot"]),
             story["snapshot_hash"],
@@ -106,6 +106,7 @@ def _related_facts(conn: sqlite3.Connection, conversation_ref: str | None, fallb
             """
             select * from observed_facts
             where conversation_ref = ?
+              and fact_type != 'usage'
             order by occurred_at, fact_id
             """,
             (conversation_ref,),

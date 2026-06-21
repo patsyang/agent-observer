@@ -1,27 +1,27 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 
-import { DiagnosticPanel } from '../components/DiagnosticPanel';
+import { EnrichmentPanel } from '../components/EnrichmentPanel';
 import { EvidenceChainTable } from '../components/EvidenceChainTable';
 import { HandleStoryDialog } from '../components/HandleStoryDialog';
 import {
   attentionStateLabel,
   conclusionCodeLabel,
-  diagnosticStatusLabel,
+  enrichmentStatusLabel,
   handlingStateLabel,
   storyKindLabel,
   usageSummaryText,
 } from '../components/storyLabels';
-import type { DiagnosticAvailability, DiagnosticJob, HandleStoryPayload, ObservationStoryDetail } from '../api/types';
+import type { EnrichmentAvailability, EnrichmentJob, HandleStoryPayload, ObservationStoryDetail } from '../api/types';
 
 interface Props {
   storyId: string;
   loadStoryDetail: (storyId: string) => Promise<ObservationStoryDetail>;
-  loadDiagnosticAvailability: (storyId: string) => Promise<DiagnosticAvailability>;
+  loadEnrichmentAvailability: (storyId: string) => Promise<EnrichmentAvailability>;
   markRead: (storyId: string) => Promise<ObservationStoryDetail>;
   handleStory: (storyId: string, payload: HandleStoryPayload) => Promise<ObservationStoryDetail>;
-  requestDiagnostic: (storyId: string, capabilityId: string) => Promise<DiagnosticJob>;
-  cancelDiagnostic: (jobId: string) => Promise<DiagnosticJob>;
+  requestEnrichment: (storyId: string, capabilityId: string) => Promise<EnrichmentJob>;
+  cancelEnrichment: (jobId: string) => Promise<EnrichmentJob>;
   onBack: () => void;
   onOpenFact?: (factId: string) => void;
 }
@@ -29,16 +29,16 @@ interface Props {
 type LoadState =
   | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; story: ObservationStoryDetail; diagnosticAvailability: DiagnosticAvailability };
+  | { status: 'ready'; story: ObservationStoryDetail; enrichmentAvailability: EnrichmentAvailability };
 
 export function ObservationStoryDetailPage({
   storyId,
   loadStoryDetail,
-  loadDiagnosticAvailability,
+  loadEnrichmentAvailability,
   markRead,
   handleStory,
-  requestDiagnostic,
-  cancelDiagnostic,
+  requestEnrichment,
+  cancelEnrichment,
   onBack,
   onOpenFact
 }: Props) {
@@ -47,18 +47,18 @@ export function ObservationStoryDetailPage({
   const [mutationError, setMutationError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
-    const [story, diagnosticAvailability] = await Promise.all([
+    const [story, enrichmentAvailability] = await Promise.all([
       loadStoryDetail(storyId),
-      loadDiagnosticAvailability(storyId),
+      loadEnrichmentAvailability(storyId),
     ]);
-    setState({ status: 'ready', story, diagnosticAvailability });
-  }, [loadDiagnosticAvailability, loadStoryDetail, storyId]);
+    setState({ status: 'ready', story, enrichmentAvailability });
+  }, [loadEnrichmentAvailability, loadStoryDetail, storyId]);
 
   useEffect(() => {
     let cancelled = false;
-    Promise.all([loadStoryDetail(storyId), loadDiagnosticAvailability(storyId)])
-      .then(([story, diagnosticAvailability]) => {
-        if (!cancelled) setState({ status: 'ready', story, diagnosticAvailability });
+    Promise.all([loadStoryDetail(storyId), loadEnrichmentAvailability(storyId)])
+      .then(([story, enrichmentAvailability]) => {
+        if (!cancelled) setState({ status: 'ready', story, enrichmentAvailability });
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error' });
@@ -66,29 +66,27 @@ export function ObservationStoryDetailPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDiagnosticAvailability, loadStoryDetail, storyId]);
+  }, [loadEnrichmentAvailability, loadStoryDetail, storyId]);
 
   if (state.status === 'loading') {
-    return <section className="panel">正在加载故事详情</section>;
+    return <section className="panel">正在加载信号详情</section>;
   }
   if (state.status === 'error') {
     return (
       <section className="panel">
-        <p>故事详情不可用。</p>
+        <p>信号详情不可用。</p>
         <button onClick={onBack}>返回总览</button>
       </section>
     );
   }
 
-  const { diagnosticAvailability, story } = state;
-  const usageText = usageSummaryText(story.usage_summary);
-
+  const { enrichmentAvailability, story } = state;
   return (
-    <section className="panel story-detail" aria-label="故事详情">
+    <section className="panel story-detail" aria-label="信号详情">
       <header className="detail-header">
         <div>
           <h2>{story.conclusion}</h2>
-          <p>故事类型：{storyKindLabel(story.story_key)}</p>
+          <p>信号类型：{storyKindLabel(story.story_key)}</p>
         </div>
         <div className="detail-header__actions">
           <button className="compact-button" onClick={reload} type="button">
@@ -109,7 +107,7 @@ export function ObservationStoryDetailPage({
           标记已读
         </button>
         <button className="primary" onClick={() => setDialogOpen(true)}>
-          处理故事
+          处理信号
         </button>
       </div>
       {mutationError && <p role="alert">{mutationError}</p>}
@@ -122,7 +120,7 @@ export function ObservationStoryDetailPage({
           }}
         />
       )}
-      <div className="detail-summary" aria-label="故事摘要">
+      <div className="detail-summary" aria-label="信号摘要">
         <div>
           <span>影响对象</span>
           <strong>{story.impact_objects.join(', ')}</strong>
@@ -137,26 +135,26 @@ export function ObservationStoryDetailPage({
         </div>
         <div>
           <span>用量</span>
-          <strong>{usageText}</strong>
+          <strong>{usageSummaryText(story.usage_summary)}</strong>
         </div>
         <div>
-          <span>诊断</span>
+          <span>补证</span>
           <strong>
-            {diagnosticStatusLabel(story.diagnostic_status_summary.status)}
-            {story.diagnostic_status_summary.reason_code ? `，${story.diagnostic_status_summary.reason_code}` : ''}
+            {enrichmentStatusLabel(story.enrichment_status_summary.status)}
+            {story.enrichment_status_summary.reason_code ? `，${story.enrichment_status_summary.reason_code}` : ''}
           </strong>
         </div>
       </div>
-      <DiagnosticPanel
+      <EnrichmentPanel
         storyId={story.story_id}
-        availability={diagnosticAvailability}
-        requestDiagnostic={requestDiagnostic}
-        cancelDiagnostic={cancelDiagnostic}
+        availability={enrichmentAvailability}
+        requestEnrichment={requestEnrichment}
+        cancelEnrichment={cancelEnrichment}
         onChanged={reload}
       />
       <section aria-label="证据链">
-        <h3>证据链</h3>
-        <p className="panel-intro">以下为本故事使用的真实事实。点击“查看事实”可打开完整原文、投影字段和来源位置。</p>
+        <h3>命中内容</h3>
+        <p className="panel-intro">以下为本信号命中的内容。点击“查看会话”会打开所属会话的完整输入输出和 token 用量。</p>
         <EvidenceChainTable entries={story.current_snapshot.evidence_chain} onOpenFact={onOpenFact} />
       </section>
       <section>
@@ -176,9 +174,9 @@ export function ObservationStoryDetailPage({
   async function runMutation(action: () => Promise<ObservationStoryDetail>) {
     setMutationError(null);
     try {
-      setState({ status: 'ready', story: await action(), diagnosticAvailability });
+      setState({ status: 'ready', story: await action(), enrichmentAvailability });
     } catch {
-      setMutationError('故事操作失败。请刷新后重试。');
+      setMutationError('信号操作失败。请刷新后重试。');
     }
   }
 }

@@ -7,7 +7,6 @@ import {
   riskTypeLabel,
   scopeValueLabel,
   severityLabel,
-  usageKindLabel,
 } from './dashboardLabels';
 
 interface Props {
@@ -28,8 +27,8 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
       </div>
       <div className="panel-body">
         <div className="metric-grid">
-          <Metric label="关联用量" value={formatNumber(usage.totals.associated_units)} note="不可简单相加" />
-          <Metric label="归因用量" value={formatNumber(usage.totals.attributed_units)} note="仅确定性证据" />
+          <Metric label="有效用量" value={formatNumber(usage.totals.effective_units)} note="模型调用有效 token" />
+          <Metric label="缓存命中" value={formatNumber(usage.totals.cached_input_units)} note={`命中率 ${formatPercent(usage.totals.cache_hit_rate)}`} />
           <Metric label="未知活动" value={formatNumber(usage.totals.unknown_units)} note="不由 AI 猜测" />
         </div>
         <div className="summary-columns">
@@ -50,7 +49,7 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
             ) : (
               activityRows.map((row) => (
                 <p key={row.rollup_id}>
-                  {activityTagLabel(row.activity_tag)}：{formatNumber(row.units)}，{usageKindLabel(row.usage_kind)}
+                  {activityTagLabel(row.activity_tag)}：{formatNumber(row.units)}
                 </p>
               ))
             )}
@@ -79,4 +78,8 @@ function sumScope(usage: UsageSummary, scope: string, scopeValue?: string): numb
   return usage.rollups
     .filter((row) => row.scope === scope && row.scope_value === scopeValue)
     .reduce((total, row) => total + row.units, 0);
+}
+
+function formatPercent(value?: number): string {
+  return `${((value ?? 0) * 100).toFixed(1)}%`;
 }

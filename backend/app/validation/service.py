@@ -12,8 +12,8 @@ ACCEPTANCE_IDS = [f"AC-{index:03d}" for index in range(1, 21)]
 CATEGORY_RULES = {
     "error_recurrence": "fact_type = 'error' and category = 'codex_error'",
     "low_evidence_fact": "quality in ('low', 'unknown')",
-    "diagnostic_feedback": "category = 'diagnostic_result'",
-    "usage_anomaly": "fact_type = 'usage'",
+    "enrichment_feedback": "category = 'enrichment_result'",
+    "usage_signal": "fact_type = 'usage'",
     "high_risk_operation": "category = 'high_risk_operation'",
     "sensitive_object_touch": "category = 'sensitive_touch'",
 }
@@ -54,7 +54,7 @@ def run_minimum_validation_experiment(
         "flow_coverage": _flow_coverage(conn),
         "acceptance_coverage": _acceptance_coverage(conn),
         "data_handling_review": {
-            "raw_upload_mode": "policy_controlled",
+            "raw_upload_mode": "always_on",
             "reported_fields": ["category", "counts", "pass_rates", "evidence_refs", "rule_fix_list"],
         },
     }
@@ -73,11 +73,11 @@ def _sample_coverage(conn: sqlite3.Connection) -> list[dict]:
     for category, where in CATEGORY_RULES.items():
         count = conn.execute(f"select count(*) from observed_facts where {where}").fetchone()[0]
         rows.append({"category": category, "sample_count": count, "covered": count > 0})
-    diagnostic_count = conn.execute("select count(*) from diagnostic_results").fetchone()[0]
-    if diagnostic_count:
+    enrichment_count = conn.execute("select count(*) from enrichment_results").fetchone()[0]
+    if enrichment_count:
         for row in rows:
-            if row["category"] == "diagnostic_feedback":
-                row["sample_count"] = diagnostic_count
+            if row["category"] == "enrichment_feedback":
+                row["sample_count"] = enrichment_count
                 row["covered"] = True
     return rows
 
@@ -155,7 +155,7 @@ def _flow_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "FLOW-002": _count(conn, "observed_facts") > 0 and _count(conn, "evidence_projections") > 0,
         "FLOW-003": _count(conn, "observation_stories") > 0,
         "FLOW-004": _count(conn, "story_handling_states") > 0 and _audit_count(conn, "story_handling_changed") > 0,
-        "FLOW-005": _count(conn, "diagnostic_jobs") > 0 and _count(conn, "diagnostic_results") > 0,
+        "FLOW-005": _count(conn, "enrichment_jobs") > 0 and _count(conn, "enrichment_results") > 0,
         "FLOW-006": _count(conn, "usage_signals") > 0 and _count(conn, "risk_signals") > 0,
         "FLOW-007": _audit_count(conn, "policy_changed") > 0,
     }
@@ -177,11 +177,11 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "AC-005": _count(conn, "story_handling_states") > 0,
         "AC-006": _count(conn, "story_handling_states") > 0 and _count(conn, "observation_stories") > 0,
         "AC-007": _count(conn, "usage_signals") > 0,
-        "AC-008": _usage_kind_count(conn, "associated") > 0 or _usage_kind_count(conn, "attributed") > 0,
+        "AC-008": _count(conn, "usage_signals") > 0,
         "AC-009": _count(conn, "risk_signals") > 0,
         "AC-010": _count(conn, "collectors") > 0,
-        "AC-011": _count(conn, "diagnostic_jobs") > 0,
-        "AC-012": _count(conn, "diagnostic_results") > 0,
+        "AC-011": _count(conn, "enrichment_jobs") > 0,
+        "AC-012": _count(conn, "enrichment_results") > 0,
         "AC-013": _count(conn, "audit_logs") > 0,
         "AC-014": _count(conn, "collectors") > 0,
         "AC-015": _count(conn, "observation_stories") > 0,
@@ -194,16 +194,16 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
     mapping = {
         "AC-001": "collector-onboarding",
         "AC-002": "fact-ingest",
-        "AC-003": "fact-query",
+        "AC-003": "conversation-query",
         "AC-004": "story-recurrence",
         "AC-005": "story-handling",
         "AC-006": "story-recompute-preservation",
         "AC-007": "usage-rollup",
-        "AC-008": "usage-attribution",
+        "AC-008": "usage-effective",
         "AC-009": "risk-governance",
         "AC-010": "collector-source-status",
-        "AC-011": "diagnostic-availability",
-        "AC-012": "diagnostic-result",
+        "AC-011": "enrichment-availability",
+        "AC-012": "enrichment-result",
         "AC-013": "fixed-account-audit",
         "AC-014": "public-console",
         "AC-015": "story-default-queue",
@@ -249,7 +249,7 @@ def _rule_fix_list(report: dict, thresholds: dict[str, float]) -> list[dict]:
             {
                 "rule_id": "flow-acceptance-coverage",
                 "reason_code": "db_objects_do_not_cover_all_prd_flows",
-                "suggested_fix": "Run collector, story handling, diagnostic, policy and governance flows before release validation.",
+                "suggested_fix": "Run collector, story handling, enrichment, policy and governance flows before release validation.",
             }
         )
     return fixes
@@ -261,7 +261,7 @@ def _flow_evidence(flow_id: str) -> list[str]:
         "FLOW-002": ["observed_facts", "evidence_projections"],
         "FLOW-003": ["observation_stories"],
         "FLOW-004": ["story_handling_states", "audit_logs"],
-        "FLOW-005": ["diagnostic_jobs", "diagnostic_results"],
+        "FLOW-005": ["enrichment_jobs", "enrichment_results"],
         "FLOW-006": ["usage_signals", "risk_signals"],
         "FLOW-007": ["effective_policies", "audit_logs"],
     }[flow_id]
@@ -277,10 +277,6 @@ def _audit_count(conn: sqlite3.Connection, action: str) -> int:
 
 def _fact_count(conn: sqlite3.Connection, where: str) -> int:
     return int(conn.execute(f"select count(*) from observed_facts where {where}").fetchone()[0])
-
-
-def _usage_kind_count(conn: sqlite3.Connection, usage_kind: str) -> int:
-    return int(conn.execute("select count(*) from usage_signals where usage_kind = ?", (usage_kind,)).fetchone()[0])
 
 
 def _story_count(conn: sqlite3.Connection, where: str) -> int:

@@ -1,16 +1,17 @@
 import { useState } from 'react';
-import { ActivitySquare, DatabaseZap, LayoutDashboard, Radio } from 'lucide-react';
+import { ActivitySquare, LayoutDashboard, MessagesSquare, Radio } from 'lucide-react';
 
 import {
   clientPackageUrl,
-  cancelDiagnostic,
+  cancelEnrichment,
   deleteCollector,
   fetchDashboardSummary,
   fetchClientPackageConfig,
   fetchCollectors,
-  fetchDiagnosticAvailability,
-  fetchFactDetail,
-  fetchFacts,
+  fetchConversationDetail,
+  fetchConversationForFact,
+  fetchConversations,
+  fetchEnrichmentAvailability,
   fetchPolicy,
   fetchRecentAudit,
   fetchRiskSummary,
@@ -19,21 +20,20 @@ import {
   fetchUsageSummary,
   handleStory,
   markStoryRead,
-  requestDiagnostic,
-  updateCollectorRawUpload,
+  requestEnrichment,
   updatePolicy
 } from './api/client';
 import { AccessConfigDrawer } from './components/AccessConfigDrawer';
 import { CollectorsPage } from './pages/CollectorsPage';
+import { ConversationQueryPage } from './pages/ConversationQueryPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { FactQueryPage, type InitialFactFilters } from './pages/FactQueryPage';
 import { ObservationStoryDetailPage } from './pages/ObservationStoryDetailPage';
 
-type View = 'dashboard' | 'collectors' | 'facts';
+type View = 'dashboard' | 'collectors' | 'conversations';
 
 const navItems: Array<{ view: View; label: string; desc: string; icon: typeof LayoutDashboard }> = [
-  { view: 'dashboard', label: '观测总览', desc: '故事与风险', icon: LayoutDashboard },
-  { view: 'facts', label: '事实查询', desc: '证据与原文', icon: DatabaseZap },
+  { view: 'dashboard', label: '观测总览', desc: '信号与用量', icon: LayoutDashboard },
+  { view: 'conversations', label: '会话查询', desc: '输入与响应', icon: MessagesSquare },
   { view: 'collectors', label: '采集器', desc: '状态与策略', icon: Radio }
 ];
 
@@ -41,7 +41,7 @@ export function App() {
   const [view, setView] = useState<View>('dashboard');
   const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
-  const [initialFactFilters, setInitialFactFilters] = useState<InitialFactFilters | null>(null);
+  const [returnStoryId, setReturnStoryId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
@@ -64,7 +64,7 @@ export function App() {
               onClick={() => {
                 setSelectedStoryId(null);
                 setSelectedFactId(null);
-                setInitialFactFilters(null);
+                setReturnStoryId(null);
                 setView(item.view);
               }}
             >
@@ -80,7 +80,7 @@ export function App() {
         <section className="side-card">
           <span>当前项目</span>
           <strong>agent-observer</strong>
-          <small>collector / 本地事实上报</small>
+          <small>collector / 本地观测上报</small>
         </section>
         <button className="primary full-width" onClick={() => setDrawerOpen(true)}>
           <ActivitySquare aria-hidden="true" size={16} />
@@ -91,8 +91,8 @@ export function App() {
       <main className="main">
         <header className="topbar">
           <div>
-            <h1>{view === 'dashboard' ? '观测总览' : view === 'facts' ? '事实查询' : '采集器'}</h1>
-            <p>围绕故事处理、证据追溯和 collector 接入状态进行日常排查。</p>
+            <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : '采集器'}</h1>
+            <p>围绕信号、会话输入输出和 collector 接入状态进行日常排查。</p>
           </div>
         </header>
         {view === 'dashboard' && selectedStoryId === null && (
@@ -102,44 +102,45 @@ export function App() {
             loadUsageSummary={fetchUsageSummary}
             loadRiskSummary={fetchRiskSummary}
             onOpenStory={setSelectedStoryId}
-            onOpenFacts={(filters) => {
-              setSelectedFactId(null);
-              setInitialFactFilters(filters);
-              setView('facts');
-            }}
           />
         )}
         {view === 'dashboard' && selectedStoryId !== null && (
           <ObservationStoryDetailPage
             storyId={selectedStoryId}
             loadStoryDetail={fetchStoryDetail}
-            loadDiagnosticAvailability={fetchDiagnosticAvailability}
+            loadEnrichmentAvailability={fetchEnrichmentAvailability}
             markRead={markStoryRead}
             handleStory={handleStory}
-            requestDiagnostic={requestDiagnostic}
-            cancelDiagnostic={cancelDiagnostic}
+            requestEnrichment={requestEnrichment}
+            cancelEnrichment={cancelEnrichment}
             onBack={() => setSelectedStoryId(null)}
             onOpenFact={(factId) => {
               setSelectedFactId(factId);
-              setInitialFactFilters(null);
+              setReturnStoryId(selectedStoryId);
               setSelectedStoryId(null);
-              setView('facts');
+              setView('conversations');
             }}
           />
         )}
-        {view === 'facts' && (
-          <FactQueryPage
-            initialFactFilters={initialFactFilters}
+        {view === 'conversations' && (
+          <ConversationQueryPage
             initialFactId={selectedFactId}
-            loadFacts={fetchFacts}
-            loadFactDetail={fetchFactDetail}
+            loadConversationDetail={fetchConversationDetail}
+            loadConversationForFact={fetchConversationForFact}
+            loadConversations={fetchConversations}
+            onBack={returnStoryId ? () => {
+              setSelectedFactId(null);
+              setSelectedStoryId(returnStoryId);
+              setReturnStoryId(null);
+              setView('dashboard');
+            } : undefined}
+            backLabel="返回信号"
           />
         )}
         {view === 'collectors' && (
           <CollectorsPage
             loadCollectors={fetchCollectors}
             deleteCollector={deleteCollector}
-            updateRawUpload={updateCollectorRawUpload}
           />
         )}
         {drawerOpen && (

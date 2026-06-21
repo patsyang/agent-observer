@@ -5,8 +5,7 @@ import json
 import zipfile
 from pathlib import Path
 
-from app.policy import get_effective_policy
-
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 APP_ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -15,7 +14,6 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
     out.mkdir(parents=True, exist_ok=True)
     config_path = out / "agent-observer.config.json"
     package_path = out / "agent-observer-windows.zip"
-    policy = get_effective_policy(conn)
     config = {
         "server_url": "http://127.0.0.1:8765",
         "collector_id": "windows-collector",
@@ -28,9 +26,9 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
         "max_events_per_cycle": 100,
         "upload_batch_size": 50,
         "evidence_mode": "structured_projection",
-        "raw_upload_enabled": bool(policy["upload_raw"]),
         "agent_type": "codex",
-        "effective_policy": policy,
+        "agent_version": COLLECTOR_CLIENT_VERSION,
+        "protocol_version": COLLECTOR_PROTOCOL_VERSION,
     }
     config_path.write_text(json.dumps(config, indent=2), encoding="utf-8")
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -55,6 +53,8 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
     return {
         "filename": "agent-observer-windows.zip",
         "path": str(package_path),
-        "config_path": str(config_path),
         "sha256": checksum,
+        "server_url": config["server_url"],
+        "agent_version": COLLECTOR_CLIENT_VERSION,
+        "protocol_version": COLLECTOR_PROTOCOL_VERSION,
     }

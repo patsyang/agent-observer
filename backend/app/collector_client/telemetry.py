@@ -18,12 +18,11 @@ def collect_facts(
     history_window_days: int = 7,
     max_events: int = 500,
     cursor: dict | None = None,
-    upload_raw: bool = False,
 ) -> list[dict]:
     observed_at = _now()
     root = _codex_home(codex_home)
     sessions_dir = root / "sessions"
-    facts = [_health_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists(), upload_raw)]
+    facts = [_health_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists())]
     source_facts = _codex_facts(
         collector_id=collector_id,
         sequence=sequence,
@@ -31,11 +30,10 @@ def collect_facts(
         history_window_days=history_window_days,
         max_events=max_events,
         cursor=cursor or {},
-        upload_raw=upload_raw,
     )
     if source_facts:
         return facts + source_facts
-    return facts + [_source_gap_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists(), upload_raw)]
+    return facts + [_source_gap_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists())]
 
 def _codex_facts(
     *,
@@ -45,30 +43,26 @@ def _codex_facts(
     history_window_days: int,
     max_events: int,
     cursor: dict,
-    upload_raw: bool,
 ) -> list[dict]:
     sessions_dir = codex_home / "sessions"
     if not sessions_dir.exists():
         return []
     cutoff = datetime.now(UTC) - timedelta(days=max(1, history_window_days))
-    legacy_last_source_key = str(cursor.get("last_source_key", ""))
-    legacy_recent_seen = set(str(item) for item in cursor.get("recent_source_keys", []))
-    legacy_mode = not cursor.get("sources") and bool(legacy_last_source_key or legacy_recent_seen)
     cursor.setdefault("sources", {})
     facts: list[dict] = []
     content_index: dict[str, int] = {}
     seen_source_keys: set[str] = set()
     live_seen = set(str(item) for item in cursor.get("live_tail_source_keys", []))
-    if legacy_mode or cursor.get("sources"):
+    if cursor.get("sources"):
         for source_key, path, line_number, record in _recent_tail_records(
             sessions_dir,
             cutoff,
-            cursor=None if legacy_mode else cursor,
+            cursor=cursor,
             max_records=max(1, max_events),
         ):
-            if source_key in legacy_recent_seen or source_key in live_seen or source_key in seen_source_keys:
+            if source_key in live_seen or source_key in seen_source_keys:
                 continue
-            fact = _record_fact(collector_id, sequence, source_key, path, line_number, record, upload_raw)
+            fact = _record_fact(collector_id, sequence, source_key, path, line_number, record)
             if fact:
                 fact["source_specific"]["priority_stream"] = "live_tail"
                 add_or_merge_content_fact(facts, content_index, fact)
@@ -81,9 +75,9 @@ def _codex_facts(
     for source_key, path, line_number, record in _incremental_records(sessions_dir, cutoff, cursor, max(1, max_events)):
         if len(facts) >= max(1, max_events):
             break
-        if source_key in seen_source_keys or source_key in legacy_recent_seen or (legacy_last_source_key and source_key <= legacy_last_source_key):
+        if source_key in seen_source_keys:
             continue
-        fact = _record_fact(collector_id, sequence, source_key, path, line_number, record, upload_raw)
+        fact = _record_fact(collector_id, sequence, source_key, path, line_number, record)
         if fact:
             fact["source_specific"]["priority_stream"] = "file_cursor"
             add_or_merge_content_fact(facts, content_index, fact)

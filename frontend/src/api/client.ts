@@ -1,13 +1,13 @@
 import type {
   ClientPackageConfig,
-  DiagnosticAvailability,
-  DiagnosticJob,
+  ConversationTimeWindow,
+  ConversationDetail,
+  ConversationsResponse,
+  EnrichmentAvailability,
+  EnrichmentJob,
   CollectorsResponse,
   DashboardSummary,
   EffectivePolicy,
-  FactDetail,
-  FactsResponse,
-  FactQuality,
   HandleStoryPayload,
   ObservationStoryDetail,
   PolicyUpdatePayload,
@@ -72,13 +72,6 @@ export function deleteCollector(collectorId: string): Promise<{ collector_id: st
   return deleteJson(`/api/collectors/${encodeURIComponent(collectorId)}`);
 }
 
-export function updateCollectorRawUpload(
-  collectorId: string,
-  enabled: boolean
-): Promise<{ collector_id: string; raw_upload_enabled: boolean; raw_upload_override: boolean; raw_upload_source: string }> {
-  return patchJson(`/api/collectors/${encodeURIComponent(collectorId)}/raw-upload`, { enabled });
-}
-
 export function fetchClientPackageConfig(): Promise<ClientPackageConfig> {
   return readJson<ClientPackageConfig>('/api/client-package/config');
 }
@@ -99,39 +92,34 @@ export function clientPackageUrl(): string {
   return `${apiBase}/api/client-package/windows`;
 }
 
-export function fetchFacts(
+export function fetchConversations(
   filters: {
-    quality?: FactQuality | 'all';
-    fact_type?: string;
-    source?: string;
-    window?: TimeWindow;
-    include_health?: boolean;
-    limit?: number;
-    offset?: number;
+    window?: ConversationTimeWindow | '';
+    start_at?: string;
+    end_at?: string;
+    prompt_query?: string;
+    response_query?: string;
     page?: number;
     page_size?: number;
-    time_basis?: 'occurred' | 'ingested';
   } = {}
-): Promise<FactsResponse> {
+): Promise<ConversationsResponse> {
   const params = new URLSearchParams();
-  if (filters.quality && filters.quality !== 'all') params.set('quality', filters.quality);
-  if (filters.fact_type && filters.fact_type !== 'all') params.set('fact_type', filters.fact_type);
-  if (filters.source && filters.source !== 'all') params.set('source', filters.source);
-  params.set('window', filters.window ?? '1h');
-  params.set('time_basis', filters.time_basis ?? 'occurred');
-  params.set('include_health', String(filters.include_health ?? false));
-  params.set('page_size', String(filters.page_size ?? filters.limit ?? 50));
-  if (filters.page) {
-    params.set('page', String(filters.page));
-  } else {
-    params.set('offset', String(filters.offset ?? 0));
-  }
-  const suffix = params.toString() ? `?${params.toString()}` : '';
-  return readJson<FactsResponse>(`/api/facts${suffix}`);
+  if (filters.window) params.set('window', filters.window);
+  if (filters.start_at) params.set('start_at', filters.start_at);
+  if (filters.end_at) params.set('end_at', filters.end_at);
+  if (filters.prompt_query) params.set('prompt_query', filters.prompt_query);
+  if (filters.response_query) params.set('response_query', filters.response_query);
+  params.set('page', String(filters.page ?? 1));
+  params.set('page_size', String(filters.page_size ?? 50));
+  return readJson<ConversationsResponse>(`/api/conversations?${params.toString()}`);
 }
 
-export function fetchFactDetail(factId: string): Promise<FactDetail> {
-  return readJson<FactDetail>(`/api/facts/${factId}`);
+export function fetchConversationDetail(conversationRef: string): Promise<ConversationDetail> {
+  return readJson<ConversationDetail>(`/api/conversations/${encodeURIComponent(conversationRef)}`);
+}
+
+export function fetchConversationForFact(factId: string): Promise<ConversationDetail> {
+  return readJson<ConversationDetail>(`/api/conversations/by-fact/${encodeURIComponent(factId)}`);
 }
 
 export function fetchUsageSummary(window: TimeWindow = '1h'): Promise<UsageSummary> {
@@ -167,14 +155,14 @@ export function handleStory(storyId: string, payload: HandleStoryPayload): Promi
   return postJson<ObservationStoryDetail>(`/api/stories/${storyId}/handle`, payload);
 }
 
-export function fetchDiagnosticAvailability(storyId: string): Promise<DiagnosticAvailability> {
-  return readJson<DiagnosticAvailability>(`/api/stories/${storyId}/diagnostics/availability`);
+export function fetchEnrichmentAvailability(storyId: string): Promise<EnrichmentAvailability> {
+  return readJson<EnrichmentAvailability>(`/api/stories/${storyId}/enrichments/availability`);
 }
 
-export function requestDiagnostic(storyId: string, capabilityId: string): Promise<DiagnosticJob> {
-  return postJson<DiagnosticJob>(`/api/stories/${storyId}/diagnostics`, { capability_id: capabilityId });
+export function requestEnrichment(storyId: string, capabilityId: string): Promise<EnrichmentJob> {
+  return postJson<EnrichmentJob>(`/api/stories/${storyId}/enrichments`, { capability_id: capabilityId });
 }
 
-export function cancelDiagnostic(jobId: string): Promise<DiagnosticJob> {
-  return postJson<DiagnosticJob>(`/api/diagnostics/${jobId}/cancel`);
+export function cancelEnrichment(jobId: string): Promise<EnrichmentJob> {
+  return postJson<EnrichmentJob>(`/api/enrichments/${jobId}/cancel`);
 }
