@@ -69,7 +69,7 @@ def test_query_facts_filters_time_window_and_hides_health_by_default(tmp_path):
                         "old-error-001",
                         (now - timedelta(hours=2)).isoformat(),
                         fact_type="error",
-                        category="codex_error",
+                        category="tool_execution_failure",
                         severity="high",
                         summary="旧错误不应出现在 1 小时默认窗口。",
                         projection={"tool": "shell"},
@@ -281,7 +281,7 @@ def test_ingest_stores_raw_evidence_when_projection_upload_raw_is_enabled(tmp_pa
                     {
                         "source_event_id": "raw-event-001",
                         "fact_type": "error",
-                        "category": "codex_error",
+                        "category": "tool_execution_failure",
                         "quality": "high",
                         "severity": "high",
                         "summary": "Codex 工具失败，已上传原始证据。",
@@ -292,7 +292,7 @@ def test_ingest_stores_raw_evidence_when_projection_upload_raw_is_enabled(tmp_pa
                         "evidence_projections": [
                             {
                                 "projection_id": "proj-raw-001",
-                                "category": "codex_error",
+                                "category": "tool_execution_failure",
                                 "span": "session:raw:line1",
                                 "raw_hash": "hash-raw-001",
                                 "projection": {"tool": "shell"},

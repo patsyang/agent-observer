@@ -3,6 +3,7 @@ import { ArrowRight } from 'lucide-react';
 import type { BehaviorSignal } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 import { decisionStateLabel, enrichmentStatusLabel, scopeText, signalKindLabel } from './signalLabels';
+import { primaryToolContext } from './ToolContextBlock';
 
 interface Props {
   signal: BehaviorSignal;
@@ -10,12 +11,15 @@ interface Props {
 }
 
 export function SignalCard({ signal, onOpen }: Props) {
+  const toolContext = primaryToolContext(signal.evidence_groups.flatMap((group) => group.items));
+  const conversation = signal.linked_conversations[0];
   return (
     <article className="signal-card" data-testid="signal-card" data-signal-key={signal.signal_key}>
       <div className="signal-card__header">
         <div>
           <div className="signal-card__badges">
             <span className="badge violet">{signalKindLabel(signal.signal_kind)}</span>
+            <span className="badge teal">{signal.workspace_summary?.label ?? '工作区未知'}</span>
             <span className="badge gray">{signal.severity} / {signal.confidence}</span>
             <span className="badge teal">最近 {formatSignalTime(signal.last_event_at)}</span>
           </div>
@@ -24,32 +28,35 @@ export function SignalCard({ signal, onOpen }: Props) {
         </div>
       </div>
 
-      <dl className="signal-fields signal-fields--compact">
+      <div className="signal-card__meta" data-testid="signal-card-meta">
         <div>
-          <dt>影响范围</dt>
-          <dd>{scopeText(signal.affected_scope)}</dd>
+          <span>会话</span>
+          <strong>{conversation?.session_title || conversation?.session_ref || conversation?.conversation_ref || '未知会话'}</strong>
         </div>
         <div>
-          <dt>证据质量</dt>
-          <dd>{formatNumber(signal.evidence_groups.length)} 组证据</dd>
+          <span>命中</span>
+          <strong>{formatNumber(signal.occurrence_count ?? 0)} 次</strong>
         </div>
         <div>
-          <dt>状态</dt>
-          <dd>{decisionStateLabel(signal.decision_state)}</dd>
+          <span>状态</span>
+          <strong>{decisionStateLabel(signal.decision_state)}</strong>
         </div>
         <div>
-          <dt>命中</dt>
-          <dd>{formatNumber(signal.occurrence_count ?? 0)} 次</dd>
+          <span>影响范围</span>
+          <strong>{scopeText(signal.affected_scope)}</strong>
         </div>
-        <div>
-          <dt>建议动作</dt>
-          <dd>{signal.suggested_actions[0] ?? '查看证据分组'}</dd>
-        </div>
-        <div>
-          <dt>补证</dt>
-          <dd>{enrichmentStatusLabel(signal.enrichment_status_summary.status)}</dd>
-        </div>
-      </dl>
+      </div>
+
+      <div className="signal-card__context" data-testid="signal-card-context">
+        <section>
+          <span>最近命令</span>
+          <p>{toolContext?.command_excerpt || toolContext?.command || signal.latest_summary || '暂无命令上下文'}</p>
+        </section>
+        <section>
+          <span>错误摘要</span>
+          <p>{toolContext?.error_excerpt || enrichmentStatusLabel(signal.enrichment_status_summary.status)}</p>
+        </section>
+      </div>
 
       <div className="signal-card__footer">
         <button className="compact-button primary" data-testid="open-signal" onClick={() => onOpen(signal.signal_id)}>
@@ -72,4 +79,3 @@ function formatSignalTime(value?: string | null): string {
     minute: '2-digit'
   }).format(date);
 }
-

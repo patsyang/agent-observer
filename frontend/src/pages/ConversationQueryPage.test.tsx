@@ -9,6 +9,14 @@ const detail: ConversationDetail = {
   conversation_ref: 'conv-alpha',
   session_ref: 'session-alpha',
   session_title: '分析信号定义与类型-Grill',
+  workspace: {
+    agent_type: 'codex',
+    workspace_id: 'codex:agent-observer',
+    workspace_path: 'D:/workspace/agentic_factory/apps/agent-observer',
+    workspace_label: 'Agent Observer',
+    workspace_alias_source: 'codex_global_state',
+    workspace_confidence: 'high',
+  },
   started_at: '2026-06-21T01:00:00+00:00',
   last_event_at: '2026-06-21T01:04:00+00:00',
   prompt_preview: '请检查观测总览',
@@ -42,12 +50,12 @@ const detail: ConversationDetail = {
   hits: [
     {
       fact_id: 'risk-alpha',
-      category: 'high_risk_operation',
+      category: 'destructive_operation',
       fact_type: 'risk',
       severity: 'high',
       occurred_at: '2026-06-21T01:03:00+00:00',
-      summary: '命中高风险操作',
-      content_preview: '高风险操作: 工作区文件',
+      summary: '命中破坏性操作',
+      content_preview: '破坏性操作: 工作区文件',
     },
     {
       fact_id: 'tool-alpha',
@@ -83,7 +91,8 @@ describe('ConversationQueryPage', () => {
     );
 
     expect(await screen.findByText('序号')).toBeInTheDocument();
-    expect(screen.getByText('Codex 会话名')).toBeInTheDocument();
+    expect(screen.getByText('会话名')).toBeInTheDocument();
+    expect(screen.queryByText('Codex 会话名')).not.toBeInTheDocument();
     expect(screen.getByText('分析信号定义与类型-Grill')).toBeInTheDocument();
     expect(screen.getByText('时间戳')).toBeInTheDocument();
     expect(screen.getAllByText('提交 Prompt').length).toBeGreaterThan(0);
@@ -95,10 +104,15 @@ describe('ConversationQueryPage', () => {
       end_at: '',
       prompt_query: '',
       response_query: '',
+      workspace_query: '',
       page: 1,
       page_size: 50,
     });
 
+    expect(screen.getAllByText('工作区').length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText('Agent Observer')).toBeInTheDocument();
+    await user.type(screen.getByLabelText('工作区'), 'Observer');
+    expect(loadConversations).toHaveBeenCalledTimes(1);
     await user.type(screen.getByLabelText('提交 Prompt'), '观测');
     expect(loadConversations).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '搜索会话' }));
@@ -120,6 +134,7 @@ describe('ConversationQueryPage', () => {
     await waitFor(() => expect(loadConversations).toHaveBeenLastCalledWith(expect.objectContaining({
       prompt_query: '观测',
       response_query: '信号',
+      workspace_query: 'Observer',
       start_at: expectedStart,
       end_at: expectedEnd,
       window: '',
@@ -143,10 +158,11 @@ describe('ConversationQueryPage', () => {
     expect(loadConversationForFact).toHaveBeenCalledWith('risk-alpha');
     expect(within(drawer).getByRole('heading', { name: '分析信号定义与类型-Grill' })).toBeInTheDocument();
     expect(within(drawer).getByText('conv-alpha')).toBeInTheDocument();
+    expect(within(drawer).getAllByText('Agent Observer').length).toBeGreaterThan(0);
     expect(screen.getByText('模型调用累计有效 token')).toBeInTheDocument();
     expect(screen.getByText('缓存命中 token')).toBeInTheDocument();
     expect(screen.getByText('60.0%')).toBeInTheDocument();
-    expect(screen.getByText('检测到高风险操作：工作区文件')).toBeInTheDocument();
+    expect(screen.getByText('检测到破坏性操作：工作区文件')).toBeInTheDocument();
     expect(screen.getByText('其他技术活动已折叠')).toBeInTheDocument();
     expect(screen.queryByText('工具 exec_command')).not.toBeInTheDocument();
     await user.click(screen.getByLabelText('关闭会话详情'));

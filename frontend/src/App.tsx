@@ -87,6 +87,7 @@ export function App() {
           <ActivitySquare aria-hidden="true" size={16} />
           接入配置
         </button>
+        <div className="sidebar-dashboard-slot" id="dashboard-sidebar-slot" />
       </aside>
 
       <main className="main">
@@ -109,6 +110,7 @@ export function App() {
           <SignalDetailPage
             signalId={selectedSignalId}
             loadSignalDetail={fetchSignalDetail}
+            loadConversationDetail={fetchConversationDetail}
             loadEnrichmentAvailability={fetchEnrichmentAvailability}
             markRead={markSignalRead}
             handleSignal={handleSignal}

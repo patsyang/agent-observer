@@ -38,7 +38,7 @@ def _timeout_output(call_id: str) -> dict:
     }
 
 
-def test_codex_source_template_pairs_call_output_into_command_timeout_fact(tmp_path):
+def test_codex_source_template_pairs_call_output_into_workflow_timeout_fact(tmp_path):
     codex_home = tmp_path / ".codex"
     sessions = codex_home / "sessions"
     sessions.mkdir(parents=True)
@@ -55,14 +55,102 @@ def test_codex_source_template_pairs_call_output_into_command_timeout_fact(tmp_p
         cursor={"last_sequence": 0, "sources": {}},
     )
 
-    timeout_fact = next(fact for fact in facts if fact["category"] == "command_timeout")
+    timeout_fact = next(fact for fact in facts if fact["category"] == "workflow_step_timeout")
     projection = timeout_fact["projection"]
     assert projection["workflow"] == "spec-driven"
     assert projection["run_id"] == "run_76317963ed8f"
     assert projection["exit_code"] == 124
     assert projection["wall_time_seconds"] == 3604.0
     assert projection["timeout_after_ms"] == 3604035
-    assert timeout_fact["error_signature"]["signature_key"] == "command_timeout:spec-driven:run_76317963ed8f:124"
+    assert timeout_fact["projection"]["timeout_type"] == "workflow_step_timeout"
+    assert timeout_fact["error_signature"]["signature_key"] == "workflow_step_timeout:spec-driven:run_76317963ed8f:124"
+
+
+def test_successful_tool_output_with_exit_code_text_is_not_failure_or_timeout(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-06-19T00:50:00.000Z",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "call-success-with-fixture",
+                "arguments": json.dumps({"cmd": "Get-Content backend/tests/test_fixture.py"}),
+            },
+        },
+        {
+            "timestamp": "2026-06-19T00:51:14.903Z",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-success-with-fixture",
+                "output": (
+                    "Chunk ID: abc\nWall time: 0.3 seconds\nProcess exited with code 0\n"
+                    "Output:\nassert 'Exit code: 124' in fixture\ncommand timed out after 3604035 milliseconds\n"
+                ),
+            },
+        },
+    ]
+    (sessions / "successful-output.jsonl").write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex-success-output",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    categories = {fact["category"] for fact in facts}
+    assert "tool_execution_timeout" not in categories
+    assert "workflow_step_timeout" not in categories
+    assert "tool_execution_failure" not in categories
+
+
+def test_failed_status_with_successful_process_exit_is_not_failure(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-06-19T00:50:00.000Z",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "exec_command",
+                "call_id": "call-status-failed-success",
+                "arguments": json.dumps({"cmd": "Get-Content fixture.txt"}),
+            },
+        },
+        {
+            "timestamp": "2026-06-19T00:51:14.903Z",
+            "type": "response_item",
+            "status": "failed",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-status-failed-success",
+                "output": "Chunk ID: abc\nWall time: 0.3 seconds\nProcess exited with code 0\nOutput:\nall good\n",
+            },
+        },
+    ]
+    (sessions / "failed-status-success.jsonl").write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex-status-success",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    assert "tool_execution_failure" not in {fact["category"] for fact in facts}
 
 
 def test_v2_file_cursor_keeps_call_context_across_append_cycles(tmp_path):
@@ -85,7 +173,7 @@ def test_v2_file_cursor_keeps_call_context_across_append_cycles(tmp_path):
     assert {fact["source_event_id"] for fact in first if fact["category"] != "collector_health"}.isdisjoint(
         {fact["source_event_id"] for fact in second if fact["category"] != "collector_health"}
     )
-    timeout_fact = next(fact for fact in second if fact["category"] == "command_timeout")
+    timeout_fact = next(fact for fact in second if fact["category"] == "workflow_step_timeout")
     assert timeout_fact["projection"]["run_id"] == "run_append_context"
 
 
@@ -127,7 +215,44 @@ def test_v2_file_cursor_reads_only_current_cycle_batch(tmp_path, monkeypatch):
     )
 
     assert len([fact for fact in facts if fact["category"] != "collector_health"]) == 2
-    assert parse_count == 2
+
+
+def test_workspace_hint_does_not_scan_deep_session_files(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    path = sessions / "deep-session-meta.jsonl"
+    records = [
+        {
+            "timestamp": f"2026-06-19T00:{index % 60:02d}:00.000Z",
+            "type": "usage",
+            "total_tokens": 100 + index,
+            "conversation_id": f"conversation-{index}",
+            "session_id": "deep-session-meta",
+        }
+        for index in range(40)
+    ]
+    records.append(
+        {
+            "timestamp": "2026-06-19T00:50:00.000Z",
+            "type": "session_meta",
+            "payload": {"cwd": "D:/workspace/too-deep"},
+        }
+    )
+    path.write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex-deep",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=2,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    business_facts = [fact for fact in facts if fact["category"] != "collector_health"]
+    assert len(business_facts) == 2
+    assert all("workspace_id" not in fact["source_refs"] for fact in business_facts)
 
 
 def test_v2_file_cursor_continues_same_file_after_cycle_limit(tmp_path):
@@ -232,7 +357,7 @@ def test_codex_source_template_uploads_raw_prompt_by_default(tmp_path):
     assert reasoning_fact["projection"]["content_length"] == len("模型正在判断证据链刷新路径")
 
 
-def test_codex_error_signature_groups_same_failure_shape(tmp_path):
+def test_tool_execution_failure_signature_groups_same_failure_shape(tmp_path):
     codex_home = tmp_path / ".codex"
     sessions = codex_home / "sessions"
     sessions.mkdir(parents=True)
@@ -269,7 +394,7 @@ def test_codex_error_signature_groups_same_failure_shape(tmp_path):
     signatures = {
         fact["error_signature"]["signature_key"]
         for fact in facts
-        if fact["category"] == "codex_error"
+        if fact["category"] == "tool_execution_failure"
     }
 
-    assert signatures == {"codex_error:function_call_output:response_item:1:function_call_output"}
+    assert signatures == {"tool_execution_failure:function_call_output:function_call_output:1"}

@@ -1,6 +1,6 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import type { DashboardSummary, RiskSummary, SignalsResponse, UsageSummary } from '../api/types';
 import { DashboardPage } from './DashboardPage';
@@ -52,7 +52,7 @@ const usage: UsageSummary = {
 const risks: RiskSummary = {
   signals: [
     {
-      risk_type: 'sensitive_object_touch',
+      risk_type: 'sensitive_content_exposure',
       object_type: 'configuration',
       count: 1001,
       highest_severity: 'high',
@@ -112,7 +112,12 @@ const summary: DashboardSummary = {
 const signalPage: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
 
 describe('DashboardPage', () => {
+  afterEach(() => {
+    document.getElementById('dashboard-sidebar-slot')?.remove();
+  });
+
   it('renders signals and usage trend instead of usage anomaly investigation', async () => {
+    document.body.appendChild(Object.assign(document.createElement('div'), { id: 'dashboard-sidebar-slot' }));
     const loadDashboardSummary = vi.fn(async () => summary);
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
@@ -129,23 +134,34 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByLabelText('使用与风险治理')).toBeInTheDocument();
     expect(screen.getByLabelText('用量趋势')).toBeInTheDocument();
+    expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('用量趋势'));
+    expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('使用与风险治理'));
+    expect(await screen.findByTestId('dashboard-sidebar-context')).toHaveTextContent('接入与筛选');
     expect(screen.getByLabelText('选择时间范围内 token 用量与缓存命中折线图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('行为风险信号')).toBeInTheDocument();
+    expect(screen.queryByText('行为风险信号台')).not.toBeInTheDocument();
+    expect(screen.queryByText(/默认只看最近 1 小时/)).not.toBeInTheDocument();
     expect(screen.getByText('采集器自检')).toBeInTheDocument();
     expect(screen.queryByText(/最近命中：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
     expect(screen.getByText('1 / 6')).toBeInTheDocument();
     expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument();
-    expect(screen.getByText('3,175')).toBeInTheDocument();
-    expect(screen.getByText('1,015')).toBeInTheDocument();
-    expect(screen.getByText('900')).toBeInTheDocument();
-    expect(screen.getAllByText(/命中率 30.0%/).length).toBeGreaterThanOrEqual(2);
-    expect(screen.getByText(/Session：session-001 \/ 1,120/)).toBeInTheDocument();
-    expect(screen.getByText(/Conversation：conversation-001 \/ 2,040/)).toBeInTheDocument();
-    expect(screen.getByText(/未识别活动：1,015/)).toBeInTheDocument();
-    expect(screen.getAllByText(/敏感对象触达 \/ 配置：1,001/).length).toBeGreaterThan(0);
-    expect(loadSignals).toHaveBeenCalledWith({ window: '1h', page: 1, page_size: 20 });
+    const governance = screen.getByLabelText('使用与风险治理');
+    expect(within(governance).getByText('有效用量 (Token)')).toBeInTheDocument();
+    expect(within(governance).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
+    expect(within(governance).getByText('待处理信号')).toBeInTheDocument();
+    expect(within(governance).getByText('3,175')).toBeInTheDocument();
+    expect(within(governance).getByText('900')).toBeInTheDocument();
+    expect(within(governance).getByText('0')).toBeInTheDocument();
+    expect(screen.getByText(/缓存命中率 30.0%/)).toBeInTheDocument();
+    expect(within(governance).queryByText('未知活动')).not.toBeInTheDocument();
+    expect(within(governance).queryByText('模型调用有效 token')).not.toBeInTheDocument();
+    expect(within(governance).queryByText('当前队列待看')).not.toBeInTheDocument();
+    expect(within(governance).queryByText(/活动：/)).not.toBeInTheDocument();
+    expect(within(governance).queryByText(/风险：/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText('筛选工作区')).toBeInTheDocument();
+    expect(loadSignals).toHaveBeenCalledWith({ window: '1h', workspace_query: '', page: 1, page_size: 20 });
     expect(loadUsageSummary).toHaveBeenCalledWith('1h');
     expect(loadRiskSummary).toHaveBeenCalledWith('1h');
     expect(loadDashboardSummary).toHaveBeenCalledWith('1h');

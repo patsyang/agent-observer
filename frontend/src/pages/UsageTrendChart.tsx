@@ -13,9 +13,9 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
   const peakIndex = pointValues.indexOf(effectivePeak);
   const peakPoint = points[peakIndex];
   const width = Math.max(560, Math.max(1, points.length) * 96);
-  const height = 190;
-  const plotTop = 32;
-  const plotHeight = 116;
+  const height = 140;
+  const plotTop = 24;
+  const plotHeight = 72;
   const xStart = 24;
   const xEnd = width - 24;
   const linePath = (values: number[]) => points
@@ -65,13 +65,14 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
                   const y = plotTop + plotHeight - (value / max) * plotHeight;
                   const cached = cachedValues[index];
                   const cachedY = plotTop + plotHeight - (cached / max) * plotHeight;
+                  const closeSeries = Math.abs(cachedY - y) < 20;
                   return (
                     <g key={point.bucket}>
-                      <text className="usage-trend-value" x={x} y={Math.max(12, y - 10)} textAnchor="middle">
+                      <text className="usage-trend-value" x={x} y={Math.max(12, y - (closeSeries ? 14 : 10))} textAnchor="middle">
                         {formatNumber(value)}
                       </text>
                       <circle className="usage-trend-dot" cx={x} cy={y} r="3.5" />
-                      <text className="usage-trend-value cache" x={x} y={Math.min(height - 8, cachedY + 16)} textAnchor="middle">
+                      <text className="usage-trend-value cache" x={x} y={Math.min(height - 8, cachedY + (closeSeries ? 24 : 16))} textAnchor="middle">
                         {formatNumber(cached)}
                       </text>
                       <circle className="usage-trend-dot cache" cx={x} cy={cachedY} r="3.5" />

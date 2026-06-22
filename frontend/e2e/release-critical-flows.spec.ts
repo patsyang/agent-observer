@@ -145,7 +145,7 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
 
   const signalsResponse = await request.get(`${E2E_API_BASE}/api/signals?window=all`);
   const signals = (await signalsResponse.json()) as { signals: E2ESignal[] };
-  const failureSignal = signals.signals.find((signal) => signal.signal_kind === 'tool_failure_cluster');
+  const failureSignal = signals.signals.find((signal) => signal.signal_kind === 'tool_execution_failure');
   expect(failureSignal).toBeTruthy();
   const signalId = failureSignal!.signal_id;
   const handle = await request.post(`${E2E_API_BASE}/api/signals/${signalId}/handle`, {

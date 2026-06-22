@@ -5,50 +5,64 @@ import { E2E_API_BASE } from './support/urls';
 test('operator reviews behavior risk signals with grouped evidence', async ({ page, request }) => {
   const suffix = Date.now();
   const conversation = `conversation-e2e-signal-${suffix}`;
-  const items = [
-    {
-      source_event_id: `signal-error-${suffix}`,
-      fact_type: 'error',
-      category: 'codex_error',
-      quality: 'high',
-      severity: 'high',
-      summary: 'function_call_output failed with exit_code=1',
-      occurred_at: new Date().toISOString(),
-      span: 'tool:error',
-      raw_hash: `hash-error-${suffix}`,
-      projection: { tool_name: 'exec_command', exit_code: 1 },
-      error_signature: { signature_key: `sig-${suffix}`, category: 'codex_error' },
-      source_refs: { conversation_ref: conversation },
-      source_specific: { codex_event_type: 'tool_result' }
+  const sessionTitle = 'E2E 工具失败排查';
+  const command = 'cmd /c apps\\agent-observer\\scripts\\start-backend.cmd';
+  const error = 'Port 8765 is already in use';
+  const sourceRefs = { conversation_ref: conversation, session_title: sessionTitle };
+  const toolFailures = Array.from({ length: 3 }, (_, index) => ({
+    source_event_id: `signal-error-${suffix}-${index}`,
+    fact_type: 'error',
+    category: 'tool_execution_failure',
+    quality: 'high',
+    severity: 'high',
+    summary: `function_call_output failed with exit_code=1 (${index})`,
+    occurred_at: new Date(Date.now() - index * 1000).toISOString(),
+    span: `tool:error:${index}`,
+    raw_hash: `hash-error-${suffix}-${index}`,
+    projection: {
+      tool_name: 'exec_command',
+      call_id: `call-e2e-${index}`,
+      command,
+      command_excerpt: command,
+      command_category: 'shell',
+      exit_code: 1,
+      error_excerpt: error,
+      wall_time_seconds: 1.2
     },
+    error_signature: { signature_key: `tool-exec-failure-${suffix}-${index}`, category: 'tool_execution_failure' },
+    source_refs: sourceRefs,
+    source_specific: { codex_event_type: 'tool_result' }
+  }));
+  const items = [
+    ...toolFailures,
     {
       source_event_id: `signal-key-${suffix}`,
       fact_type: 'risk',
-      category: 'high_risk_operation',
+      category: 'file_change',
       quality: 'high',
       severity: 'medium',
       summary: 'changed .gitignore',
       occurred_at: new Date().toISOString(),
       span: 'tool:key-file',
       raw_hash: `hash-key-${suffix}`,
-      projection: { object_type: 'configuration', path: '.gitignore' },
-      risk: { risk_type: 'high_risk_operation', severity: 'medium', object_type: 'configuration' },
-      source_refs: { conversation_ref: conversation },
+      projection: { object_type: 'configuration', changed_paths: ['.gitignore'], file_count: 1, additions: 1, deletions: 0 },
+      risk: { risk_type: 'file_change', severity: 'medium', object_type: 'configuration' },
+      source_refs: sourceRefs,
       source_specific: { codex_event_type: 'tool_result' }
     },
     ...Array.from({ length: 20 }, (_, index) => ({
       source_event_id: `signal-workspace-${suffix}-${index}`,
       fact_type: 'risk',
-      category: 'high_risk_operation',
+      category: 'file_change',
       quality: 'high',
       severity: 'medium',
       summary: `workspace file changed src/file_${index}.py`,
       occurred_at: new Date().toISOString(),
       span: `tool:workspace:${index}`,
       raw_hash: `hash-workspace-${suffix}-${index}`,
-      projection: { object_type: 'workspace_file', path: `src/file_${index}.py` },
-      risk: { risk_type: 'high_risk_operation', severity: 'medium', object_type: 'workspace_file' },
-      source_refs: { conversation_ref: conversation },
+      projection: { object_type: 'workspace_file', changed_paths: [`src/file_${index}.py`], file_count: 1, additions: 30, deletions: 0 },
+      risk: { risk_type: 'file_change', severity: 'medium', object_type: 'workspace_file' },
+      source_refs: sourceRefs,
       source_specific: { codex_event_type: 'tool_result' }
     }))
   ];
@@ -66,15 +80,29 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
   });
   const rebuilt = await request.post(`${E2E_API_BASE}/api/signals/rebuild`, { data: { reason: 'e2e-signal' } });
   const body = await rebuilt.json();
-  expect(body.signals.some((item: { signal_kind: string }) => item.signal_kind === 'tool_failure_cluster')).toBeTruthy();
-  expect(body.signals.some((item: { signal_kind: string }) => item.signal_kind === 'workspace_change_burst')).toBeTruthy();
+  const toolSignals = body.signals.filter((item: { signal_kind: string }) => item.signal_kind === 'tool_execution_failure');
+  expect(toolSignals).toHaveLength(1);
+  expect(toolSignals[0].occurrence_count).toBe(3);
+  expect(body.signals.some((item: { signal_kind: string }) => item.signal_kind === 'change_volume_anomaly')).toBeTruthy();
   expect(body.signals.some((item: { signal_kind: string }) => item.signal_kind === 'key_file_change')).toBeTruthy();
 
   await page.goto('/');
-  const failureCard = page.locator('[data-signal-key^="tool_failure_cluster"]').first();
+  const failureCard = page.locator('[data-signal-key^="tool_execution_failure"]').first();
   await expect(failureCard).toBeVisible({ timeout: 15000 });
+  await expect(failureCard).toContainText('本会话 3 次 exec_command 执行失败，退出码 1');
+  await expect(failureCard).toContainText(sessionTitle);
+  await expect(failureCard).toContainText(command);
   await failureCard.getByTestId('open-signal').click();
   await expect(page.getByTestId('signal-detail')).toBeVisible();
-  await expect(page.getByTestId('evidence-groups')).toContainText('会话');
+  await expect(page.getByTestId('evidence-groups')).toContainText('命中事件');
+  await expect(page.getByTestId('evidence-groups')).toContainText('3 条');
+  await expect(page.getByTestId('evidence-groups')).toContainText(command);
+  await expect(page.getByTestId('evidence-groups')).toContainText(error);
+  await expect(page.getByTestId('evidence-groups')).not.toContainText(`会话 ${conversation}`);
   await expect(page.getByTestId('evidence-groups')).not.toContainText('N 行');
+  await page.getByRole('button', { name: '查看会话' }).first().click();
+  const drawer = page.getByRole('dialog');
+  await expect(drawer).toContainText('当前信号命中');
+  await expect(drawer).toContainText(command);
+  await expect(drawer).toContainText(error);
 });

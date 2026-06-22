@@ -1,4 +1,5 @@
 import type { TimeWindow } from './types.facts';
+import type { ToolContext } from './types.signals';
 
 export type ConversationTimeWindow = TimeWindow | '2h' | '3h' | 'today';
 
@@ -11,10 +12,20 @@ export interface ConversationUsage {
   cache_hit_rate?: number;
 }
 
+export interface WorkspaceScope {
+  agent_type?: string;
+  workspace_id: string;
+  workspace_path: string;
+  workspace_label: string;
+  workspace_alias_source?: string;
+  workspace_confidence?: string;
+}
+
 export interface ConversationSummary {
   conversation_ref: string;
   session_ref: string;
   session_title: string;
+  workspace: WorkspaceScope;
   started_at: string;
   last_event_at: string;
   prompt_preview: string;
@@ -41,6 +52,7 @@ export interface ConversationHit {
   occurred_at: string;
   summary: string;
   content_preview: string;
+  tool_context?: ToolContext | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {

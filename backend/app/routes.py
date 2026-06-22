@@ -108,6 +108,7 @@ def register_conversation_routes(app, http_exception) -> None:
         end_at: str | None = None,
         prompt_query: str | None = None,
         response_query: str | None = None,
+        workspace_query: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ):
@@ -119,6 +120,7 @@ def register_conversation_routes(app, http_exception) -> None:
                 end_at=end_at,
                 prompt_query=prompt_query,
                 response_query=response_query,
+                workspace_query=workspace_query,
                 page=page,
                 page_size=page_size,
             )
@@ -162,9 +164,9 @@ def register_policy_routes(app, http_exception) -> None:
 
 def register_signal_routes(app, http_exception) -> None:
     @app.get("/api/signals")
-    def api_signals(window: str = "1h", page: int = 1, page_size: int = 20):
+    def api_signals(window: str = "1h", workspace_query: str | None = None, page: int = 1, page_size: int = 20):
         with connect() as conn:
-            return list_signals(conn, window=window, page=page, page_size=page_size)
+            return list_signals(conn, window=window, workspace_query=workspace_query, page=page, page_size=page_size)
 
     @app.get("/api/signals/{signal_id}")
     def api_signal_detail(signal_id: str):

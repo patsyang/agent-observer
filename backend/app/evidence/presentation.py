@@ -25,8 +25,19 @@ def projection_preview(
         return f"推理片段: {_truncate(reasoning)}"
 
     tool = _string_value(projection, "tool") or _string_value(projection, "tool_name")
+    command = _string_value(projection, "command_excerpt") or _string_value(projection, "command")
     command_category = _string_value(projection, "command_category")
     exit_code = projection.get("exit_code")
+    if command:
+        pieces = [f"命令 {_truncate(command)}"]
+        if exit_code is not None:
+            pieces.append(f"退出码 {exit_code}")
+        if projection.get("is_timeout"):
+            pieces.append("超时")
+        error = _string_value(projection, "error_excerpt")
+        if error:
+            pieces.append(f"错误 {_truncate(error, 120)}")
+        return "，".join(pieces)
     if tool:
         pieces = [f"工具 {tool}"]
         if command_category:
@@ -230,15 +241,15 @@ def _has_risk_projection(projection: dict[str, Any], category: str) -> bool:
         projection.get("object_type")
         or projection.get("risk_type")
         or projection.get("sensitive_categories")
-        or category in {"high_risk_operation", "sensitive_touch", "sensitive_object_touch"}
+        or category in {"file_change", "destructive_operation", "sensitive_content_exposure"}
     )
 
 
 def _category_risk_label(category: str) -> str:
     return {
-        "high_risk_operation": "高风险操作",
-        "sensitive_touch": "敏感对象触达",
-        "sensitive_object_touch": "敏感对象触达",
+        "file_change": "文件变更",
+        "destructive_operation": "破坏性操作",
+        "sensitive_content_exposure": "敏感内容暴露",
     }.get(category, "")
 
 

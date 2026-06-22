@@ -50,7 +50,7 @@ def _batch(batch_id: str = "batch-001") -> dict:
                     "category": "tool_failure",
                 },
                 "usage": {"scope": "session", "units": 42, "activity_tag": "implementation"},
-                "risk": {"risk_type": "high_risk_operation", "severity": "medium"},
+                "risk": {"risk_type": "destructive_operation", "severity": "medium"},
                 "source_refs": {"conversation_ref": "conv-hash-001"},
                 "source_specific": {"codex_event_type": "tool_result"},
             },

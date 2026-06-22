@@ -54,16 +54,19 @@ def _query_int(query: dict[str, list[str]], key: str, default: int) -> int:
 
 def _signals_query_options(raw_path: str) -> dict:
     query = parse_qs(urlparse(raw_path).query)
-    return {
+    options = {
         "window": _query_one(query, "window", "all"),
         "page": _query_int(query, "page", 1),
         "page_size": _query_int(query, "page_size", 20),
     }
+    if _query_one(query, "workspace_query"):
+        options["workspace_query"] = _query_one(query, "workspace_query")
+    return options
 
 
 def _conversations_query_options(raw_path: str) -> dict:
     query = parse_qs(urlparse(raw_path).query)
-    return {
+    options = {
         "window": _query_one(query, "window", "1h") or "1h",
         "start_at": _query_one(query, "start_at"),
         "end_at": _query_one(query, "end_at"),
@@ -72,6 +75,9 @@ def _conversations_query_options(raw_path: str) -> dict:
         "page": _query_int(query, "page", 1),
         "page_size": _query_int(query, "page_size", 50),
     }
+    if _query_one(query, "workspace_query"):
+        options["workspace_query"] = _query_one(query, "workspace_query")
+    return options
 
 
 def _path_part(path: str, index: int) -> str:

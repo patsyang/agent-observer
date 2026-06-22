@@ -8,6 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.sensitivity import sensitive_categories_from_text
+from app.collector_client.tool_execution import command_text, parse_tool_output
 
 
 def payload(record: dict) -> dict:
@@ -54,9 +55,9 @@ def exit_code(record: dict) -> int | None:
             continue
     output = value.get("output")
     if isinstance(output, str):
-        match = re.search(r"Exit code:\s*(-?\d+)", output)
-        if match:
-            return int(match.group(1))
+        parsed = parse_tool_output(output)
+        if parsed.exit_code is not None:
+            return parsed.exit_code
     if payload_type(record) == "patch_apply_end" and value.get("success") is False:
         return 1
     return None
@@ -71,7 +72,7 @@ def safe_signature_seed(record: dict) -> str:
             "top_type": top_type(record),
             "payload_type": payload_type(record),
             "tool": value.get("name") or record.get("tool"),
-            "command_category": command_category(str(args.get("command", ""))),
+            "command_category": command_category(command_text(args)),
             "call_ref": hash_value(str(value.get("call_id", "")))[:16] if value.get("call_id") else None,
             "output_shape": hash_value(str(output))[:16] if output is not None else None,
         }

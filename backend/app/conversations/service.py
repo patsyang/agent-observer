@@ -4,7 +4,9 @@ import json
 import sqlite3
 from typing import Any
 
+from app.conversations.filters import filter_conversations
 from app.conversations.time_window import normalize_iso_param, window_cutoff
+from app.conversations.workspace import workspace_from_rows
 from app.evidence.presentation import projection_preview
 
 def query_conversations(
@@ -15,13 +17,19 @@ def query_conversations(
     end_at: str | None = None,
     prompt_query: str | None = None,
     response_query: str | None = None,
+    workspace_query: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
     rows = _conversation_rows(conn, window=window, start_at=start_at, end_at=end_at)
     conversations = [_summary(conn, ref, facts) for ref, facts in _group_by_conversation(rows).items()]
     conversations = [item for item in conversations if _has_input_or_output(item)]
-    conversations = _filter_conversations(conversations, prompt_query=prompt_query, response_query=response_query)
+    conversations = filter_conversations(
+        conversations,
+        prompt_query=prompt_query,
+        response_query=response_query,
+        workspace_query=workspace_query,
+    )
     conversations.sort(key=lambda item: (item["last_event_at"] or "", item["conversation_ref"]), reverse=True)
     current_page = max(1, int(page or 1))
     limit = max(1, min(int(page_size or 50), 200))
@@ -183,6 +191,7 @@ def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3
         "conversation_ref": conversation_ref,
         "session_ref": _first_value(ordered, "session_ref"),
         "session_title": _session_title(ordered),
+        "workspace": workspace_from_rows(ordered),
         "started_at": ordered[0]["occurred_at"],
         "last_event_at": ordered[-1]["occurred_at"],
         "prompt_preview": _truncate(prompt),
@@ -193,21 +202,6 @@ def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3
         "hit_count": sum(1 for row in ordered if row["fact_type"] in {"error", "risk", "tool", "unknown"}),
         "token_usage": _usage(conn, conversation_ref, ordered),
     }
-
-def _filter_conversations(conversations: list[dict], *, prompt_query: str | None, response_query: str | None) -> list[dict]:
-    prompt = (prompt_query or "").strip().lower()
-    response = (response_query or "").strip().lower()
-    if not prompt and not response:
-        return conversations
-    result = []
-    for item in conversations:
-        prompt_text = str(item.get("_prompt_search_text") or item["prompt_preview"]).lower()
-        response_text = str(item.get("_response_search_text") or item["response_preview"]).lower()
-        prompt_ok = not prompt or prompt in prompt_text
-        response_ok = not response or response in response_text
-        if prompt_ok and response_ok:
-            result.append(item)
-    return result
 
 def _has_input_or_output(item: dict) -> bool:
     has_prompt = bool(item["prompt_preview"] or item.get("_prompt_search_text"))
@@ -269,6 +263,25 @@ def _hit(row: sqlite3.Row) -> dict:
         "summary": row["summary"],
         "content_preview": row["content_preview"]
         or projection_preview(projection, row["raw_content"], row["summary"], row["projection_category"] or row["category"]),
+        "tool_context": _tool_context(projection),
+    }
+
+
+def _tool_context(projection: dict) -> dict | None:
+    if not any(projection.get(key) not in (None, "") for key in ("command", "command_excerpt", "tool_name", "exit_code", "is_timeout")):
+        return None
+    return {
+        "tool_name": str(projection.get("tool_name") or projection.get("tool") or projection.get("name") or ""),
+        "command": str(projection.get("command") or ""),
+        "command_excerpt": str(projection.get("command_excerpt") or projection.get("command") or ""),
+        "command_category": str(projection.get("command_category") or ""),
+        "exit_code": projection.get("exit_code"),
+        "is_timeout": bool(projection.get("is_timeout")),
+        "timeout_ms": projection.get("timeout_ms"),
+        "timeout_after_ms": projection.get("timeout_after_ms"),
+        "wall_time_seconds": projection.get("wall_time_seconds"),
+        "error_excerpt": str(projection.get("error_excerpt") or ""),
+        "call_id": str(projection.get("call_id") or ""),
     }
 
 
@@ -490,4 +503,3 @@ def _truncate(value: str, limit: int = 220) -> str:
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 1]}..."
-

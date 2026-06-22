@@ -55,16 +55,18 @@ export function factTypeLabel(type: string): string {
     codex_prompt: '用户 Prompt',
     codex_message: 'Codex 消息',
     codex_reasoning: '推理片段',
-    codex_error: 'Codex 错误',
-    error: 'Codex 错误',
+    tool_execution_failure: '工具执行失败',
+    tool_execution_timeout: '工具执行超时',
+    workflow_step_failure: 'Workflow 失败',
+    workflow_step_timeout: 'Workflow 超时',
+    error: '执行异常',
     tool: '工具事件',
     tool_call: '工具调用',
-    tool_failure: '工具失败',
     tool_result: '工具结果',
     risk: '风险命中',
-    high_risk_operation: '高风险操作',
-    sensitive_touch: '敏感触达',
-    sensitive_object_touch: '敏感触达',
+    file_change: '文件变更',
+    destructive_operation: '破坏性操作',
+    sensitive_content_exposure: '敏感内容暴露',
     enrichment: '补证命中',
     enrichment_result: '补证结果',
     unknown: '低证据事件',
@@ -112,8 +114,9 @@ export function activityTagLabel(value: string): string {
 
 export function riskTypeLabel(value: string): string {
   const labels: Record<string, string> = {
-    high_risk_operation: '高风险操作',
-    sensitive_object_touch: '敏感对象触达',
+    file_change: '文件变更',
+    destructive_operation: '破坏性操作',
+    sensitive_content_exposure: '敏感内容暴露',
   };
   return labels[value] ?? value;
 }

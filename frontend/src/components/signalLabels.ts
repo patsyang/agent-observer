@@ -37,11 +37,14 @@ export function conclusionCodeLabel(value: string): string {
 
 export function signalKindLabel(value: string): string {
   const labels: Record<string, string> = {
-    tool_failure_cluster: '工具失败',
-    command_timeout: '命令超时',
-    workspace_change_burst: '密集改动',
+    tool_execution_failure: '工具失败',
+    tool_execution_timeout: '工具超时',
+    workflow_step_failure: 'Workflow 失败',
+    workflow_step_timeout: 'Workflow 超时',
+    change_volume_anomaly: '变更量异常',
     key_file_change: '关键文件',
-    sensitive_object_touch: '敏感触达'
+    destructive_operation_attempt: '破坏性操作',
+    sensitive_content_exposure: '敏感内容'
   };
   return labels[value] ?? '行为风险';
 }
@@ -64,10 +67,10 @@ export function scopeText(scope: Record<string, unknown>): string {
     ['对象', scope.object_count],
     ['失败', scope.failure_count],
     ['操作', scope.operation_count],
-    ['文件', scope.file_count]
+    ['文件', scope.file_count],
+    ['超时', scope.timeout_count]
   ]
     .filter(([, value]) => typeof value === 'number' && value > 0)
     .map(([label, value]) => `${label} ${formatNumber(Number(value))}`);
   return parts.length ? parts.join(' / ') : '范围待确认';
 }
-

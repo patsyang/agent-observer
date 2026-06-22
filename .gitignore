@@ -86,6 +86,7 @@ data/*.sqlite
 frontend/tsconfig.tsbuildinfo
 frontend/test-results/
 frontend/data/runtime/
+frontend/apps/
 
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite

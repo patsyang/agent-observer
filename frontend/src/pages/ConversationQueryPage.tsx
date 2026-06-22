@@ -12,6 +12,7 @@ type Filters = {
   end_at: string;
   prompt_query: string;
   response_query: string;
+  workspace_query: string;
   page: number;
   page_size: number;
 };
@@ -42,7 +43,7 @@ export function ConversationQueryPage({
 }) {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
-  const [draftFilters, setDraftFilters] = useState<Pick<Filters, 'window' | 'start_at' | 'end_at' | 'prompt_query' | 'response_query'>>(defaultFilters);
+  const [draftFilters, setDraftFilters] = useState<Pick<Filters, 'window' | 'start_at' | 'end_at' | 'prompt_query' | 'response_query' | 'workspace_query'>>(defaultFilters);
   const [rows, setRows] = useState<ConversationSummary[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, page_size: PAGE_SIZE, has_more: false });
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
@@ -102,6 +103,7 @@ export function ConversationQueryPage({
       end_at: draftFilters.end_at,
       prompt_query: draftFilters.prompt_query.trim(),
       response_query: draftFilters.response_query.trim(),
+      workspace_query: draftFilters.workspace_query.trim(),
     });
   };
 
@@ -117,6 +119,13 @@ export function ConversationQueryPage({
       )}
 
       <div className="conversation-toolbar" aria-label="会话筛选">
+        <TextFilter
+          testId="workspace-query"
+          label="工作区"
+          onChange={(workspace_query) => updateDraftFilters({ workspace_query })}
+          onSubmit={submitSearch}
+          value={draftFilters.workspace_query}
+        />
         <TextFilter
           testId="prompt-query"
           label="提交 Prompt"
@@ -177,6 +186,7 @@ const defaultFilters: Filters = {
   end_at: '',
   prompt_query: '',
   response_query: '',
+  workspace_query: '',
   page: 1,
   page_size: PAGE_SIZE,
 };

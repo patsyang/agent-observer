@@ -38,7 +38,7 @@ def get_risk_summary(conn: sqlite3.Connection, *, mode: str = "summary", window:
         )
         if row["projection_id"]:
             signal["evidence_refs"].append(row["projection_id"])
-        if row["risk_type"] == "sensitive_object_touch":
+        if row["risk_type"] == "sensitive_content_exposure":
             signal["sensitive_categories"].update(_sensitive_categories_for_projection(row["projection_json"], row["raw_content"]))
 
     grouped: dict[tuple[str, str], dict] = {}
@@ -114,7 +114,7 @@ def _parse_time(value: str) -> datetime:
 
 
 def _normalized_object_type(risk_type: str, object_type: str, categories: set[str]) -> str:
-    if risk_type != "sensitive_object_touch":
+    if risk_type != "sensitive_content_exposure":
         return object_type
     if not categories and object_type in {"credential", "auth"}:
         return ""

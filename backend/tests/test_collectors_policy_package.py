@@ -302,6 +302,6 @@ def test_collector_ingest_creates_chinese_facts_and_signal(tmp_path):
 
     assert result["accepted"] >= 2
     assert any("采集器完成一次本机链路自检" in summary for summary in summaries)
-    assert any("错误指纹" in summary for summary in summaries)
+    assert any("工具执行失败" in summary for summary in summaries)
     assert signals["signals"]
-    assert any(signal["signal_kind"] == "tool_failure_cluster" for signal in signals["signals"])
+    assert any(signal["signal_kind"] == "tool_execution_failure" for signal in signals["signals"])

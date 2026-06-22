@@ -12,6 +12,7 @@ MANIFEST = {
         "command_id": "collect_codex_tool_failure_context",
         "template": "tool_failure_context.v1",
         "output_schema": "tool_failure_context.v1",
+        "signal_kinds": {"tool_execution_failure", "tool_execution_timeout", "workflow_step_failure", "workflow_step_timeout"},
     }
 }
 TERMINAL_STATUSES = {"succeeded", "failed", "expired", "unavailable", "cancelled"}
@@ -218,7 +219,10 @@ def record_enrichment_result(
 def _capability_state(conn: sqlite3.Connection, signal_id: str, capability_id: str) -> dict:
     policy = conn.execute("select enrichment_mode from effective_policies where id = 1").fetchone()
     manifest = MANIFEST[capability_id]
-    if policy and policy["enrichment_mode"] == "disabled":
+    signal = _signal_row(conn, signal_id)
+    if signal["signal_kind"] not in manifest["signal_kinds"]:
+        state, reason = "unavailable", "capability_not_applicable"
+    elif policy and policy["enrichment_mode"] == "disabled":
         state, reason = "unavailable", "policy_denied"
     else:
         collector_id = _collector_id(conn, signal_id)

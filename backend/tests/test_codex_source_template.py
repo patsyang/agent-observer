@@ -179,12 +179,12 @@ def test_codex_source_template_extracts_structured_facts_with_raw_content_by_def
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"codex_error", "usage", "high_risk_operation", "sensitive_touch", "codex_message"} <= categories
+    assert {"tool_execution_failure", "usage", "destructive_operation", "sensitive_content_exposure", "codex_message"} <= categories
     assert "uncategorized" not in categories
-    assert any(fact.get("error_signature") for fact in facts if fact["category"] == "codex_error")
+    assert any(fact.get("error_signature") for fact in facts if fact["category"] == "tool_execution_failure")
     assert any(fact.get("usage", {}).get("activity_tag") == "shell_debug" for fact in facts)
-    assert any(fact.get("risk", {}).get("risk_type") == "high_risk_operation" for fact in facts)
-    sensitive_fact = next(fact for fact in facts if fact["category"] == "sensitive_touch")
+    assert any(fact.get("risk", {}).get("risk_type") == "destructive_operation" for fact in facts)
+    sensitive_fact = next(fact for fact in facts if fact["category"] == "sensitive_content_exposure")
     assert sensitive_fact["projection"]["object_type"] == "credential"
     assert sensitive_fact["projection"]["sensitive_categories"] == ["token"]
     assert sensitive_fact["projection"]["sensitive_matches"][0]["match_type"] == "authorization_bearer"
@@ -362,7 +362,7 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"tool_call", "codex_error", "usage", "high_risk_operation", "codex_prompt", "codex_reasoning"} <= categories
+    assert {"tool_call", "tool_execution_failure", "usage", "file_change", "codex_prompt", "codex_reasoning"} <= categories
     prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
     assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
     assert prompt_fact["projection"]["content_length"] == len("请检查 Dashboard 为什么看不到原始 Prompt")
@@ -372,9 +372,9 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     assert usage_fact["usage"]["units"] == 60
     assert usage_fact["projection"]["context_total_tokens"] == 120
     assert usage_fact["projection"]["cached_input_tokens"] == 60
-    assert any(fact.get("error_signature", {}).get("signature_key", "").startswith("codex_error:function_call_output") for fact in facts)
+    assert any(fact.get("error_signature", {}).get("signature_key", "").startswith("tool_execution_failure:") for fact in facts)
     assert any(fact.get("projection", {}).get("command_category") == "test" for fact in facts)
-    assert not [fact for fact in facts if fact["category"] == "sensitive_touch"]
+    assert not [fact for fact in facts if fact["category"] == "sensitive_content_exposure"]
 
 
 def test_codex_source_template_attaches_latest_session_title(tmp_path):
@@ -403,3 +403,54 @@ def test_codex_source_template_attaches_latest_session_title(tmp_path):
     business_facts = [fact for fact in facts if fact["category"] != "collector_health"]
     assert business_facts
     assert {fact["source_refs"]["session_title"] for fact in business_facts} == {"分析信号定义与类型-Grill"}
+
+
+def test_codex_source_template_attaches_workspace_label_from_global_state(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    workspace_path = "D:/workspace/agentic_factory/apps/agent-observer"
+    (codex_home / ".codex-global-state.json").write_text(
+        json.dumps(
+            {
+                "electron-workspace-root-labels": {
+                    "D:\\workspace\\agentic_factory\\apps\\agent-observer": "Agent Observer"
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    records = [
+        {
+            "timestamp": "2026-06-18T10:00:00+00:00",
+            "type": "session_meta",
+            "payload": {"id": "session-workspace", "cwd": workspace_path},
+        },
+        {
+            "timestamp": "2026-06-18T10:01:00+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "user",
+                "content": [{"type": "input_text", "text": "输入"}],
+            },
+        },
+    ]
+    (sessions / "session-workspace.jsonl").write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex-workspace",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
+    refs = prompt_fact["source_refs"]
+    assert refs["workspace_label"] == "Agent Observer"
+    assert refs["workspace_path"].endswith("agent-observer")
+    assert refs["workspace_alias_source"] == "codex_global_state"
+    assert refs["workspace_confidence"] == "high"

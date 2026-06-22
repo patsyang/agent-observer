@@ -12,26 +12,37 @@ import {
 interface Props {
   usage: UsageSummary;
   risks: RiskSummary;
+  compact?: boolean;
+  pendingSignalCount?: number;
 }
 
-export function UsageGovernanceSummary({ usage, risks }: Props) {
+export function UsageGovernanceSummary({ usage, risks, compact = false, pendingSignalCount }: Props) {
   const session = usage.rollups.find((row) => row.scope === 'session' && row.scope_value !== 'unknown');
   const conversation = usage.rollups.find((row) => row.scope === 'conversation' && row.scope_value !== 'unknown');
   const activityRows = usage.rollups.filter((row) => row.scope === 'activity_tag');
+  const riskCount = pendingSignalCount ?? risks.signals.reduce((total, signal) => total + signal.count, 0);
 
   return (
-    <section className="panel flush summary-band" aria-label="使用与风险治理" data-testid="usage-governance">
+    <section className={compact ? 'panel flush summary-band summary-band--compact' : 'panel flush summary-band'} aria-label="使用与风险治理" data-testid="usage-governance">
       <div className="panel-header">
         <h2>使用与风险治理</h2>
         <span className="badge gray">确定性汇总</span>
       </div>
       <div className="panel-body">
-        <div className="metric-grid">
-          <Metric label="有效用量" value={formatNumber(usage.totals.effective_units)} note="模型调用有效 token" />
-          <Metric label="缓存命中" value={formatNumber(usage.totals.cached_input_units)} note={`命中率 ${formatPercent(usage.totals.cache_hit_rate)}`} />
-          <Metric label="未知活动" value={formatNumber(usage.totals.unknown_units)} note="不由 AI 猜测" />
-        </div>
-        <div className="summary-columns">
+        {compact ? (
+          <div className="metric-grid">
+            <CompactMetric label="有效用量 (Token)" value={formatNumber(usage.totals.effective_units)} />
+            <CompactMetric label={`缓存命中 (${formatPercent(usage.totals.cache_hit_rate)})`} value={formatNumber(usage.totals.cached_input_units)} />
+            <CompactMetric label="待处理信号" value={formatNumber(riskCount)} />
+          </div>
+        ) : (
+          <div className="metric-grid">
+            <Metric label="有效用量" value={formatNumber(usage.totals.effective_units)} note="模型调用有效 token" />
+            <Metric label="缓存命中" value={formatNumber(usage.totals.cached_input_units)} note={`命中率 ${formatPercent(usage.totals.cache_hit_rate)}`} />
+            <Metric label="待处理信号" value={formatNumber(riskCount)} note="当前时间范围内未处理" />
+          </div>
+        )}
+        {!compact && <div className="summary-columns">
           <section>
             <h3>范围</h3>
             <p>
@@ -67,9 +78,18 @@ export function UsageGovernanceSummary({ usage, risks }: Props) {
               ))
             )}
           </section>
-        </div>
+        </div>}
       </div>
     </section>
+  );
+}
+
+function CompactMetric({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="metric metric--compact">
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
   );
 }
 

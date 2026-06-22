@@ -2,21 +2,32 @@ import { X } from 'lucide-react';
 
 import type { ConversationDetail, ConversationHit } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
+import { ToolContextBlock } from '../components/ToolContextBlock';
 import { factTypeLabel, formatDateTime, severityLabel } from './dashboardLabels';
 
 interface Props {
   detail: ConversationDetail;
+  highlightFactIds?: string[];
+  highlightTitle?: string;
   onClose: () => void;
 }
 
-export function ConversationDrawer({ detail, onClose }: Props) {
-  const actionableHits = detail.hits.filter(isActionableHit);
-  const technicalHits = detail.hits.filter((hit) => !isActionableHit(hit));
+export function ConversationDrawer({ detail, highlightFactIds = [], highlightTitle = '当前信号命中', onClose }: Props) {
+  const highlighted = new Set(highlightFactIds);
+  const highlightedHits = detail.hits.filter((hit) => highlighted.has(hit.fact_id));
+  const remainingHits = detail.hits.filter((hit) => !highlighted.has(hit.fact_id));
+  const actionableHits = remainingHits.filter(isActionableHit);
+  const technicalHits = remainingHits.filter((hit) => !isActionableHit(hit));
   const conversationName = detail.session_title || detail.session_ref || detail.conversation_ref;
+  const highlightTerms = highlightedHits.flatMap((hit) => [
+    hit.tool_context?.command,
+    hit.tool_context?.command_excerpt,
+    hit.tool_context?.error_excerpt,
+  ]).filter((value): value is string => Boolean(value));
 
   return (
     <div className="drawer-backdrop" role="presentation">
-      <aside className="drawer conversation-drawer" aria-label="会话详情" data-testid="conversation-drawer">
+      <aside className="drawer conversation-drawer" role="dialog" aria-modal="true" aria-label="会话详情" data-testid="conversation-drawer">
         <header className="drawer-header">
           <div>
             <span>会话</span>
@@ -30,6 +41,10 @@ export function ConversationDrawer({ detail, onClose }: Props) {
         </header>
 
         <dl className="drawer-meta">
+          <div>
+            <dt>工作区</dt>
+            <dd>{workspaceLabel(detail)}</dd>
+          </div>
           <div>
             <dt>模型调用累计有效 token</dt>
             <dd>{formatNumber(detail.token_usage.effective_units)}</dd>
@@ -52,6 +67,33 @@ export function ConversationDrawer({ detail, onClose }: Props) {
           </div>
         </dl>
 
+        {highlightedHits.length > 0 && (
+          <section className="drawer-section">
+            <h3>{highlightTitle}</h3>
+            <div className="conversation-hit-list">
+              {highlightedHits.map((hit) => (
+                <article className="conversation-hit conversation-hit--highlight" key={hit.fact_id}>
+                  <header>
+                    <strong>{hitTitle(hit)}</strong>
+                    <span>{severityLabel(hit.severity)}</span>
+                  </header>
+                  <ToolContextBlock context={hit.tool_context} />
+                  {!hit.tool_context && <p>{hitReadableText(hit)}</p>}
+                  <small>{formatDateTime(hit.occurred_at)}</small>
+                </article>
+              ))}
+            </div>
+          </section>
+        )}
+
+        <section className="drawer-section">
+          <h3>工作区归属</h3>
+          <div className="conversation-hit-summary">
+            <strong>{workspaceLabel(detail)}</strong>
+            <p>{detail.workspace.workspace_path || '未识别工作区路径'}</p>
+          </div>
+        </section>
+
         <section className="drawer-section">
           <h3>输入输出</h3>
           {detail.messages.length === 0 ? (
@@ -64,7 +106,7 @@ export function ConversationDrawer({ detail, onClose }: Props) {
                     <strong>{roleLabel(message.role)}</strong>
                     <small>{formatDateTime(message.occurred_at)}</small>
                   </header>
-                  <p>{message.content}</p>
+                  <p>{renderHighlightedText(message.content, highlightTerms)}</p>
                 </article>
               ))}
             </div>
@@ -85,7 +127,8 @@ export function ConversationDrawer({ detail, onClose }: Props) {
                         <strong>{hitTitle(hit)}</strong>
                         <span>{severityLabel(hit.severity)}</span>
                       </header>
-                      <p>{hitReadableText(hit)}</p>
+                      <ToolContextBlock context={hit.tool_context} />
+                      {!hit.tool_context && <p>{hitReadableText(hit)}</p>}
                       <small>{formatDateTime(hit.occurred_at)}</small>
                     </article>
                   ))}
@@ -108,6 +151,15 @@ export function ConversationDrawer({ detail, onClose }: Props) {
   );
 }
 
+function workspaceLabel(detail: ConversationDetail): string {
+  return detail.workspace.workspace_label || basename(detail.workspace.workspace_path) || '工作区未知';
+}
+
+function basename(path: string): string {
+  const parts = path.replace(/\\/g, '/').split('/').filter(Boolean);
+  return parts.at(-1) ?? '';
+}
+
 function roleLabel(role: string): string {
   return {
     user: '提交 Prompt',
@@ -125,7 +177,15 @@ function formatPercent(value?: number): string {
 function isActionableHit(hit: ConversationHit): boolean {
   const category = hit.category.toLowerCase();
   if (hit.severity === 'high' || hit.severity === 'medium') return true;
-  return ['codex_error', 'command_timeout', 'tool_failure', 'high_risk_operation', 'sensitive_touch', 'sensitive_object_touch'].includes(category);
+  return [
+    'tool_execution_failure',
+    'tool_execution_timeout',
+    'workflow_step_failure',
+    'workflow_step_timeout',
+    'file_change',
+    'destructive_operation',
+    'sensitive_content_exposure'
+  ].includes(category);
 }
 
 function hitTitle(hit: ConversationHit): string {
@@ -136,7 +196,7 @@ function hitReadableText(hit: ConversationHit): string {
   const text = hit.content_preview || hit.summary;
   if (!text) return '该命中缺少可展示的上下文，请回到输入输出查看相邻内容。';
   return text
-    .replace(/^高风险操作[:：]\s*/, '检测到高风险操作：')
+    .replace(/^破坏性操作[:：]\s*/, '检测到破坏性操作：')
     .replace(/^工具\s+/, '工具活动：');
 }
 
@@ -151,4 +211,13 @@ function technicalHitSummary(hits: ConversationHit[]): string {
     .slice(0, 4)
     .map(([label, count]) => `${label} ${formatNumber(count)} 条`)
     .join('、');
+}
+
+function renderHighlightedText(content: string, terms: string[]) {
+  const term = terms.find((value) => value.length > 8 && content.includes(value));
+  if (!term) return content;
+  const parts = content.split(term);
+  return parts.flatMap((part, index) => (
+    index === parts.length - 1 ? [part] : [part, <mark key={`${term}-${index}`}>{term}</mark>]
+  ));
 }

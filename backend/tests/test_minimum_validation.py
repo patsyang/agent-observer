@@ -25,12 +25,12 @@ def _validation_batch(
     occurred_at: list[str] | None = None,
 ) -> dict:
     categories = [
-        ("validation-error-recurring", "error", "codex_error", "high", "high", "Recurring checkout command failure"),
+        ("validation-error-recurring", "error", "tool_execution_failure", "high", "high", "Recurring checkout command failure"),
         ("validation-low-evidence", "unknown", "uncategorized", "low", "low", "Low evidence retry candidate"),
         ("validation-enrichment", "enrichment", "enrichment_result", "high", "medium", "Enrichment result feedback needed"),
         ("validation-usage", "usage", "usage", "high", "low", "High usage session with deterministic label"),
-        ("validation-risk", "risk", "high_risk_operation", "high", "medium", "High-risk workspace command"),
-        ("validation-sensitive", "risk", "sensitive_touch", "high", "high", "Sensitive configuration touched"),
+        ("validation-risk", "risk", "file_change", "high", "medium", "Workspace file changed"),
+        ("validation-sensitive", "risk", "sensitive_content_exposure", "high", "high", "Sensitive configuration touched"),
     ]
     items = []
     dates = occurred_at or ["2026-06-18T10:00:00+00:00"] * len(categories)
@@ -49,8 +49,9 @@ def _validation_batch(
             "source_refs": {"conversation_ref": f"conversation-{event_id}"},
             "source_specific": {"validation_sample": validation_sample},
         }
-        if category == "codex_error":
-            item["error_signature"] = {"signature_key": event_id, "category": "codex_error"}
+        if category == "tool_execution_failure":
+            item["projection"] = {"tool_name": "exec_command", "exit_code": 1}
+            item["error_signature"] = {"signature_key": event_id, "category": "tool_execution_failure"}
         if fact_type == "usage":
             item["usage"] = {
                 "units": 90,
@@ -60,7 +61,7 @@ def _validation_batch(
             }
         if fact_type == "risk":
             item["risk"] = {
-                "risk_type": "sensitive_object_touch" if category == "sensitive_touch" else "high_risk_operation",
+                "risk_type": "sensitive_content_exposure" if category == "sensitive_content_exposure" else "file_change",
                 "severity": severity,
                 "object_type": "configuration",
             }
@@ -92,12 +93,12 @@ def test_minimum_validation_stops_synthetic_sample_before_release_pass(tmp_path)
         "flow-acceptance-coverage",
     }
     assert {row["category"] for row in report["sample_coverage"]} == {
-        "error_recurrence",
+        "tool_execution_failure",
         "low_evidence_fact",
         "enrichment_feedback",
         "usage_signal",
-        "high_risk_operation",
-        "sensitive_object_touch",
+        "file_change",
+        "sensitive_content_exposure",
     }
     assert all(row["covered"] for row in report["sample_coverage"])
     assert report["flow_coverage"].keys() == set(FLOW_IDS)
@@ -153,12 +154,12 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
     assert report["error_signal_evidence_group_pass_rate"] >= 0.8
     assert report["usage_explanation_pass_rate"] >= 0.8
     assert {row["category"] for row in report["sample_coverage"]} == {
-        "error_recurrence",
+        "tool_execution_failure",
         "low_evidence_fact",
         "enrichment_feedback",
         "usage_signal",
-        "high_risk_operation",
-        "sensitive_object_touch",
+        "file_change",
+        "sensitive_content_exposure",
     }
     assert all(row["covered"] for row in report["sample_coverage"])
     assert report["flow_coverage"].keys() == set(FLOW_IDS)

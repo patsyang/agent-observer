@@ -8,6 +8,7 @@ from app.collector_client.fact_mapper import _health_fact, _record_fact, _source
 from app.collector_client.session_index import load_session_titles
 from app.collector_client.source_reader import _incremental_records, _recent_tail_records
 from app.collector_client.telemetry_utils import codex_home as _codex_home, now as _now
+from app.collector_client.workspace_scope import load_workspace_resolver
 
 
 def collect_facts(
@@ -51,6 +52,7 @@ def _codex_facts(
     cutoff = datetime.now(UTC) - timedelta(days=max(1, history_window_days))
     cursor.setdefault("sources", {})
     session_titles = load_session_titles(codex_home)
+    workspace_resolver = load_workspace_resolver(codex_home)
     facts: list[dict] = []
     content_index: dict[str, int] = {}
     seen_source_keys: set[str] = set()
@@ -64,7 +66,16 @@ def _codex_facts(
         ):
             if source_key in live_seen or source_key in seen_source_keys:
                 continue
-            fact = _record_fact(collector_id, sequence, source_key, path, line_number, record, session_titles=session_titles)
+            fact = _record_fact(
+                collector_id,
+                sequence,
+                source_key,
+                path,
+                line_number,
+                record,
+                session_titles=session_titles,
+                workspace_resolver=workspace_resolver,
+            )
             if fact:
                 fact["source_specific"]["priority_stream"] = "live_tail"
                 add_or_merge_content_fact(facts, content_index, fact)
@@ -79,7 +90,16 @@ def _codex_facts(
             break
         if source_key in seen_source_keys:
             continue
-        fact = _record_fact(collector_id, sequence, source_key, path, line_number, record, session_titles=session_titles)
+        fact = _record_fact(
+            collector_id,
+            sequence,
+            source_key,
+            path,
+            line_number,
+            record,
+            session_titles=session_titles,
+            workspace_resolver=workspace_resolver,
+        )
         if fact:
             fact["source_specific"]["priority_stream"] = "file_cursor"
             add_or_merge_content_fact(facts, content_index, fact)

@@ -1,3 +1,5 @@
+import type { WorkspaceScope } from './types.conversations';
+
 export type DecisionState = 'unread' | 'read' | 'needs_review' | 'handled';
 
 export interface SignalUsageSummary {
@@ -53,6 +55,21 @@ export interface SignalEvidenceItem {
   sensitive_categories?: string[];
   tool_name?: string | null;
   exit_code?: string | number | null;
+  tool_context?: ToolContext | null;
+}
+
+export interface ToolContext {
+  tool_name: string;
+  command: string;
+  command_excerpt: string;
+  command_category: string;
+  exit_code: string | number | null;
+  is_timeout: boolean;
+  timeout_ms: number | null;
+  timeout_after_ms: number | null;
+  wall_time_seconds: number | null;
+  error_excerpt: string;
+  call_id: string;
 }
 
 export interface SignalEvidenceGroup {
@@ -66,8 +83,27 @@ export interface SignalEvidenceGroup {
 
 export interface LinkedConversation {
   conversation_ref: string;
+  session_ref?: string;
+  session_title?: string;
+  workspace?: WorkspaceScope;
   hit_count: number;
   last_seen_at?: string | null;
+  matched_fact_ids?: string[];
+}
+
+export interface SignalWorkspaceSummary {
+  mode: 'single' | 'multiple' | 'unknown' | string;
+  label: string;
+  count: number;
+}
+
+export interface SignalWorkspaceRef {
+  agent_type?: string;
+  workspace_id: string;
+  workspace_path: string;
+  workspace_label: string;
+  workspace_alias_source?: string;
+  workspace_confidence?: string;
 }
 
 export interface BehaviorSignal {
@@ -82,6 +118,8 @@ export interface BehaviorSignal {
   affected_scope: Record<string, unknown>;
   evidence_groups: SignalEvidenceGroup[];
   linked_conversations: LinkedConversation[];
+  workspace_refs: SignalWorkspaceRef[];
+  workspace_summary: SignalWorkspaceSummary;
   usage_summary: SignalUsageSummary;
   enrichment_status_summary: EnrichmentStatusSummary;
   suggested_actions: string[];

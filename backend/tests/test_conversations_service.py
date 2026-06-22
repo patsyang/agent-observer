@@ -95,6 +95,31 @@ def _event(event_id: str, category: str, occurred_at: str, conversation: str = "
     }
 
 
+def _tool_failure(event_id: str, occurred_at: str, conversation: str = "conv-detail") -> dict:
+    return {
+        "source_event_id": event_id,
+        "fact_type": "error",
+        "category": "tool_execution_failure",
+        "quality": "high",
+        "severity": "medium",
+        "summary": "工具执行失败：cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，exit_code=1。",
+        "occurred_at": occurred_at,
+        "span": f"event:{conversation}",
+        "raw_hash": f"hash-{event_id}",
+        "projection": {
+            "tool_name": "exec_command",
+            "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+            "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+            "command_category": "shell",
+            "exit_code": 1,
+            "error_excerpt": "Port 8765 is already in use.",
+        },
+        "source_refs": _source_refs(conversation),
+        "source_specific": {"codex_event_type": "function_call_output"},
+        "error_signature": {"signature_key": f"tool_execution_failure:exec_command:{event_id}:1", "category": "tool_execution_failure"},
+    }
+
+
 def _source_refs(conversation: str, *, line: int | None = None, source_path_hash: str | None = None) -> dict:
     refs = {"conversation_ref": conversation, "session_ref": f"session-{conversation}"}
     if line is not None:
@@ -107,6 +132,21 @@ def _source_refs(conversation: str, *, line: int | None = None, source_path_hash
 def _source_refs_with_title(conversation: str, title: str) -> dict:
     refs = _source_refs(conversation)
     refs["session_title"] = title
+    return refs
+
+
+def _source_refs_with_workspace(conversation: str, label: str, path: str = "D:/workspace/agentic_factory/apps/agent-observer") -> dict:
+    refs = _source_refs(conversation)
+    refs.update(
+        {
+            "workspace_id": "codex:workspace-agent-observer",
+            "workspace_path": path,
+            "workspace_label": label,
+            "workspace_alias_source": "codex_global_state",
+            "workspace_confidence": "high",
+            "agent_type": "codex",
+        }
+    )
     return refs
 
 
@@ -166,6 +206,37 @@ def test_query_conversations_exposes_codex_session_title(tmp_path):
 
     assert result["conversations"][0]["session_title"] == "分析信号定义与类型-Grill"
     assert detail["session_title"] == "分析信号定义与类型-Grill"
+
+
+def test_query_conversations_exposes_and_filters_workspace(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        prompt = _item("workspace-prompt", "codex_prompt", "查看工作区", (now - timedelta(minutes=5)).isoformat(), "conv-workspace")
+        prompt["source_refs"] = _source_refs_with_workspace("conv-workspace", "Agent Observer")
+        response = _item("workspace-response", "codex_message", "已展示工作区", (now - timedelta(minutes=4)).isoformat(), "conv-workspace")
+        response["source_refs"] = _source_refs_with_workspace("conv-workspace", "Agent Observer")
+        other_prompt = _item("other-prompt", "codex_prompt", "其他输入", (now - timedelta(minutes=5)).isoformat(), "conv-other")
+        other_prompt["source_refs"] = _source_refs_with_workspace("conv-other", "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+        other_response = _item("other-response", "codex_message", "其他输出", (now - timedelta(minutes=4)).isoformat(), "conv-other")
+        other_response["source_refs"] = _source_refs_with_workspace("conv-other", "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-conversation-workspace",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+                "collector_id": "collector-codex",
+                "source": "codex",
+                "cursor": "cursor-workspace",
+                "items": [prompt, response, other_prompt, other_response],
+            },
+        )
+        result = query_conversations(conn, window="1h", workspace_query="agent observer")
+        detail = get_conversation_query(conn, "conv-workspace")
+
+    assert [row["conversation_ref"] for row in result["conversations"]] == ["conv-workspace"]
+    assert result["conversations"][0]["workspace"]["workspace_label"] == "Agent Observer"
+    assert detail["workspace"]["workspace_path"].endswith("agent-observer")
 
 
 def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
@@ -379,6 +450,43 @@ def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):
     assert [hit["fact_id"] for hit in detail["hits"]] == ["detail-tool"]
     assert detail["token_usage"]["effective_units"] == 64
     assert by_fact["conversation_ref"] == "conv-detail"
+
+
+def test_conversation_detail_hits_expose_tool_context(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-conversation-tool-context",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+                "collector_id": "collector-codex",
+                "source": "codex",
+                "cursor": "cursor-tool-context",
+                "items": [
+                    _item("tool-context-prompt", "codex_prompt", "启动后端", (now - timedelta(minutes=5)).isoformat(), "conv-tool-context"),
+                    _item("tool-context-response", "codex_message", "后端端口被占用", (now - timedelta(minutes=4)).isoformat(), "conv-tool-context"),
+                    _tool_failure("tool-context-failure", (now - timedelta(minutes=3)).isoformat(), "conv-tool-context"),
+                ],
+            },
+        )
+        detail = get_conversation_query(conn, "conv-tool-context")
+
+    assert detail["hits"][0]["content_preview"].startswith("命令 cmd /c apps\\agent-observer")
+    assert detail["hits"][0]["tool_context"] == {
+        "tool_name": "exec_command",
+        "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+        "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+        "command_category": "shell",
+        "exit_code": 1,
+        "is_timeout": False,
+        "timeout_ms": None,
+        "timeout_after_ms": None,
+        "wall_time_seconds": None,
+        "error_excerpt": "Port 8765 is already in use.",
+        "call_id": "",
+    }
 
 
 def test_query_conversations_supports_short_hour_windows_and_today(tmp_path):

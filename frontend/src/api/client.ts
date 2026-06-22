@@ -99,6 +99,7 @@ export function fetchConversations(
     end_at?: string;
     prompt_query?: string;
     response_query?: string;
+    workspace_query?: string;
     page?: number;
     page_size?: number;
   } = {}
@@ -109,6 +110,7 @@ export function fetchConversations(
   if (filters.end_at) params.set('end_at', filters.end_at);
   if (filters.prompt_query) params.set('prompt_query', filters.prompt_query);
   if (filters.response_query) params.set('response_query', filters.response_query);
+  if (filters.workspace_query) params.set('workspace_query', filters.workspace_query);
   params.set('page', String(filters.page ?? 1));
   params.set('page_size', String(filters.page_size ?? 50));
   return readJson<ConversationsResponse>(`/api/conversations?${params.toString()}`);
@@ -131,10 +133,11 @@ export function fetchRiskSummary(window: TimeWindow = '1h'): Promise<RiskSummary
 }
 
 export function fetchSignals(
-  options: { window?: TimeWindow; page?: number; page_size?: number } = {}
+  options: { window?: TimeWindow; workspace_query?: string; page?: number; page_size?: number } = {}
 ): Promise<SignalsResponse> {
   const params = new URLSearchParams();
   params.set('window', options.window ?? '1h');
+  if (options.workspace_query) params.set('workspace_query', options.workspace_query);
   params.set('page', String(options.page ?? 1));
   params.set('page_size', String(options.page_size ?? 20));
   const suffix = params.toString() ? `?${params.toString()}` : '';

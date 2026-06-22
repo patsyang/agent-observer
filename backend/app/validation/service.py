@@ -10,12 +10,12 @@ FLOW_IDS = [f"FLOW-{index:03d}" for index in range(1, 8)]
 ACCEPTANCE_IDS = [f"AC-{index:03d}" for index in range(1, 21)]
 
 CATEGORY_RULES = {
-    "error_recurrence": "fact_type = 'error' and category = 'codex_error'",
+    "tool_execution_failure": "fact_type = 'error' and category in ('tool_execution_failure', 'workflow_step_failure')",
     "low_evidence_fact": "quality in ('low', 'unknown')",
     "enrichment_feedback": "category = 'enrichment_result'",
     "usage_signal": "fact_type = 'usage'",
-    "high_risk_operation": "category = 'high_risk_operation'",
-    "sensitive_object_touch": "category = 'sensitive_touch'",
+    "file_change": "category = 'file_change'",
+    "sensitive_content_exposure": "category = 'sensitive_content_exposure'",
 }
 
 QUALIFIED_TD011_MARKER = "td_011_real_codex_session"
@@ -133,7 +133,7 @@ def _parse_iso_datetime(value: str) -> datetime:
 
 
 def _error_signal_rate(conn: sqlite3.Connection) -> float:
-    signals = conn.execute("select evidence_groups_json from behavior_signals where signal_kind = 'tool_failure_cluster'").fetchall()
+    signals = conn.execute("select evidence_groups_json from behavior_signals where signal_kind in ('tool_execution_failure', 'workflow_step_failure')").fetchall()
     if not signals:
         return 0.0
     passed = sum(1 for signal in signals if len(json.loads(signal["evidence_groups_json"])) >= 1)

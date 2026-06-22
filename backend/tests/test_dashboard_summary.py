@@ -23,7 +23,7 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
                     {
                         "source_event_id": "dashboard-error-001",
                         "fact_type": "error",
-                        "category": "codex_error",
+                        "category": "tool_execution_failure",
                         "quality": "high",
                         "severity": "high",
                         "summary": "function_call_output failed with exit_code=1",
@@ -31,7 +31,7 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
                         "span": "session:dashboard",
                         "raw_hash": "hash-dashboard-error",
                         "projection": {"tool_name": "exec_command", "exit_code": 1},
-                        "error_signature": {"signature_key": "dashboard-tool-failure", "category": "codex_error"},
+                        "error_signature": {"signature_key": "dashboard-tool-failure", "category": "tool_execution_failure"},
                         "source_refs": {"conversation_ref": "conv-dashboard"},
                         "source_specific": {"codex_event_type": "tool_result"},
                         "raw_content": "raw command content must not be in summary",
@@ -47,7 +47,7 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
     assert summary["facts"]["items"][0]["content_preview"]
     assert "raw_content" not in summary["facts"]["items"][0]
     assert summary["signals"]["total"] >= 1
-    assert summary["signals"]["items"][0]["signal_kind"] == "tool_failure_cluster"
+    assert summary["signals"]["items"][0]["signal_kind"] == "tool_execution_failure"
 
 
 def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):

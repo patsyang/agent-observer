@@ -87,9 +87,13 @@ export function EvidenceChainTable({ entries, onOpenFact }: Props) {
 
 function evidenceTypeLabel(entry: SignalEvidenceItem): string {
   const normalized = entry.category.toLowerCase();
-  if (normalized === 'codex_error') return 'Codex 错误';
-  if (normalized === 'high_risk_operation') return '高风险操作';
-  if (normalized === 'sensitive_object_touch') return '敏感对象触达';
+  if (normalized === 'tool_execution_failure') return '工具执行失败';
+  if (normalized === 'tool_execution_timeout') return '工具执行超时';
+  if (normalized === 'workflow_step_failure') return 'Workflow 失败';
+  if (normalized === 'workflow_step_timeout') return 'Workflow 超时';
+  if (normalized === 'file_change') return '文件变更';
+  if (normalized === 'destructive_operation') return '破坏性操作';
+  if (normalized === 'sensitive_content_exposure') return '敏感内容暴露';
   if (normalized === 'codex_prompt') return '用户 Prompt';
   if (normalized === 'codex_message') return 'Codex 消息';
   if (normalized === 'codex_reasoning') return '推理片段';

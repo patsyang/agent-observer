@@ -1,14 +1,21 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
 
+import { ConversationDrawer } from './ConversationDrawer';
 import { EnrichmentPanel } from '../components/EnrichmentPanel';
 import { HandleSignalDialog } from '../components/HandleSignalDialog';
-import { conclusionCodeLabel, decisionStateLabel, enrichmentStatusLabel, signalKindLabel, usageSummaryText } from '../components/signalLabels';
-import type { BehaviorSignalDetail, EnrichmentAvailability, EnrichmentJob, HandleSignalPayload } from '../api/types';
+import { signalKindLabel } from '../components/signalLabels';
+import type { BehaviorSignalDetail, ConversationDetail, EnrichmentAvailability, EnrichmentJob, HandleSignalPayload, LinkedConversation } from '../api/types';
+import { SignalDetailSummary } from './SignalDetailSummary';
+import { SignalLinkedConversations } from './SignalLinkedConversations';
+import { SignalWorkspaceChips } from './SignalWorkspaceChips';
+import { ToolContextBlock } from '../components/ToolContextBlock';
+import type { SignalEvidenceItem } from '../api/types';
 
 interface Props {
   signalId: string;
   loadSignalDetail: (signalId: string) => Promise<BehaviorSignalDetail>;
+  loadConversationDetail: (conversationRef: string) => Promise<ConversationDetail>;
   loadEnrichmentAvailability: (signalId: string) => Promise<EnrichmentAvailability>;
   markRead: (signalId: string) => Promise<BehaviorSignalDetail>;
   handleSignal: (signalId: string, payload: HandleSignalPayload) => Promise<BehaviorSignalDetail>;
@@ -25,6 +32,7 @@ type LoadState =
 
 export function SignalDetailPage({
   signalId,
+  loadConversationDetail,
   loadSignalDetail,
   loadEnrichmentAvailability,
   markRead,
@@ -37,6 +45,8 @@ export function SignalDetailPage({
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [dialogOpen, setDialogOpen] = useState(false);
   const [mutationError, setMutationError] = useState<string | null>(null);
+  const [drawer, setDrawer] = useState<{ detail: ConversationDetail; hitIds: string[] } | null>(null);
+  const [drawerError, setDrawerError] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     const [signal, enrichmentAvailability] = await Promise.all([
@@ -67,6 +77,7 @@ export function SignalDetailPage({
   }
 
   const { enrichmentAvailability, signal } = state;
+  const eventGroups = signal.evidence_groups.filter((group) => group.group_type !== 'conversation');
   return (
     <section className="panel signal-detail" aria-label="信号详情" data-testid="signal-detail">
       <header className="detail-header detail-header--sticky">
@@ -105,31 +116,7 @@ export function SignalDetailPage({
         />
       )}
 
-      <div className="detail-summary detail-summary--wide" aria-label="信号摘要">
-        <div>
-          <span>为什么重要</span>
-          <strong>{signal.why_it_matters}</strong>
-        </div>
-        <div>
-          <span>状态</span>
-          <strong>
-            {decisionStateLabel(signal.decision_state)}
-            {signal.conclusion_code ? `，${conclusionCodeLabel(signal.conclusion_code)}` : ''}
-          </strong>
-          {signal.note && <small>{signal.note}</small>}
-        </div>
-        <div>
-          <span>用量</span>
-          <strong>{usageSummaryText(signal.usage_summary)}</strong>
-        </div>
-        <div>
-          <span>补证</span>
-          <strong>
-            {enrichmentStatusLabel(signal.enrichment_status_summary.status)}
-            {signal.enrichment_status_summary.reason_code ? `，${signal.enrichment_status_summary.reason_code}` : ''}
-          </strong>
-        </div>
-      </div>
+      <SignalDetailSummary signal={signal} />
 
       <section>
         <h3>建议动作</h3>
@@ -146,26 +133,14 @@ export function SignalDetailPage({
         onChanged={reload}
       />
 
-      <section aria-label="关联会话">
-        <h3>关联会话</h3>
-        <div className="row-list">
-          {signal.linked_conversations.length === 0 ? (
-            <p>暂无可定位会话。</p>
-          ) : signal.linked_conversations.map((item) => (
-            <div className="collector-row" key={item.conversation_ref}>
-              <div className="collector-row__identity">
-                <strong>{item.conversation_ref}</strong>
-                <small>{item.hit_count} 条命中 / {item.last_seen_at ?? '未知时间'}</small>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
+      <SignalWorkspaceChips workspaces={signal.workspace_refs ?? []} />
+      <SignalLinkedConversations conversations={signal.linked_conversations} onOpen={openLinkedConversation} />
+      {drawerError && <p role="alert">{drawerError}</p>}
 
-      <section aria-label="证据分组" data-testid="evidence-groups">
-        <h3>证据分组</h3>
+      <section aria-label="命中事件" data-testid="evidence-groups">
+        <h3>命中事件</h3>
         <div className="signal-group-list">
-          {signal.evidence_groups.map((group) => (
+          {eventGroups.map((group) => (
             <article className="signal-group" key={group.group_id}>
               <header>
                 <strong>{group.title}</strong>
@@ -176,10 +151,13 @@ export function SignalDetailPage({
                 {group.items.map((item) => (
                   <li key={item.evidence_ref}>
                     <span>{item.occurred_at ?? '无时间'}</span>
-                    <strong>{item.summary}</strong>
-                    <small>{item.content_preview}</small>
+                    <div className="signal-event-main">
+                      <strong>{item.summary}</strong>
+                      <small>{item.content_preview}</small>
+                      <ToolContextBlock context={item.tool_context} compact />
+                    </div>
                     {item.fact_id && (
-                      <button className="compact-button" onClick={() => onOpenFact?.(item.fact_id!)} type="button">
+                      <button className="compact-button" onClick={() => openEvidenceConversation(item)} type="button">
                         查看会话
                       </button>
                     )}
@@ -190,8 +168,40 @@ export function SignalDetailPage({
           ))}
         </div>
       </section>
+      {drawer && (
+        <ConversationDrawer
+          detail={drawer.detail}
+          highlightFactIds={drawer.hitIds}
+          highlightTitle="当前信号命中"
+          onClose={() => setDrawer(null)}
+        />
+      )}
     </section>
   );
+
+  async function openLinkedConversation(conversation: LinkedConversation) {
+    setDrawerError(null);
+    try {
+      const detail = await loadConversationDetail(conversation.conversation_ref);
+      setDrawer({ detail, hitIds: conversation.matched_fact_ids ?? [] });
+    } catch {
+      setDrawerError('会话详情加载失败。请稍后重试。');
+    }
+  }
+
+  async function openEvidenceConversation(item: SignalEvidenceItem) {
+    if (!item.conversation_ref) {
+      if (item.fact_id) onOpenFact?.(item.fact_id);
+      return;
+    }
+    setDrawerError(null);
+    try {
+      const detail = await loadConversationDetail(item.conversation_ref);
+      setDrawer({ detail, hitIds: item.fact_id ? [item.fact_id] : [] });
+    } catch {
+      setDrawerError('会话详情加载失败。请稍后重试。');
+    }
+  }
 
   async function runMutation(action: () => Promise<BehaviorSignalDetail>) {
     setMutationError(null);

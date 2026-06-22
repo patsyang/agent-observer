@@ -8,7 +8,7 @@ from collections import Counter
 
 from app.behavior_signals.common import dumps, loads, now_iso
 from app.behavior_signals.evidence import enrichment_entries, evidence_entries
-from app.collector_client.command_context import command_error_projection
+from app.conversations.workspace import empty_workspace, workspace_from_rows
 
 KEY_PATH_PATTERNS = (
     (re.compile(r"(^|/)\.gitignore$", re.I), "项目忽略规则"),
@@ -66,17 +66,68 @@ def conversation_refs(facts: list[sqlite3.Row]) -> list[str]:
     return sorted({fact["conversation_ref"] for fact in facts if fact["conversation_ref"]})
 
 
-def linked_conversations(facts: list[sqlite3.Row]) -> list[dict]:
+def linked_conversations(conn: sqlite3.Connection, facts: list[sqlite3.Row]) -> list[dict]:
     counts = Counter(fact["conversation_ref"] or "unknown" for fact in facts)
     last_seen: dict[str, str] = {}
+    matched_fact_ids: dict[str, list[str]] = {}
     for fact in facts:
         ref = fact["conversation_ref"] or "unknown"
         last_seen[ref] = max(last_seen.get(ref, ""), fact["occurred_at"])
-    return [
-        {"conversation_ref": ref, "hit_count": count, "last_seen_at": last_seen.get(ref)}
-        for ref, count in counts.most_common(10)
-        if ref != "unknown"
-    ]
+        matched_fact_ids.setdefault(ref, []).append(fact["fact_id"])
+    items = []
+    for ref, count in counts.most_common(10):
+        if ref == "unknown":
+            continue
+        context = _conversation_context(conn, ref)
+        items.append(
+            {
+                "conversation_ref": ref,
+                "session_ref": context["session_ref"],
+                "session_title": context["session_title"],
+                "workspace": context["workspace"],
+                "hit_count": count,
+                "last_seen_at": last_seen.get(ref),
+                "matched_fact_ids": matched_fact_ids.get(ref, []),
+            }
+        )
+    return items
+
+
+def _conversation_context(conn: sqlite3.Connection, conversation_ref: str) -> dict:
+    rows = conn.execute(
+        """
+        select *
+        from observed_facts
+        where coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id) = ?
+          and fact_type != 'collector_health'
+        order by occurred_at, fact_id
+        """,
+        (conversation_ref,),
+    ).fetchall()
+    return {
+        "session_ref": _first_row_value(rows, "session_ref"),
+        "session_title": _session_title(rows),
+        "workspace": workspace_from_rows(rows) if rows else empty_workspace(),
+    }
+
+
+def _first_row_value(rows: list[sqlite3.Row], key: str) -> str:
+    for row in rows:
+        if row[key]:
+            return str(row[key])
+    return ""
+
+
+def _session_title(rows: list[sqlite3.Row]) -> str:
+    for row in rows:
+        try:
+            refs = json.loads(row["source_refs_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        title = str(refs.get("session_title") or "").strip()
+        if title:
+            return title
+    return ""
 
 
 def primary_projection(conn: sqlite3.Connection, fact_id: str) -> dict:
@@ -99,14 +150,6 @@ def first_text(projections: list[dict], *keys: str) -> str:
 def exit_code_from_summary(summary: str) -> str:
     match = re.search(r"exit[_ ]code[:= ]+(-?\d+)", summary, re.I)
     return match.group(1) if match else ""
-
-
-def command_timeout_projection(conn: sqlite3.Connection, fact_id: str) -> dict:
-    projection = primary_projection(conn, fact_id)
-    if str(projection.get("exit_code")) == "124" or projection.get("error_kind") == "command_timeout":
-        parsed = _command_timeout_from_raw(conn, fact_id)
-        return {**projection, **parsed} if parsed else projection
-    return {}
 
 
 def risk_facts(conn: sqlite3.Connection, risk_type: str, object_type: str | None) -> list[sqlite3.Row]:
@@ -134,6 +177,9 @@ def path_hint(conn: sqlite3.Connection, fact: sqlite3.Row) -> str:
     ).fetchall()
     for row in rows:
         projection = loads(row["projection_json"])
+        changed_paths = projection.get("changed_paths")
+        if isinstance(changed_paths, list) and changed_paths:
+            return str(changed_paths[0]).replace("\\", "/")
         for key in ("path", "file_path", "target", "workdir"):
             if projection.get(key):
                 return str(projection[key]).replace("\\", "/")
@@ -193,11 +239,13 @@ def conversation_groups(conn: sqlite3.Connection, facts: list[sqlite3.Row], limi
     for ref, bucket in sorted(buckets.items(), key=lambda item: (-len(item[1]), item[0]))[:limit]:
         if ref == "unknown":
             continue
+        context = _conversation_context(conn, ref)
+        title = context["session_title"] or context["session_ref"] or f"会话 {ref}"
         groups.append(
             {
                 "group_id": f"conversation:{ref}",
                 "group_type": "conversation",
-                "title": f"会话 {ref}",
+                "title": title,
                 "summary": f"{len(bucket):,} 条命中",
                 "count": len(bucket),
                 "items": _items(conn, bucket[:5]),
@@ -274,38 +322,39 @@ def _items(conn: sqlite3.Connection, facts: list[sqlite3.Row], projections: list
             {
                 "fact_id": fact["fact_id"],
                 "evidence_ref": entry.get("evidence_ref", fact["fact_id"]),
+                "category": fact["category"],
+                "quality": fact["quality"],
+                "fact_type": fact["fact_type"],
                 "occurred_at": fact["occurred_at"],
                 "summary": fact["summary"],
                 "conversation_ref": fact["conversation_ref"],
+                "source_event_type": entry.get("source_event_type", ""),
+                "source_label": entry.get("source_label", ""),
                 "content_preview": entry.get("content_preview") or fact["content_preview"] or fact["summary"],
                 "tool_name": projection.get("tool_name") or projection.get("tool") or projection.get("name"),
                 "exit_code": projection.get("exit_code") or exit_code_from_summary(fact["summary"]),
+                "tool_context": _tool_context(projection),
             }
         )
     return items
 
 
-def _command_timeout_from_raw(conn: sqlite3.Connection, fact_id: str) -> dict:
-    row = conn.execute(
-        "select raw_content from evidence_projections where fact_id = ? and raw_content is not null order by projection_id limit 1",
-        (fact_id,),
-    ).fetchone()
-    if row is None:
-        return {}
-    try:
-        record = json.loads(row["raw_content"])
-    except json.JSONDecodeError:
-        return {}
-    projection = command_error_projection(record)
-    if projection and projection.get("is_timeout"):
-        return projection
-    payload = record.get("payload") if isinstance(record.get("payload"), dict) else {}
-    output = str(payload.get("output") or "")
-    exit_match = re.search(r"Exit code:\s*(-?\d+)", output)
-    if not exit_match or exit_match.group(1) != "124":
-        return {}
-    wall_match = re.search(r"Wall time:\s*([0-9.]+)\s*seconds", output)
-    return {"exit_code": 124, "wall_time_seconds": float(wall_match.group(1)) if wall_match else None}
+def _tool_context(projection: dict) -> dict | None:
+    if not any(projection.get(key) not in (None, "") for key in ("command", "command_excerpt", "tool_name", "exit_code", "is_timeout")):
+        return None
+    return {
+        "tool_name": str(projection.get("tool_name") or projection.get("tool") or projection.get("name") or ""),
+        "command": str(projection.get("command") or ""),
+        "command_excerpt": str(projection.get("command_excerpt") or projection.get("command") or ""),
+        "command_category": str(projection.get("command_category") or ""),
+        "exit_code": projection.get("exit_code"),
+        "is_timeout": bool(projection.get("is_timeout")),
+        "timeout_ms": projection.get("timeout_ms"),
+        "timeout_after_ms": projection.get("timeout_after_ms"),
+        "wall_time_seconds": projection.get("wall_time_seconds"),
+        "error_excerpt": str(projection.get("error_excerpt") or ""),
+        "call_id": str(projection.get("call_id") or ""),
+    }
 
 
 def _path_from_raw(raw_content: str | None) -> str:

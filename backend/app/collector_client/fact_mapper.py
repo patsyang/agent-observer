@@ -3,9 +3,10 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
+from typing import Any
 
 from app.sensitivity import sensitive_matches_from_record
-from app.collector_client.command_context import command_error_projection, command_timeout_fact
+from app.collector_client.command_context import command_error_projection, tool_failure_fact
 from app.collector_client.content_events import CONTENT_EVENTS, content_fact
 from app.collector_client.content_dedup import stamp_content_identity
 from app.collector_client.telemetry_utils import (
@@ -26,8 +27,9 @@ from app.collector_client.telemetry_utils import (
     stable_projection as _stable_projection,
     top_type as _top_type,
 )
+from app.collector_client.tool_execution import command_excerpt, command_text
 
-HIGH_RISK_OPERATIONS = {"delete", "remove", "rm", "overwrite", "chmod", "permission_change"}
+DESTRUCTIVE_OPERATIONS = {"delete", "remove", "rm", "overwrite", "chmod", "permission_change"}
 
 
 def _health_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool) -> dict:
@@ -83,11 +85,12 @@ def _record_fact(
     record: dict,
     *,
     session_titles: dict[str, str] | None = None,
+    workspace_resolver: Any | None = None,
 ) -> dict | None:
     payload = _payload(record)
     event_type = _event_type(record, payload)
     occurred_at = _occurred_at(record)
-    refs = _source_refs(collector_id, sequence, source_key, path, line_number, record, session_titles or {})
+    refs = _source_refs(collector_id, sequence, source_key, path, line_number, record, session_titles or {}, workspace_resolver)
     event_id = _source_event_id(refs["source_path_hash"], line_number, event_type, occurred_at, record)
     common = {
         "source_event_id": event_id,
@@ -109,7 +112,9 @@ def _record_fact(
         return _error_fact(common, record)
     if _has_sensitive_marker(record):
         return _sensitive_fact(common, record)
-    if risk := _risk_fact(common, record):
+    if change := _file_change_fact(common, record):
+        return change
+    if risk := _destructive_fact(common, record):
         return risk
     if tool := _tool_fact(common, record):
         return tool
@@ -121,23 +126,23 @@ def _record_fact(
 
 def _error_fact(common: dict, record: dict) -> dict:
     command_projection = command_error_projection(record)
-    if command_projection and command_projection["is_timeout"]:
-        return command_timeout_fact(common, command_projection)
+    if command_projection:
+        return tool_failure_fact(common, command_projection)
     payload = _payload(record)
     tool = _clean(record.get("tool") or record.get("command") or payload.get("name") or _payload_type(record) or "unknown_tool")
     phase = _clean(record.get("phase") or payload.get("status") or record.get("status") or _top_type(record))
     exit_code = _exit_code(record) or 1
     error_kind = _clean(record.get("error_kind") or payload.get("error") or payload.get("type") or _payload_type(record))
-    signature = f"codex_error:{tool}:{phase}:{exit_code}:{error_kind}"
+    signature = f"tool_execution_failure:{tool}:{phase}:{exit_code}:{error_kind}"
     return {
         **common,
         "fact_type": "error",
-        "category": "codex_error",
+        "category": "tool_execution_failure",
         "quality": "high",
         "severity": "high" if exit_code else "medium",
-        "summary": f"Codex {tool} 在 {phase} 阶段失败，exit_code={exit_code}，已生成错误指纹。",
+        "summary": f"工具执行失败：{tool} 在 {phase} 阶段 exit_code={exit_code}。",
         "projection": {"tool": tool, "phase": phase, "exit_code": exit_code, "error_kind": error_kind, "signature": signature},
-        "error_signature": {"signature_key": signature, "category": "codex_error"},
+        "error_signature": {"signature_key": signature, "category": "tool_execution_failure"},
     }
 
 def _usage_fact(common: dict, record: dict) -> dict:
@@ -179,7 +184,7 @@ def _usage_fact(common: dict, record: dict) -> dict:
             "activity_tag": activity_tag,
             "session_id": session_id,
             "conversation_id": conversation_id,
-            "project_ref": _ref(record.get("project") or "unknown"),
+            "project_ref": common["source_refs"].get("workspace_id") or _ref(record.get("project") or "unknown"),
             "account_ref": _ref(record.get("account") or "local"),
         },
     }
@@ -201,31 +206,63 @@ def _int(value: object) -> int:
     except (TypeError, ValueError):
         return 0
 
-def _risk_fact(common: dict, record: dict) -> dict | None:
+def _file_change_fact(common: dict, record: dict) -> dict | None:
+    payload = _payload(record)
+    if _payload_type(record) != "patch_apply_end" or not bool(payload.get("success")):
+        return None
+    changes = payload.get("changes")
+    if not isinstance(changes, dict) or not changes:
+        return None
+    paths = [str(path).replace("\\", "/") for path in changes.keys()]
+    additions = sum(_int(value.get("additions")) for value in changes.values() if isinstance(value, dict))
+    deletions = sum(_int(value.get("deletions")) for value in changes.values() if isinstance(value, dict))
+    top_dirs = _top_directories(paths)
+    return {
+        **common,
+        "fact_type": "risk",
+        "category": "file_change",
+        "quality": "high",
+        "severity": "medium",
+        "summary": f"Agent 修改了 {len(paths)} 个工作区文件，新增 {additions} 行，删除 {deletions} 行。",
+        "projection": {
+            "operation": "file_change",
+            "object_type": "workspace_file",
+            "changed_paths": paths[:200],
+            "file_count": len(paths),
+            "additions": additions,
+            "deletions": deletions,
+            "top_directories": top_dirs,
+        },
+        "risk": {"risk_type": "file_change", "severity": "medium", "object_type": "workspace_file"},
+    }
+
+
+def _destructive_fact(common: dict, record: dict) -> dict | None:
     payload = _payload(record)
     args = _arguments(payload)
-    command_category = _command_category(str(args.get("command", "")))
+    command = command_text(args)
+    command_category = _command_category(command)
     operation = _clean(record.get("operation") or record.get("action") or args.get("operation") or payload.get("name") or record.get("tool") or "")
     path = _clean(record.get("path") or record.get("target") or args.get("path") or args.get("workdir") or "")
-    patch_risk = _payload_type(record) == "patch_apply_end" and bool(payload.get("success"))
-    if operation not in HIGH_RISK_OPERATIONS and command_category != "destructive" and "delete" not in path and "auth" not in path.lower() and not patch_risk:
+    if operation not in DESTRUCTIVE_OPERATIONS and command_category not in {"destructive", "permission_change"} and "delete" not in path:
         return None
     object_type = _object_type(path)
     return {
         **common,
         "fact_type": "risk",
-        "category": "high_risk_operation",
+        "category": "destructive_operation",
         "quality": "high",
-        "severity": "medium",
-        "summary": f"检测到高风险本地操作类别：{operation or command_category or 'workspace_change'}，对象类型 {object_type}。",
+        "severity": "high",
+        "summary": f"检测到破坏性本地操作：{operation or command_category}，对象类型 {object_type}。",
         "projection": {
-            "operation": operation or command_category or "workspace_change",
+            "operation": operation or command_category,
             "object_type": object_type,
+            "command_excerpt": command_excerpt(command),
             "path_hash": _hash(path)[:16],
             "command_category": command_category,
             "change_count": _change_count(payload),
         },
-        "risk": {"risk_type": "high_risk_operation", "severity": "medium", "object_type": object_type},
+        "risk": {"risk_type": "destructive_operation", "severity": "high", "object_type": object_type},
     }
 
 def _sensitive_fact(common: dict, record: dict) -> dict:
@@ -235,10 +272,10 @@ def _sensitive_fact(common: dict, record: dict) -> dict:
     return {
         **common,
         "fact_type": "risk",
-        "category": "sensitive_touch",
+        "category": "sensitive_content_exposure",
         "quality": "high",
         "severity": "high",
-        "summary": f"Codex 会话触达高置信敏感值：{', '.join(categories) if categories else 'unknown'}。",
+        "summary": f"Agent 会话暴露高置信敏感内容：{', '.join(categories) if categories else 'unknown'}。",
         "projection": {
             "object_type": object_type,
             "category_count": len(categories),
@@ -246,7 +283,7 @@ def _sensitive_fact(common: dict, record: dict) -> dict:
             "sensitive_matches": matches,
             "sensitivity_confidence": "high",
         },
-        "risk": {"risk_type": "sensitive_object_touch", "severity": "high", "object_type": object_type},
+        "risk": {"risk_type": "sensitive_content_exposure", "severity": "high", "object_type": object_type},
     }
 
 def _low_evidence_fact(common: dict, record: dict) -> dict:
@@ -280,7 +317,7 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         return None
     args = _arguments(payload)
     tool_name = _clean(payload.get("name") or payload_type)
-    command_category = _command_category(str(args.get("command", "")))
+    command_category = _command_category(command_text(args))
     exit_code = _exit_code(record)
     if exit_code and exit_code != 0:
         return None
@@ -302,6 +339,14 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         },
     }
 
+
+def _top_directories(paths: list[str]) -> list[str]:
+    counts: dict[str, int] = {}
+    for path in paths:
+        directory = "/".join(path.split("/")[:2]) if "/" in path else path
+        counts[directory] = counts.get(directory, 0) + 1
+    return [path for path, _ in sorted(counts.items(), key=lambda item: (-item[1], item[0]))[:5]]
+
 def _source_refs(
     collector_id: str,
     sequence: int,
@@ -310,6 +355,7 @@ def _source_refs(
     line_number: int,
     record: dict,
     session_titles: dict[str, str] | None = None,
+    workspace_resolver: Any | None = None,
 ) -> dict:
     payload = _payload(record)
     session_ref = record.get("session_id") or record.get("session") or payload.get("id") or path.stem
@@ -332,6 +378,8 @@ def _source_refs(
     }
     if title := _session_title(session_titles or {}, record, payload, path, session_ref):
         refs["session_title"] = title
+    if workspace_resolver is not None:
+        refs.update({key: value for key, value in workspace_resolver.resolve(path, record).items() if value})
     return refs
 
 def _session_title(session_titles: dict[str, str], record: dict, payload: dict, path: Path, session_ref: object) -> str:
@@ -362,12 +410,14 @@ def _source_event_id(path_hash: str, line_number: int, event_type: str, occurred
 
 def _is_error(record: dict) -> bool:
     payload = _payload(record)
+    if _payload_type(record) in {"function_call_output", "custom_tool_call_output"}:
+        exit_code = _exit_code(record)
+        if exit_code is not None:
+            return exit_code != 0
     status = str(record.get("status") or record.get("level") or payload.get("status") or "").lower()
     if status in {"error", "failed", "failure"}:
         return True
     if _payload_type(record) == "patch_apply_end" and payload.get("success") is False:
-        return True
-    if (_payload_type(record) in {"function_call_output", "custom_tool_call_output"}) and (_exit_code(record) or 0) != 0:
         return True
     try:
         return int(record.get("exit_code") or 0) != 0

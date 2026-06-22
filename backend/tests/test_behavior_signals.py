@@ -14,7 +14,7 @@ def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
         "fact_type": fact_type,
         "category": category,
         "quality": "high",
-        "severity": "high" if category == "codex_error" else "medium",
+        "severity": "high" if category in {"tool_execution_failure", "workflow_step_failure", "workflow_step_timeout"} else "medium",
         "summary": f"{category} {event_id}",
         "occurred_at": "2026-06-18T10:00:00+00:00",
         "span": f"event:{event_id}",
@@ -22,6 +22,22 @@ def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
         "source_refs": {"conversation_ref": "conversation-1"},
         "source_specific": {"codex_event_type": "tool_result"},
     }
+
+
+def _with_workspace(item: dict, label: str, path: str = "D:/workspace/agentic_factory/apps/agent-observer") -> dict:
+    refs = dict(item.get("source_refs") or {})
+    refs.update(
+        {
+            "workspace_id": f"codex:{label.lower().replace(' ', '-')}",
+            "workspace_path": path,
+            "workspace_label": label,
+            "workspace_alias_source": "codex_global_state",
+            "workspace_confidence": "high",
+            "agent_type": "codex",
+        }
+    )
+    item["source_refs"] = refs
+    return item
 
 
 def _ingest(conn, items: list[dict]) -> None:
@@ -39,26 +55,134 @@ def _ingest(conn, items: list[dict]) -> None:
     )
 
 
-def test_tool_failure_cluster_is_explainable_signal(tmp_path):
-    item = _base_item("tool-failure-1", "codex_error", "error")
+def test_tool_execution_failure_is_explainable_signal(tmp_path):
+    prompt = _base_item("prompt-1", "codex_prompt", "event")
+    prompt["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "修复工具失败上下文"}
+    prompt["projection"] = {"role": "user", "prompt_text": "请修复工具失败"}
+    prompt["raw_content"] = {"text": "请修复工具失败"}
+    item = _base_item("tool-failure-1", "tool_execution_failure", "error")
+    item.update(
+        {
+            "summary": "function_call_output failed with exit_code=1",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 1,
+                "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+                "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+                "command_category": "shell",
+                "error_excerpt": "Port 8765 is already in use.",
+            },
+            "error_signature": {"signature_key": "tool_execution_failure:exec_command:abc:1", "category": "tool_execution_failure"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [prompt, item])
+        result = rebuild_signals(conn, reason="test")
+        queue = list_signals(conn)
+        signal = next(item for item in queue["signals"] if item["signal_kind"] == "tool_execution_failure")
+        detail = get_signal_detail(conn, signal["signal_id"])
+
+    assert result["updated"] == 1
+    assert signal["title"] == "本会话 1 次 exec_command 执行失败，退出码 1"
+    assert detail["evidence_groups"][0]["group_type"] == "failure"
+    assert detail["evidence_groups"][0]["title"] == "命中事件"
+    assert detail["evidence_groups"][0]["items"][0]["tool_context"]["command"] == "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd"
+    assert detail["evidence_groups"][0]["items"][0]["tool_context"]["error_excerpt"] == "Port 8765 is already in use."
+    assert detail["linked_conversations"][0]["conversation_ref"] == "conversation-1"
+    assert detail["linked_conversations"][0]["session_title"] == "修复工具失败上下文"
+    assert detail["linked_conversations"][0]["matched_fact_ids"] == [item["source_event_id"]]
+
+
+def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tmp_path):
+    first = _base_item("tool-failure-a", "tool_execution_failure", "error")
+    first["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "分析故事定义与类型"}
+    first.update(
+        {
+            "summary": "工具执行失败：npm test，exit_code=1。",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 1,
+                "command": "npm test",
+                "command_excerpt": "npm test",
+                "command_category": "test",
+                "error_excerpt": "1 failed",
+            },
+            "error_signature": {"signature_key": "tool_execution_failure:exec_command:cmd-a:1", "category": "tool_execution_failure"},
+        }
+    )
+    second = _base_item("tool-failure-b", "tool_execution_failure", "error")
+    second["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "分析故事定义与类型"}
+    second.update(
+        {
+            "summary": "工具执行失败：python -m pytest，exit_code=1。",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 1,
+                "command": "python -m pytest",
+                "command_excerpt": "python -m pytest",
+                "command_category": "test",
+                "error_excerpt": "2 failed",
+            },
+            "error_signature": {"signature_key": "tool_execution_failure:exec_command:cmd-b:1", "category": "tool_execution_failure"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [first, second])
+        signals = [item for item in list_signals(conn, window="all")["signals"] if item["signal_kind"] == "tool_execution_failure"]
+        detail = get_signal_detail(conn, signals[0]["signal_id"])
+
+    assert len(signals) == 1
+    assert signals[0]["title"] == "本会话 2 次 exec_command 执行失败，退出码 1"
+    assert signals[0]["occurrence_count"] == 2
+    assert [group["group_type"] for group in detail["evidence_groups"]] == ["failure"]
+    assert detail["linked_conversations"][0]["session_title"] == "分析故事定义与类型"
+    assert [item["tool_context"]["command"] for item in detail["evidence_groups"][0]["items"]] == ["npm test", "python -m pytest"]
+
+
+def test_signals_expose_and_filter_workspace_scope(tmp_path):
+    item = _base_item("tool-failure-workspace", "tool_execution_failure", "error")
     item.update(
         {
             "summary": "function_call_output failed with exit_code=1",
             "projection": {"tool_name": "exec_command", "exit_code": 1},
-            "error_signature": {"signature_key": "function_call_output:exec:exit:1", "category": "codex_error"},
+            "error_signature": {"signature_key": "tool_execution_failure:workspace:exit:1", "category": "tool_execution_failure"},
         }
     )
+    _with_workspace(item, "Agent Observer")
     with connect(tmp_path / "observer.sqlite") as conn:
         _ingest(conn, [item])
-        result = rebuild_signals(conn, reason="test")
-        queue = list_signals(conn)
-        signal = next(item for item in queue["signals"] if item["signal_kind"] == "tool_failure_cluster")
-        detail = get_signal_detail(conn, signal["signal_id"])
+        queue = list_signals(conn, window="all", workspace_query="observer")
+        detail = get_signal_detail(conn, queue["signals"][0]["signal_id"])
 
-    assert result["updated"] == 1
-    assert signal["title"].startswith("工具失败集中出现")
-    assert detail["evidence_groups"][0]["group_type"] == "failure"
-    assert detail["linked_conversations"][0]["conversation_ref"] == "conversation-1"
+    assert queue["total"] == 1
+    assert queue["signals"][0]["workspace_summary"]["mode"] == "single"
+    assert queue["signals"][0]["workspace_summary"]["label"] == "Agent Observer"
+    assert detail["workspace_refs"][0]["workspace_label"] == "Agent Observer"
+
+
+def test_signals_summarize_multiple_workspaces_and_filter_by_any_workspace(tmp_path):
+    first = _base_item("tool-failure-workspace-a", "tool_execution_failure", "error")
+    first.update(
+        {
+            "projection": {"tool_name": "exec_command", "exit_code": 1},
+            "error_signature": {"signature_key": "tool_execution_failure:multi:exit:1", "category": "tool_execution_failure"},
+        }
+    )
+    _with_workspace(first, "Agent Observer", "D:/workspace/agentic_factory/apps/agent-observer")
+    second = _base_item("tool-failure-workspace-b", "tool_execution_failure", "error")
+    second.update(
+        {
+            "projection": {"tool_name": "exec_command", "exit_code": 1},
+            "error_signature": {"signature_key": "tool_execution_failure:multi:exit:1", "category": "tool_execution_failure"},
+        }
+    )
+    _with_workspace(second, "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [first, second])
+        queue = list_signals(conn, window="all", workspace_query="knowledge")
+
+    assert queue["total"] == 1
+    assert queue["signals"][0]["workspace_summary"] == {"mode": "single", "label": "Knowledge Kit", "count": 1}
 
 
 def test_usage_events_do_not_generate_behavior_signals(tmp_path):
@@ -71,33 +195,81 @@ def test_usage_events_do_not_generate_behavior_signals(tmp_path):
     assert queue["signals"] == []
 
 
-def test_workspace_change_burst_groups_by_conversation(tmp_path):
+def test_change_volume_anomaly_groups_by_conversation(tmp_path):
     items = []
     for index in range(20):
-        item = _base_item(f"workspace-{index}", "high_risk_operation")
+        item = _base_item(f"workspace-{index}", "file_change")
         item.update(
             {
                 "summary": f"workspace file changed src/file_{index}.py",
-                "projection": {"object_type": "workspace_file", "path": f"src/file_{index}.py"},
-                "risk": {"risk_type": "high_risk_operation", "severity": "medium", "object_type": "workspace_file"},
+                "projection": {
+                    "object_type": "workspace_file",
+                    "changed_paths": [f"src/file_{index}.py"],
+                    "file_count": 1,
+                    "additions": 30,
+                    "deletions": 0,
+                },
+                "risk": {"risk_type": "file_change", "severity": "medium", "object_type": "workspace_file"},
             }
         )
         items.append(item)
     with connect(tmp_path / "observer.sqlite") as conn:
         _ingest(conn, items)
-        detail = next(item for item in list_signals(conn, window="all")["signals"] if item["signal_kind"] == "workspace_change_burst")
+        detail = next(item for item in list_signals(conn, window="all")["signals"] if item["signal_kind"] == "change_volume_anomaly")
 
-    assert detail["affected_scope"]["operation_count"] == 20
     assert detail["affected_scope"]["file_count"] == 20
 
 
+def test_change_volume_anomaly_skips_missing_conversation_ref(tmp_path):
+    item = _base_item("workspace-no-conversation", "file_change")
+    item["source_refs"] = {}
+    item.update(
+        {
+            "summary": "workspace files changed without conversation",
+            "projection": {"object_type": "workspace_file", "changed_paths": [f"src/file_{index}.py" for index in range(20)], "additions": 600},
+            "risk": {"risk_type": "file_change", "severity": "medium", "object_type": "workspace_file"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [item])
+        queue = list_signals(conn, window="all")
+
+    assert all(signal["signal_kind"] != "change_volume_anomaly" for signal in queue["signals"])
+
+
+def test_workflow_timeout_signal_is_actionable_and_enrichable(tmp_path):
+    item = _base_item("workflow-timeout-1", "workflow_step_timeout", "error")
+    item.update(
+        {
+            "summary": "Workflow 步骤超时：spec-driven / run_123",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 124,
+                "workflow": "spec-driven",
+                "run_id": "run_123",
+                "command": "python scripts/ao.py spec-driven resume --run-id run_123",
+                "command_fingerprint": "abc123",
+                "wall_time_seconds": 600,
+            },
+            "error_signature": {"signature_key": "workflow_step_timeout:spec-driven:run_123:124", "category": "workflow_step_timeout"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [item])
+        signal = next(item for item in list_signals(conn, window="all")["signals"] if item["signal_kind"] == "workflow_step_timeout")
+        availability = get_enrichment_availability(conn, signal["signal_id"])
+
+    assert "unknown" not in signal["title"]
+    assert availability["capabilities"][0]["state"] == "queueable"
+
+
 def test_key_file_change_detects_config_entry_paths(tmp_path):
-    item = _base_item("key-file-1", "high_risk_operation")
+    item = _base_item("key-file-1", "file_change")
     item.update(
         {
             "summary": "changed .gitignore",
-            "projection": {"object_type": "configuration", "path": ".gitignore"},
-            "risk": {"risk_type": "high_risk_operation", "severity": "medium", "object_type": "configuration"},
+            "projection": {"object_type": "configuration", "changed_paths": [".gitignore"]},
+            "risk": {"risk_type": "file_change", "severity": "medium", "object_type": "configuration"},
         }
     )
     with connect(tmp_path / "observer.sqlite") as conn:
@@ -108,11 +280,11 @@ def test_key_file_change_detects_config_entry_paths(tmp_path):
 
 
 def test_signal_decision_and_enrichment_use_signal_id(tmp_path):
-    item = _base_item("tool-failure-2", "codex_error", "error")
+    item = _base_item("tool-failure-2", "tool_execution_failure", "error")
     item.update(
         {
             "projection": {"tool_name": "exec_command", "exit_code": 1},
-            "error_signature": {"signature_key": "function_call_output:exec:exit:1", "category": "codex_error"},
+            "error_signature": {"signature_key": "tool_execution_failure:exec:exit:1", "category": "tool_execution_failure"},
         }
     )
     with connect(tmp_path / "observer.sqlite") as conn:

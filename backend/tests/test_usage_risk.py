@@ -92,7 +92,7 @@ def _usage_risk_batch() -> dict:
             {
                 "source_event_id": "risk-sensitive-001",
                 "fact_type": "risk",
-                "category": "sensitive_touch",
+                "category": "sensitive_content_exposure",
                 "quality": "high",
                 "severity": "high",
                 "summary": "Sensitive configuration touched through raw category",
@@ -101,7 +101,7 @@ def _usage_risk_batch() -> dict:
                 "raw_hash": "hash-risk-sensitive",
                 "projection": {"object_type": "configuration", "count": 1},
                 "risk": {
-                    "risk_type": "sensitive_object_touch",
+                    "risk_type": "sensitive_content_exposure",
                     "severity": "high",
                     "object_type": "configuration",
                 },
@@ -193,7 +193,7 @@ def test_risk_summary_uses_projection_refs_and_object_counts(tmp_path):
         detailed = get_risk_summary(conn, mode="detailed")
 
     signal = summary["signals"][0]
-    assert signal["risk_type"] == "sensitive_object_touch"
+    assert signal["risk_type"] == "sensitive_content_exposure"
     assert signal["object_type"] == "configuration"
     assert signal["count"] == 1
     assert signal["highest_severity"] == "high"
@@ -236,7 +236,7 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
                     {
                         "source_event_id": "risk-token-telemetry",
                         "fact_type": "risk",
-                        "category": "sensitive_touch",
+                        "category": "sensitive_content_exposure",
                         "quality": "high",
                         "severity": "high",
                         "summary": "Legacy token false positive",
@@ -250,14 +250,14 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
                         },
                         "upload_raw": True,
                         "raw_content": '{"payload":{"arguments":"git commit -m \\"token telemetry contract\\""}}',
-                        "risk": {"risk_type": "sensitive_object_touch", "severity": "high", "object_type": "credential"},
+                        "risk": {"risk_type": "sensitive_content_exposure", "severity": "high", "object_type": "credential"},
                         "source_refs": {"conversation_ref": "conversation-token-telemetry"},
                         "source_specific": {"codex_event_type": "function_call"},
                     },
                     {
                         "source_event_id": "risk-auth-status",
                         "fact_type": "risk",
-                        "category": "sensitive_touch",
+                        "category": "sensitive_content_exposure",
                         "quality": "high",
                         "severity": "high",
                         "summary": "Legacy auth reference",
@@ -271,7 +271,7 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
                         },
                         "upload_raw": True,
                         "raw_content": '{"payload":{"arguments":"uv run oh auth status"}}',
-                        "risk": {"risk_type": "sensitive_object_touch", "severity": "high", "object_type": "credential"},
+                        "risk": {"risk_type": "sensitive_content_exposure", "severity": "high", "object_type": "credential"},
                         "source_refs": {"conversation_ref": "conversation-auth"},
                         "source_specific": {"codex_event_type": "function_call"},
                     },
@@ -281,5 +281,5 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
         summary = get_risk_summary(conn)
 
     signals = {(signal["risk_type"], signal["object_type"]): signal for signal in summary["signals"]}
-    assert ("sensitive_object_touch", "credential") not in signals
-    assert ("sensitive_object_touch", "auth") not in signals
+    assert ("sensitive_content_exposure", "credential") not in signals
+    assert ("sensitive_content_exposure", "auth") not in signals

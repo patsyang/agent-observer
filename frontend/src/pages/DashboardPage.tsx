@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, SignalsResponse, TimeWindow, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
@@ -6,21 +7,17 @@ import { SignalCard } from '../components/SignalCard';
 import { TimeWindowTabs } from '../components/TimeWindowTabs';
 import { formatNumber } from '../utils/numberFormat';
 import {
-  collectorRuntimeLabel,
   emptyUsage,
   formatDateTime,
   latestFactTitle,
-  qualitySummary,
-  queueSummary,
-  reasonCodeLabel,
-  sumBacklog,
 } from './dashboardLabels';
+import { DashboardAccessPanel } from './DashboardAccessPanel';
 import { UsageGovernanceSummary } from './UsageGovernanceSummary';
 import { UsageTrendChart } from './UsageTrendChart';
 
 interface Props {
   loadDashboardSummary: (window: TimeWindow) => Promise<DashboardSummary>;
-  loadSignals: (options: { window: TimeWindow; page?: number; page_size?: number }) => Promise<SignalsResponse>;
+  loadSignals: (options: { window: TimeWindow; workspace_query?: string; page?: number; page_size?: number }) => Promise<SignalsResponse>;
   loadUsageSummary: (window: TimeWindow) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindow) => Promise<RiskSummary>;
   onOpenSignal: (signalId: string) => void;
@@ -57,8 +54,14 @@ export function DashboardPage({
 }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [window, setWindow] = useState<TimeWindow>('1h');
+  const [workspaceQuery, setWorkspaceQuery] = useState('');
   const [refreshToken, setRefreshToken] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
+  const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null);
+
+  useEffect(() => {
+    setSidebarSlot(document.getElementById('dashboard-sidebar-slot'));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -84,7 +87,7 @@ export function DashboardPage({
           setLastRefresh(new Date().toISOString());
         }
         return Promise.allSettled([
-          loadSignals({ window, page: 1, page_size: 20 }),
+          loadSignals({ window, workspace_query: workspaceQuery.trim(), page: 1, page_size: 20 }),
           loadUsageSummary(window),
           loadRiskSummary(window)
         ]);
@@ -108,7 +111,7 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, window]);
+  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, window, workspaceQuery]);
 
   if (state.status === 'loading') {
     return (
@@ -137,13 +140,27 @@ export function DashboardPage({
 
   return (
     <div className="dashboard workbench" aria-label="行为风险信号台" data-testid="dashboard-page">
+      {sidebarSlot && createPortal(
+        <DashboardAccessPanel
+          activeSignalCount={activeSignals.length}
+          collectors={state.collectors}
+          facts={state.facts}
+          onlineCount={onlineCollectors.length}
+        />,
+        sidebarSlot
+      )}
       <section className="context-bar">
-        <div>
-          <strong>行为风险信号台</strong>
-          <span>默认只看最近 1 小时；信号队列只放可以判断和下钻的行为风险模式。</span>
-        </div>
         <div className="context-actions">
           <TimeWindowTabs value={window} onChange={setWindow} />
+          <label className="compact-filter">
+            工作区
+            <input
+              aria-label="筛选工作区"
+              onChange={(event) => setWorkspaceQuery(event.target.value)}
+              placeholder="别名/路径"
+              value={workspaceQuery}
+            />
+          </label>
           <button className="compact-button" onClick={() => setRefreshToken((value) => value + 1)} type="button">
             刷新
           </button>
@@ -167,43 +184,12 @@ export function DashboardPage({
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
       </section>
 
-      <UsageTrendChart usage={state.usage} />
+      <div className="usage-row" data-testid="usage-row">
+        <UsageTrendChart usage={state.usage} />
+        <UsageGovernanceSummary usage={state.usage} risks={state.risks} compact pendingSignalCount={state.signals.total ?? activeSignals.length} />
+      </div>
 
       <div className="workbench-grid">
-        <aside className="panel flush workbench-side" aria-label="观测上下文">
-          <div className="panel-header">
-            <h2>接入与筛选</h2>
-            <span className={onlineCollectors.length ? 'badge green' : 'badge amber'}>
-              {onlineCollectors.length ? '已收到心跳' : '等待采集器'}
-            </span>
-          </div>
-          <div className="panel-body">
-            <div className="context-stack">
-              <Mini label="命中质量" value={qualitySummary(state.facts)} />
-              <Mini label="待传 outbox" value={formatNumber(sumBacklog(state.collectors))} />
-              <Mini label="重点队列" value={queueSummary(activeSignals.length)} />
-            </div>
-            {state.collectors.collectors.length === 0 ? (
-              <p>还没有采集器注册。请下载 Windows 包并运行 start。</p>
-            ) : (
-              <div className="row-list">
-                {state.collectors.collectors.slice(0, 4).map((collector) => (
-                  <div className="collector-row" key={collector.collector_id}>
-                    <div className="collector-row__identity">
-                      <strong>{collector.display_name}</strong>
-                      <small>{collector.collector_id}</small>
-                    </div>
-                    <span className="collector-row__status">
-                      {collectorRuntimeLabel(collector.source_status, collector.runtime_phase)} / {reasonCodeLabel(collector.reason_code)}
-                    </span>
-                    <span className="badge teal">backlog {formatNumber(collector.outbox_backlog)}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        </aside>
-
         <section className="panel flush signal-workbench" aria-label="行为风险信号" data-testid="signal-queue">
           <div className="panel-header">
             <h2>行为风险信号</h2>
@@ -224,9 +210,6 @@ export function DashboardPage({
           </div>
         </section>
 
-        <aside className="side-stack" aria-label="用量和风险">
-          <UsageGovernanceSummary usage={state.usage} risks={state.risks} />
-        </aside>
       </div>
     </div>
   );

@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Iterable
 
 from app.collector_client.command_context import attach_call_context
+from app.collector_client.workspace_scope import workspace_hint_from_file
 from app.collector_client.telemetry_utils import (
     hash_value as _hash,
     occurred_at as _occurred_at,
@@ -19,6 +20,7 @@ def _incremental_records(sessions_dir: Path, cutoff: datetime, cursor: dict, lim
     for _, path, stat in _candidate_files(sessions_dir, cutoff):
         if emitted >= limit:
             break
+        workspace_hint = workspace_hint_from_file(path)
         path_hash = _hash(path.as_posix())
         sources = cursor.setdefault("sources", {})
         file_state = sources.get(path_hash) if isinstance(sources, dict) else None
@@ -45,7 +47,7 @@ def _incremental_records(sessions_dir: Path, cutoff: datetime, cursor: dict, lim
             cursor,
             max_records=max(1, limit - emitted),
         ):
-            yield source_key, path, line_number, record
+            yield source_key, path, line_number, _attach_workspace_hint(record, workspace_hint)
             emitted += 1
             file_state.update(
                 {
@@ -163,6 +165,7 @@ def _recent_tail_records(
         if cursor is not None and not _should_tail_v2_file(cursor, path, stat):
             continue
         min_line = _v2_tail_min_line(cursor, path) if cursor is not None else 0
+        workspace_hint = workspace_hint_from_file(path)
         records = [(line_no, record) for line_no, record in _tail_records(path, max_records=max(1, max_records)) if line_no > min_line]
         contextual = attach_call_context([*_stored_call_context_rows(cursor or {}), *records])
         _remember_call_context(cursor or {}, [(line_no, 0, record) for line_no, record in records])
@@ -171,7 +174,7 @@ def _recent_tail_records(
             if line_number not in tail_lines:
                 continue
             source_key = f"{path.as_posix()}:{line_number:08d}"
-            yield source_key, path, line_number, record
+            yield source_key, path, line_number, _attach_workspace_hint(record, workspace_hint)
 
 def _should_tail_v2_file(cursor: dict, path: Path, stat: object) -> bool:
     sources = cursor.get("sources")
@@ -239,6 +242,14 @@ def _count_newlines_before(path: Path, byte_offset: int) -> int:
     except OSError:
         return 0
     return count
+
+
+def _attach_workspace_hint(record: dict, workspace_hint: dict) -> dict:
+    if not workspace_hint or _payload(record).get("type") == "session_meta":
+        return record
+    enriched = dict(record)
+    enriched["_workspace_hint"] = workspace_hint
+    return enriched
 
 def _parse_records(text: str) -> Iterable[tuple[int, dict]]:
     stripped = text.strip()

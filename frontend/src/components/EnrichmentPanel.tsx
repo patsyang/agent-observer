@@ -19,8 +19,8 @@ export function EnrichmentPanel({ signalId, availability, requestEnrichment, can
   const [message, setMessage] = useState<string | null>(null);
 
   return (
-    <section aria-label="信号补证操作" data-testid="enrichment-panel">
-      <h3>信号补证</h3>
+    <section aria-label="补充排查上下文" data-testid="enrichment-panel">
+      <h3>补充排查上下文</h3>
       {activeJob && (
         <div className="enrichment-status">
           <p>

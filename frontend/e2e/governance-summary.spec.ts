@@ -61,7 +61,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
         {
           source_event_id: `e2e-risk-sensitive-${suffix}`,
           fact_type: 'risk',
-          category: 'sensitive_touch',
+          category: 'sensitive_content_exposure',
           quality: 'high',
           severity: 'high',
           summary: 'E2E sensitive configuration touched',
@@ -70,7 +70,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
           raw_hash: 'hash-e2e-risk-sensitive',
           projection: { object_type: 'configuration', count: 1 },
           risk: {
-            risk_type: 'sensitive_object_touch',
+            risk_type: 'sensitive_content_exposure',
             severity: 'high',
             object_type: 'configuration'
           },
@@ -88,7 +88,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
   await expect(page.getByTestId('usage-governance')).toBeVisible({ timeout: 15000 });
   await expect(page.getByTestId('usage-rollup-implementation')).toContainText('120');
   await expect(page.getByTestId('usage-rollup-bug_fix')).toContainText('40');
-  await expect(page.getByTestId('risk-signal-sensitive_object_touch-configuration')).toContainText('1');
+  await expect(page.getByTestId('risk-signal-sensitive_content_exposure-configuration')).toContainText('1');
 
   const usage = await request.get(`${E2E_API_BASE}/api/usage/summary`);
   const usageBody = await usage.json();
