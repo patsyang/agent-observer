@@ -1763,6 +1763,20 @@ textarea {
   margin: 0 0 8px;
 }
 
+.usage-trend-header-meta {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.usage-trend-header-meta .badge {
+  max-width: 100%;
+  white-space: normal;
+}
+
 .usage-trend-legend {
   align-items: center;
   color: #475467;
@@ -1770,7 +1784,6 @@ textarea {
   flex-wrap: wrap;
   font-size: 12px;
   gap: 12px;
-  margin-bottom: 6px;
 }
 
 .usage-trend-legend span {
@@ -1780,10 +1793,10 @@ textarea {
 }
 
 .usage-trend-swatch {
-  border-radius: 999px;
+  border-radius: 2px;
   display: inline-block;
-  height: 3px;
-  width: 18px;
+  height: 10px;
+  width: 10px;
 }
 
 .usage-trend-swatch.token {
@@ -1801,7 +1814,7 @@ textarea {
 
 .usage-trend-chart {
   display: block;
-  height: 140px;
+  height: 158px;
   max-width: none;
   min-width: 560px;
   overflow: visible;
@@ -1814,38 +1827,28 @@ textarea {
   stroke-width: 1;
 }
 
-.usage-trend-line {
-  fill: none;
-  stroke: #16795b;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-  stroke-width: 3;
+.usage-trend-bar {
+  fill: #16795b;
 }
 
-.usage-trend-line.cache {
-  stroke: #b54708;
-  stroke-width: 2.5;
-}
-
-.usage-trend-dot {
-  fill: #ffffff;
-  stroke: #16795b;
-  stroke-width: 2;
-}
-
-.usage-trend-dot.cache {
-  stroke: #b54708;
+.usage-trend-bar.cache {
+  fill: #b54708;
 }
 
 .usage-trend-value {
-  fill: #344054;
+  fill: #16795b;
   font-size: 11px;
   font-weight: 700;
 }
 
 .usage-trend-value.cache {
-  fill: #93370d;
+  fill: #b54708;
   font-weight: 600;
+}
+
+.usage-trend-axis-label {
+  fill: #667085;
+  font-size: 10px;
 }
 
 .usage-trend-footer {

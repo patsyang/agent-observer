@@ -137,7 +137,7 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('用量趋势'));
     expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('使用与风险治理'));
     expect(await screen.findByTestId('dashboard-sidebar-context')).toHaveTextContent('接入与筛选');
-    expect(screen.getByLabelText('选择时间范围内 token 用量与缓存命中折线图')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择时间范围内真实消耗 token 与缓存命中 token 柱状图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('行为风险信号')).toBeInTheDocument();
     expect(screen.queryByText('行为风险信号台')).not.toBeInTheDocument();
@@ -154,7 +154,7 @@ describe('DashboardPage', () => {
     expect(within(governance).getByText('3,175')).toBeInTheDocument();
     expect(within(governance).getByText('900')).toBeInTheDocument();
     expect(within(governance).getByText('0')).toBeInTheDocument();
-    expect(screen.getByText(/缓存命中率 30.0%/)).toBeInTheDocument();
+    expect(screen.getByText(/缓存 900（30.0%）/)).toBeInTheDocument();
     expect(within(governance).queryByText('未知活动')).not.toBeInTheDocument();
     expect(within(governance).queryByText('模型调用有效 token')).not.toBeInTheDocument();
     expect(within(governance).queryByText('当前队列待看')).not.toBeInTheDocument();

@@ -1,39 +1,58 @@
+import { useEffect, useRef, useState } from 'react';
+
 import type { UsageSummary } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
-import { formatDateTime } from './dashboardLabels';
 
 export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
+  const chartHostRef = useRef<HTMLDivElement | null>(null);
+  const [containerWidth, setContainerWidth] = useState(0);
   const points = usage.trend ?? [];
   const pointValues = points.map((point) => point.effective_units);
   const cachedValues = points.map((point) => point.cached_input_units);
   const max = Math.max(1, ...pointValues, ...cachedValues);
-  const total = usage.totals.effective_units;
+  const totalInput = usage.totals.input_token_units;
+  const effectiveTotal = usage.totals.effective_units;
   const cachedTotal = usage.totals.cached_input_units;
   const effectivePeak = Math.max(...pointValues);
   const peakIndex = pointValues.indexOf(effectivePeak);
   const peakPoint = points[peakIndex];
-  const width = Math.max(560, Math.max(1, points.length) * 96);
-  const height = 140;
-  const plotTop = 24;
-  const plotHeight = 72;
+  const minWidth = Math.max(560, Math.max(1, points.length) * 96);
+  const width = Math.max(minWidth, containerWidth);
+  const height = 158;
+  const valueLabelTop = 15;
+  const valueLabelGap = 14;
+  const plotTop = 50;
+  const plotHeight = 56;
   const xStart = 24;
   const xEnd = width - 24;
-  const linePath = (values: number[]) => points
-    .map((_point, index) => {
-      const x = points.length <= 1 ? width / 2 : xStart + (index / (points.length - 1)) * (xEnd - xStart);
-      const value = values[index];
-      const y = plotTop + plotHeight - (value / max) * plotHeight;
-      return `${index === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(' ');
-  const tokenPath = linePath(pointValues);
-  const cachedPath = linePath(cachedValues);
+  const groupWidth = points.length <= 1 ? xEnd - xStart : (xEnd - xStart) / points.length;
+  const barWidth = Math.max(8, Math.min(18, groupWidth * 0.18));
+  const valueLabelRightOffset = Math.min(44, groupWidth * 0.42);
+
+  useEffect(() => {
+    const node = chartHostRef.current;
+    if (!node) return undefined;
+    const updateWidth = () => setContainerWidth(Math.floor(node.clientWidth));
+    updateWidth();
+    if (typeof ResizeObserver === 'undefined') return undefined;
+    const observer = new ResizeObserver(updateWidth);
+    observer.observe(node);
+    return () => observer.disconnect();
+  }, [points.length]);
 
   return (
     <section className="panel flush usage-trend" aria-label="用量趋势" data-testid="usage-trend">
       <div className="panel-header">
         <h2>用量趋势</h2>
-        <span className="badge teal">{formatNumber(total)} token / 缓存 {formatNumber(cachedTotal)}</span>
+        <div className="usage-trend-header-meta">
+          <div className="usage-trend-legend" aria-label="用量趋势图例">
+            <span><i className="usage-trend-swatch token" />真实消耗 token</span>
+            <span><i className="usage-trend-swatch cache" />缓存命中 token</span>
+          </div>
+          <span className="badge teal">
+            总输入Token {formatNumber(totalInput)} / 真实消耗Token {formatNumber(effectiveTotal)} / 缓存 {formatNumber(cachedTotal)}（{formatPercent(usage.totals.cache_hit_rate)}）
+          </span>
+        </div>
       </div>
       <div className="panel-body">
         {points.length === 0 ? (
@@ -41,51 +60,47 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
         ) : (
           <>
             <p className="usage-trend-note">
-              每个点表示该时间桶内 token 合计，不是瞬时消耗；{bucketLabel(usage.window)}；缓存命中率 {formatPercent(usage.totals.cache_hit_rate)}。
+              每根柱表示该时间段内 token 合计，不是瞬时消耗；{bucketLabel(usage.window)}。
             </p>
-            <div className="usage-trend-legend" aria-label="用量趋势图例">
-              <span><i className="usage-trend-swatch token" />有效 token</span>
-              <span><i className="usage-trend-swatch cache" />缓存命中 token</span>
-            </div>
-            <div className="usage-trend-scroll">
+            <div className="usage-trend-scroll" ref={chartHostRef}>
               <svg
                 className="usage-trend-chart"
                 height={height}
                 viewBox={`0 0 ${width} ${height}`}
                 width={width}
                 role="img"
-                aria-label="选择时间范围内 token 用量与缓存命中折线图"
+                aria-label="选择时间范围内真实消耗 token 与缓存命中 token 柱状图"
               >
                 <path className="usage-trend-grid" d={`M ${xStart} ${plotTop + plotHeight} H ${xEnd}`} />
-                <path className="usage-trend-line" d={tokenPath} />
-                <path className="usage-trend-line cache" d={cachedPath} />
                 {points.map((point, index) => {
-                  const x = points.length <= 1 ? width / 2 : xStart + (index / (points.length - 1)) * (xEnd - xStart);
+                  const x = points.length <= 1 ? width / 2 : xStart + groupWidth * index + groupWidth / 2;
                   const value = pointValues[index];
                   const y = plotTop + plotHeight - (value / max) * plotHeight;
                   const cached = cachedValues[index];
                   const cachedY = plotTop + plotHeight - (cached / max) * plotHeight;
-                  const closeSeries = Math.abs(cachedY - y) < 20;
+                  const baseline = plotTop + plotHeight;
+                  const valueLabelX = x + valueLabelRightOffset;
                   return (
                     <g key={point.bucket}>
-                      <text className="usage-trend-value" x={x} y={Math.max(12, y - (closeSeries ? 14 : 10))} textAnchor="middle">
+                      <title>{bucketRangeLabel(point.bucket, usage.window)}：真实消耗 {formatNumber(value)}，缓存命中 {formatNumber(cached)}</title>
+                      <text className="usage-trend-value" x={valueLabelX} y={valueLabelTop} textAnchor="end">
                         {formatNumber(value)}
                       </text>
-                      <circle className="usage-trend-dot" cx={x} cy={y} r="3.5" />
-                      <text className="usage-trend-value cache" x={x} y={Math.min(height - 8, cachedY + (closeSeries ? 24 : 16))} textAnchor="middle">
+                      <text className="usage-trend-value cache" x={valueLabelX} y={valueLabelTop + valueLabelGap} textAnchor="end">
                         {formatNumber(cached)}
                       </text>
-                      <circle className="usage-trend-dot cache" cx={x} cy={cachedY} r="3.5" />
+                      <rect className="usage-trend-bar" x={x - barWidth - 2} y={y} width={barWidth} height={Math.max(2, baseline - y)} rx="2" />
+                      <rect className="usage-trend-bar cache" x={x + 2} y={cachedY} width={barWidth} height={Math.max(2, baseline - cachedY)} rx="2" />
+                      <text className="usage-trend-axis-label" x={x} y={baseline + 22} textAnchor="middle">
+                        {axisTickLabel(point.bucket, usage.window)}
+                      </text>
                     </g>
                   );
                 })}
               </svg>
             </div>
             <div className="usage-trend-footer">
-              <span>{formatDateTime(points[0]?.bucket)}</span>
-              <strong>有效峰值 {formatNumber(effectivePeak)}{peakPoint ? ` · ${formatDateTime(peakPoint.bucket)}` : ''}</strong>
-              <span>缓存命中 {formatNumber(cachedTotal)} / {formatPercent(usage.totals.cache_hit_rate)}</span>
-              <span>{formatDateTime(points[points.length - 1]?.bucket)}</span>
+              <span>真实消耗最高 · 时间段：{formatNumber(effectivePeak)}{peakPoint ? ` · ${bucketRangeLabel(peakPoint.bucket, usage.window)}` : ''}</span>
             </div>
           </>
         )}
@@ -95,10 +110,45 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
 }
 
 function bucketLabel(window: string): string {
-  if (window === '1h') return '按约 5 分钟聚合';
-  if (window === '24h') return '按小时聚合';
-  if (window === '7d') return '按天聚合';
-  return '按可用数据时间桶聚合';
+  if (window === '1h') return '每根柱覆盖 5 分钟';
+  if (window === '24h') return '每根柱覆盖 1 小时';
+  return '每根柱覆盖 1 天';
+}
+
+function bucketRangeLabel(value: string, window: string): string {
+  const start = new Date(value);
+  if (Number.isNaN(start.getTime())) return value;
+  const end = new Date(start.getTime() + bucketDurationMs(window) - 1);
+  if (window === '1h') return `${formatMonthDay(start)} ${formatHourMinute(start)}-${formatHourMinute(end)}`;
+  if (window === '24h') return `${formatMonthDay(start)} ${formatHourMinute(start)}-${formatHourMinute(end)}`;
+  return `${formatMonthDay(start)} 当日`;
+}
+
+function axisTickLabel(value: string, window: string): string {
+  const start = new Date(value);
+  if (Number.isNaN(start.getTime())) return value;
+  if (window === '1h' || window === '24h') return formatHourMinute(start);
+  return formatMonthDay(start);
+}
+
+function bucketDurationMs(window: string): number {
+  if (window === '1h') return 5 * 60 * 1000;
+  if (window === '24h') return 60 * 60 * 1000;
+  return 24 * 60 * 60 * 1000;
+}
+
+function formatMonthDay(value: Date): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+  }).format(value);
+}
+
+function formatHourMinute(value: Date): string {
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+  }).format(value);
 }
 
 function formatPercent(value?: number): string {
