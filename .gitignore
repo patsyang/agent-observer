@@ -9,6 +9,9 @@
 # Agent workflow scratch space
 /ai_docs/
 
+# Git worktrees (temporary workspaces)
+.agentic/worktrees/
+
 # Local business workspaces; never committed in this control-plane repo
 /apps/
 
