@@ -17,15 +17,15 @@ describe('App shell', () => {
             window: '1h',
             collectors: { total: 0, online: 0, degraded: 0, offline: 0, items: [] },
             facts: { total: 0, items: [] },
-            stories: { total: 0, items: [] },
+            signals: { total: 0, items: [] },
             risks: { total: 0, top: [] }
           });
         }
         if (url.includes('/api/conversations')) {
           return Response.json({ conversations: [], total: 0, page: 1, page_size: 50, has_more: false, window: '1h' });
         }
-        if (url.includes('/api/stories')) {
-          return Response.json({ stories: [] });
+        if (url.includes('/api/signals')) {
+          return Response.json({ signals: [] });
         }
         if (url.includes('/api/usage/summary')) {
           return Response.json({

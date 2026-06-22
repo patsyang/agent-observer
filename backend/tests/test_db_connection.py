@@ -18,37 +18,46 @@ def test_concurrent_connections_initialize_schema_once_without_locking(tmp_path)
     assert results == [0] * 24
 
 
-def test_initialize_creates_current_collector_and_story_schema(tmp_path):
+def test_initialize_creates_current_collector_and_signal_schema(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         collector_columns = {row["name"] for row in conn.execute("pragma table_info(collectors)").fetchall()}
-        story_columns = {row["name"] for row in conn.execute("pragma table_info(observation_stories)").fetchall()}
+        signal_columns = {row["name"] for row in conn.execute("pragma table_info(behavior_signals)").fetchall()}
         policy_columns = {row["name"] for row in conn.execute("pragma table_info(effective_policies)").fetchall()}
+        old_tables = {
+            row["name"]
+            for row in conn.execute(
+                "select name from sqlite_master where type='table' and name in ('observation_stories', 'story_handling_states')"
+            ).fetchall()
+        }
 
     assert {"runtime_phase", "last_seen_at", "last_cycle_duration_ms", "last_error"} <= collector_columns
     assert {
-        "story_type",
+        "signal_kind",
+        "why_it_matters",
+        "affected_scope_json",
+        "evidence_groups_json",
+        "linked_conversations_json",
         "first_seen_at",
         "last_seen_at",
         "last_event_at",
         "occurrence_count",
-        "primary_object_type",
-        "primary_object_value",
         "latest_fact_id",
         "latest_summary",
-    } <= story_columns
+    } <= signal_columns
     assert "raw_upload_default" not in policy_columns
+    assert old_tables == set()
 
 
 def test_initialize_creates_current_query_indexes(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         fact_indexes = {row["name"] for row in conn.execute("pragma index_list(observed_facts)").fetchall()}
-        story_indexes = {row["name"] for row in conn.execute("pragma index_list(observation_stories)").fetchall()}
+        signal_indexes = {row["name"] for row in conn.execute("pragma index_list(behavior_signals)").fetchall()}
         signature_indexes = {row["name"] for row in conn.execute("pragma index_list(error_signatures)").fetchall()}
 
     assert "idx_observed_facts_created_at" in fact_indexes
     assert "idx_observed_facts_conversation_occurred" in fact_indexes
     assert "idx_observed_facts_fact_type_created_at" in fact_indexes
     assert "idx_observed_facts_category_occurred_at" in fact_indexes
-    assert "idx_observation_stories_attention_last_event" in story_indexes
-    assert "idx_observation_stories_type_last_event" in story_indexes
+    assert "idx_behavior_signals_decision_last_event" in signal_indexes
+    assert "idx_behavior_signals_kind_last_event" in signal_indexes
     assert "idx_error_signatures_category_key" in signature_indexes

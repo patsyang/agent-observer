@@ -5,8 +5,8 @@ from app.collectors.service import heartbeat, register_collector
 from app.evidence_enrichment.service import record_enrichment_result, request_enrichment
 from app.ingest.service import ingest_telemetry
 from app.policy import update_effective_policy
-from app.stories.service import handle_story
-from app.stories.service import rebuild_stories
+from app.behavior_signals.service import handle_signal
+from app.behavior_signals.service import rebuild_signals
 from app.validation.service import (
     ACCEPTANCE_IDS,
     FLOW_IDS,
@@ -80,7 +80,7 @@ def test_minimum_validation_stops_synthetic_sample_before_release_pass(tmp_path)
     output_path = tmp_path / "validation-summary.json"
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(conn, _validation_batch())
-        rebuild_stories(conn, reason="minimum-validation")
+        rebuild_signals(conn, reason="minimum-validation")
         report = run_minimum_validation_experiment(conn, output_path)
 
     assert report["result"] == "STOP"
@@ -132,10 +132,10 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
             conn,
             _validation_batch(validation_sample="documented_7_day_local_sample", occurred_at=dates),
         )
-        rebuild_stories(conn, reason="minimum-validation")
-        story_id = conn.execute("select story_id from observation_stories order by rowid limit 1").fetchone()["story_id"]
-        handle_story(conn, story_id, "known_issue", "已确认需要跟进")
-        job = request_enrichment(conn, story_id, "codex_tool_failure_context")
+        rebuild_signals(conn, reason="minimum-validation")
+        signal_id = conn.execute("select signal_id from behavior_signals order by rowid limit 1").fetchone()["signal_id"]
+        handle_signal(conn, signal_id, "known_issue", "已确认需要跟进")
+        job = request_enrichment(conn, signal_id, "codex_tool_failure_context")
         record_enrichment_result(conn, job["job_id"], "succeeded", "补证结果已回流")
         update_effective_policy(
             conn,
@@ -150,7 +150,7 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
     assert report["stop_marker"] is False
     assert report["sample_source"] == "documented_7_day_local_data_sample"
     assert report["sample_profile"]["qualified_for_release_evaluation"] is True
-    assert report["error_story_evidence_chain_pass_rate"] >= 0.8
+    assert report["error_signal_evidence_group_pass_rate"] >= 0.8
     assert report["usage_explanation_pass_rate"] >= 0.8
     assert {row["category"] for row in report["sample_coverage"]} == {
         "error_recurrence",
@@ -213,10 +213,10 @@ def test_minimum_validation_qualifies_real_local_codex_template_without_fixture_
         )
         heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"})
         ingest_telemetry(conn, batch)
-        rebuild_stories(conn, reason="minimum-validation")
-        story_id = conn.execute("select story_id from observation_stories order by rowid limit 1").fetchone()["story_id"]
-        handle_story(conn, story_id, "known_issue", "已确认需要跟进")
-        job = request_enrichment(conn, story_id, "codex_tool_failure_context")
+        rebuild_signals(conn, reason="minimum-validation")
+        signal_id = conn.execute("select signal_id from behavior_signals order by rowid limit 1").fetchone()["signal_id"]
+        handle_signal(conn, signal_id, "known_issue", "已确认需要跟进")
+        job = request_enrichment(conn, signal_id, "codex_tool_failure_context")
         record_enrichment_result(conn, job["job_id"], "succeeded", "补证结果已回流")
         update_effective_policy(
             conn,
@@ -243,6 +243,6 @@ def test_minimum_validation_stop_marker_lists_rule_fixes_when_thresholds_fail(tm
     assert {item["rule_id"] for item in report["rule_fix_list"]} == {
         "validation-sample-representativeness",
         "flow-acceptance-coverage",
-        "story-evidence-chain",
+        "signal-evidence-groups",
         "usage-activity-label",
     }

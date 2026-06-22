@@ -256,7 +256,7 @@ a {
 .metric-grid,
 .summary-columns,
 .detail-grid,
-.story-fields {
+.signal-fields {
   display: grid;
   gap: 10px;
 }
@@ -284,7 +284,7 @@ a {
 }
 
 .workbench-side,
-.story-workbench,
+.signal-workbench,
 .side-stack {
   min-width: 0;
 }
@@ -295,7 +295,7 @@ a {
   gap: 12px;
 }
 
-.story-workbench .story-list {
+.signal-workbench .signal-list {
   max-height: calc(100vh - 260px);
   overflow: auto;
   padding-right: 4px;
@@ -406,7 +406,7 @@ a {
 }
 
 .row-list,
-.story-list {
+.signal-list {
   display: grid;
   gap: 8px;
 }
@@ -597,8 +597,8 @@ a {
   color: #475467;
 }
 
-.story-card,
-.story-detail,
+.signal-card,
+.signal-detail,
 .dialog {
   background: #ffffff;
   border: 1px solid #d7ddd2;
@@ -606,12 +606,12 @@ a {
   padding: 14px;
 }
 
-.story-card__header {
+.signal-card__header {
   align-items: start;
   display: block;
 }
 
-.story-card__footer {
+.signal-card__footer {
   display: flex;
   justify-content: flex-end;
 }
@@ -651,20 +651,20 @@ a {
   justify-content: flex-end;
 }
 
-.story-card__badges {
+.signal-card__badges {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
   margin-bottom: 8px;
 }
 
-.story-card h3 {
+.signal-card h3 {
   font-size: 16px;
   line-height: 1.35;
   margin: 0 0 6px;
 }
 
-.story-card small {
+.signal-card small {
   line-height: 1.45;
 }
 
@@ -734,13 +734,13 @@ a {
   white-space: nowrap;
 }
 
-.story-fields,
+.signal-fields,
 .detail-grid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   margin: 12px 0;
 }
 
-.story-fields--compact {
+.signal-fields--compact {
   background: #fbfaf6;
   border: 1px solid #edf0e8;
   border-radius: 8px;
@@ -749,7 +749,7 @@ a {
   overflow: hidden;
 }
 
-.story-fields--compact div {
+.signal-fields--compact div {
   border-bottom: 1px solid #edf0e8;
   display: grid;
   gap: 10px;
@@ -757,16 +757,16 @@ a {
   padding: 8px 10px;
 }
 
-.story-fields--compact div:last-child {
+.signal-fields--compact div:last-child {
   border-bottom: 0;
 }
 
-.story-fields dt {
+.signal-fields dt {
   color: #667085;
   font-size: 12px;
 }
 
-.story-fields dd {
+.signal-fields dd {
   margin: 0;
   overflow-wrap: anywhere;
 }
@@ -1609,7 +1609,7 @@ textarea {
     grid-template-columns: 1fr;
   }
 
-  .story-workbench .story-list {
+  .signal-workbench .signal-list {
     max-height: none;
   }
 
@@ -1661,7 +1661,7 @@ textarea {
   .metrics,
   .metric-grid,
   .summary-columns,
-  .story-fields,
+  .signal-fields,
   .detail-grid,
   .detail-summary,
   .filter-row,
@@ -1694,7 +1694,7 @@ textarea {
     justify-content: flex-start;
   }
 
-  .story-fields--compact div {
+  .signal-fields--compact div {
     grid-template-columns: 1fr;
   }
 

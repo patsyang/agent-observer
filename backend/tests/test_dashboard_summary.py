@@ -21,17 +21,17 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
                 "cursor": "1",
                 "items": [
                     {
-                        "source_event_id": "dashboard-risk-001",
-                        "fact_type": "risk",
-                        "category": "high_risk_operation",
+                        "source_event_id": "dashboard-error-001",
+                        "fact_type": "error",
+                        "category": "codex_error",
                         "quality": "high",
                         "severity": "high",
-                        "summary": "检测到删除类命令。",
+                        "summary": "function_call_output failed with exit_code=1",
                         "occurred_at": observed_at,
                         "span": "session:dashboard",
-                        "raw_hash": "hash-dashboard-risk",
-                        "projection": {"risk_type": "high_risk_operation", "object_type": "command"},
-                        "risk": {"risk_type": "high_risk_operation", "severity": "high", "object_type": "command"},
+                        "raw_hash": "hash-dashboard-error",
+                        "projection": {"tool_name": "exec_command", "exit_code": 1},
+                        "error_signature": {"signature_key": "dashboard-tool-failure", "category": "codex_error"},
                         "source_refs": {"conversation_ref": "conv-dashboard"},
                         "source_specific": {"codex_event_type": "tool_result"},
                         "raw_content": "raw command content must not be in summary",
@@ -46,8 +46,8 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
     assert summary["facts"]["total"] == 1
     assert summary["facts"]["items"][0]["content_preview"]
     assert "raw_content" not in summary["facts"]["items"][0]
-    assert summary["risks"]["top"][0]["risk_type"] == "high_risk_operation"
-    assert summary["stories"]["total"] >= 1
+    assert summary["signals"]["total"] >= 1
+    assert summary["signals"]["items"][0]["signal_kind"] == "tool_failure_cluster"
 
 
 def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):

@@ -47,7 +47,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
             """
             insert into observed_facts (
               fact_id, source_event_id, batch_id, collector_id, source, fact_type, category, quality,
-              severity, summary, occurred_at, promoted_to_story, source_refs_json,
+              severity, summary, occurred_at, promoted_to_signal, source_refs_json,
               source_specific_json, content_preview, raw_available, raw_status, conversation_ref,
               session_ref, source_event_type, source_path_hash, created_at
             ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -102,9 +102,9 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     )
     conn.commit()
     if affected_fact_ids:
-        from app.stories.service import update_stories_for_facts
+        from app.behavior_signals.service import update_signals_for_facts
 
-        update_stories_for_facts(conn, affected_fact_ids, reason="telemetry_ingest")
+        update_signals_for_facts(conn, affected_fact_ids, reason="telemetry_ingest")
     return {"batch_id": batch_id, "accepted": accepted, "duplicates": duplicates}
 
 

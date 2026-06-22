@@ -53,3 +53,24 @@ python scripts/ao.py plan-execute run `
 
 `python scripts/ao.py lint`、`python scripts/ao.py test`、`python scripts/ao.py e2e`
 和 `python scripts/ao.py verify` 只验证当前项目控制面。业务代码验证应在业务仓库或本地业务工作区自己的入口中执行。
+
+## 本地启动
+
+在两个 `cmd` 窗口分别运行：
+
+```bat
+scripts\start-backend.cmd
+```
+
+```bat
+scripts\start-frontend.cmd
+```
+
+固定地址：
+
+```text
+后端 http://127.0.0.1:8765
+前端 http://127.0.0.1:5173/
+```
+
+脚本会在端口已占用时直接退出，避免前端自动换到 5174 等非固定端口。

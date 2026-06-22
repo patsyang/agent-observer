@@ -22,7 +22,7 @@ from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.risks.service import get_risk_summary
-from app.stories.service import get_story_detail, handle_story, list_stories, mark_story_read, rebuild_stories
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, rebuild_signals
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
 
@@ -33,7 +33,7 @@ def register_routes(app, http_exception, file_response) -> None:
     register_ingest_routes(app, http_exception)
     register_conversation_routes(app, http_exception)
     register_policy_routes(app, http_exception)
-    register_story_routes(app, http_exception)
+    register_signal_routes(app, http_exception)
     register_enrichment_routes(app, http_exception)
     register_summary_routes(app)
     register_package_routes(app, file_response)
@@ -160,60 +160,60 @@ def register_policy_routes(app, http_exception) -> None:
             return recent_audit(conn)
 
 
-def register_story_routes(app, http_exception) -> None:
-    @app.get("/api/stories")
-    def api_stories(include_hidden: bool = False, window: str = "1h", queue: str = "actionable", page: int = 1, page_size: int = 20):
+def register_signal_routes(app, http_exception) -> None:
+    @app.get("/api/signals")
+    def api_signals(window: str = "1h", page: int = 1, page_size: int = 20):
         with connect() as conn:
-            return list_stories(conn, include_hidden=include_hidden, window=window, queue=queue, page=page, page_size=page_size)
+            return list_signals(conn, window=window, page=page, page_size=page_size)
 
-    @app.get("/api/stories/{story_id}")
-    def api_story_detail(story_id: str):
+    @app.get("/api/signals/{signal_id}")
+    def api_signal_detail(signal_id: str):
         with connect() as conn:
             try:
-                return get_story_detail(conn, story_id)
+                return get_signal_detail(conn, signal_id)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="story not found") from exc
+                raise http_exception(status_code=404, detail="signal not found") from exc
 
-    @app.post("/api/stories/rebuild")
-    def api_rebuild_stories(payload: dict):
+    @app.post("/api/signals/rebuild")
+    def api_rebuild_signals(payload: dict):
         with connect() as conn:
-            return rebuild_stories(conn, reason=payload.get("reason", "api"))
+            return rebuild_signals(conn, reason=payload.get("reason", "api"))
 
-    @app.post("/api/stories/{story_id}/read")
-    def api_mark_story_read(story_id: str):
-        with connect() as conn:
-            try:
-                return mark_story_read(conn, story_id)
-            except LookupError as exc:
-                raise http_exception(status_code=404, detail="story not found") from exc
-
-    @app.post("/api/stories/{story_id}/handle")
-    def api_handle_story(story_id: str, payload: dict):
+    @app.post("/api/signals/{signal_id}/read")
+    def api_mark_signal_read(signal_id: str):
         with connect() as conn:
             try:
-                return handle_story(conn, story_id, payload.get("conclusion_code"), payload.get("note"))
+                return mark_signal_read(conn, signal_id)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="story not found") from exc
+                raise http_exception(status_code=404, detail="signal not found") from exc
+
+    @app.post("/api/signals/{signal_id}/handle")
+    def api_handle_signal(signal_id: str, payload: dict):
+        with connect() as conn:
+            try:
+                return handle_signal(conn, signal_id, payload.get("conclusion_code"), payload.get("note"))
+            except LookupError as exc:
+                raise http_exception(status_code=404, detail="signal not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
 
 def register_enrichment_routes(app, http_exception) -> None:
-    @app.get("/api/stories/{story_id}/enrichments/availability")
-    def api_enrichment_availability(story_id: str):
+    @app.get("/api/signals/{signal_id}/enrichments/availability")
+    def api_enrichment_availability(signal_id: str):
         with connect() as conn:
             try:
-                return get_enrichment_availability(conn, story_id)
+                return get_enrichment_availability(conn, signal_id)
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="story not found") from exc
+                raise http_exception(status_code=404, detail="signal not found") from exc
 
-    @app.post("/api/stories/{story_id}/enrichments")
-    def api_request_enrichment(story_id: str, payload: dict):
+    @app.post("/api/signals/{signal_id}/enrichments")
+    def api_request_enrichment(signal_id: str, payload: dict):
         with connect() as conn:
             try:
-                return request_enrichment(conn, story_id, payload.get("capability_id", ""))
+                return request_enrichment(conn, signal_id, payload.get("capability_id", ""))
             except LookupError as exc:
-                raise http_exception(status_code=404, detail="story not found") from exc
+                raise http_exception(status_code=404, detail="signal not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 

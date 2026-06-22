@@ -14,12 +14,12 @@ describe('EnrichmentPanel', () => {
 
     render(
       <EnrichmentPanel
-        storyId="story-001"
+        signalId="signal-001"
         availability={{
           capabilities: [
             {
               capability_id: 'codex_tool_failure_context',
-      label: '工具失败上下文补证',
+              label: '工具失败上下文补证',
               state: 'available',
               reason_code: null
             }
@@ -34,7 +34,7 @@ describe('EnrichmentPanel', () => {
 
     await userEvent.click(screen.getByRole('button', { name: '补充工具失败上下文' }));
 
-    expect(requestEnrichment).toHaveBeenCalledWith('story-001', 'codex_tool_failure_context');
+    expect(requestEnrichment).toHaveBeenCalledWith('signal-001', 'codex_tool_failure_context');
     expect(await screen.findByRole('status')).toHaveTextContent(/补证 排队中/);
   });
 
@@ -47,7 +47,7 @@ describe('EnrichmentPanel', () => {
 
     render(
       <EnrichmentPanel
-        storyId="story-001"
+        signalId="signal-001"
         availability={{
           active_job: { job_id: 'enrichment-job-002', status: 'queued', capability_id: 'codex_tool_failure_context' },
           capabilities: [

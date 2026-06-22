@@ -14,6 +14,7 @@ export interface ConversationUsage {
 export interface ConversationSummary {
   conversation_ref: string;
   session_ref: string;
+  session_title: string;
   started_at: string;
   last_event_at: string;
   prompt_preview: string;

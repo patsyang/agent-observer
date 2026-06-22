@@ -1,6 +1,6 @@
 import type { Collector } from './types.collectors';
 import type { ObservedFact, TimeWindow } from './types.facts';
-import type { ObservationStory } from './types.stories';
+import type { BehaviorSignal } from './types.signals';
 import type { RiskSummarySignal } from './types.usage';
 
 export interface DashboardSummary {
@@ -12,9 +12,9 @@ export interface DashboardSummary {
     offline: number;
     items: Collector[];
   };
-  stories: {
+  signals: {
     total: number;
-    items: ObservationStory[];
+    items: BehaviorSignal[];
   };
   facts: {
     total: number;

@@ -49,7 +49,7 @@ def run_minimum_validation_experiment(
         "sample_source": sample_profile["sample_source"],
         "sample_profile": sample_profile,
         "sample_coverage": sample_coverage,
-        "error_story_evidence_chain_pass_rate": _error_story_rate(conn),
+        "error_signal_evidence_group_pass_rate": _error_signal_rate(conn),
         "usage_explanation_pass_rate": _usage_rate(conn),
         "flow_coverage": _flow_coverage(conn),
         "acceptance_coverage": _acceptance_coverage(conn),
@@ -132,12 +132,12 @@ def _parse_iso_datetime(value: str) -> datetime:
     return datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
-def _error_story_rate(conn: sqlite3.Connection) -> float:
-    stories = conn.execute("select evidence_refs_json from observation_stories").fetchall()
-    if not stories:
+def _error_signal_rate(conn: sqlite3.Connection) -> float:
+    signals = conn.execute("select evidence_groups_json from behavior_signals where signal_kind = 'tool_failure_cluster'").fetchall()
+    if not signals:
         return 0.0
-    passed = sum(1 for story in stories if len(json.loads(story["evidence_refs_json"])) >= 1)
-    return round(passed / len(stories), 2)
+    passed = sum(1 for signal in signals if len(json.loads(signal["evidence_groups_json"])) >= 1)
+    return round(passed / len(signals), 2)
 
 
 def _usage_rate(conn: sqlite3.Connection) -> float:
@@ -153,8 +153,8 @@ def _flow_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
     checks = {
         "FLOW-001": _count(conn, "collectors") > 0,
         "FLOW-002": _count(conn, "observed_facts") > 0 and _count(conn, "evidence_projections") > 0,
-        "FLOW-003": _count(conn, "observation_stories") > 0,
-        "FLOW-004": _count(conn, "story_handling_states") > 0 and _audit_count(conn, "story_handling_changed") > 0,
+        "FLOW-003": _count(conn, "behavior_signals") > 0,
+        "FLOW-004": _count(conn, "signal_decisions") > 0 and _audit_count(conn, "signal_decision_recorded") > 0,
         "FLOW-005": _count(conn, "enrichment_jobs") > 0 and _count(conn, "enrichment_results") > 0,
         "FLOW-006": _count(conn, "usage_signals") > 0 and _count(conn, "risk_signals") > 0,
         "FLOW-007": _audit_count(conn, "policy_changed") > 0,
@@ -173,9 +173,9 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "AC-001": _count(conn, "collectors") > 0,
         "AC-002": _count(conn, "observed_facts") > 0 and _count(conn, "error_signatures") > 0,
         "AC-003": _fact_count(conn, "quality in ('low', 'unknown')") > 0,
-        "AC-004": _story_count(conn, "attention_state = 'needs_review'") > 0 or _count(conn, "error_signatures") > 0,
-        "AC-005": _count(conn, "story_handling_states") > 0,
-        "AC-006": _count(conn, "story_handling_states") > 0 and _count(conn, "observation_stories") > 0,
+        "AC-004": _signal_count(conn, "decision_state = 'needs_review'") > 0 or _count(conn, "error_signatures") > 0,
+        "AC-005": _count(conn, "signal_decisions") > 0,
+        "AC-006": _count(conn, "signal_decisions") > 0 and _count(conn, "behavior_signals") > 0,
         "AC-007": _count(conn, "usage_signals") > 0,
         "AC-008": _count(conn, "usage_signals") > 0,
         "AC-009": _count(conn, "risk_signals") > 0,
@@ -184,8 +184,8 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "AC-012": _count(conn, "enrichment_results") > 0,
         "AC-013": _count(conn, "audit_logs") > 0,
         "AC-014": _count(conn, "collectors") > 0,
-        "AC-015": _count(conn, "observation_stories") > 0,
-        "AC-016": _count(conn, "observation_stories") > 0 and _usage_rate(conn) >= 0.8,
+        "AC-015": _count(conn, "behavior_signals") > 0,
+        "AC-016": _count(conn, "behavior_signals") > 0 and _usage_rate(conn) >= 0.8,
         "AC-017": True,
         "AC-018": _audit_count(conn, "policy_changed") > 0,
         "AC-019": True,
@@ -195,9 +195,9 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "AC-001": "collector-onboarding",
         "AC-002": "fact-ingest",
         "AC-003": "conversation-query",
-        "AC-004": "story-recurrence",
-        "AC-005": "story-handling",
-        "AC-006": "story-recompute-preservation",
+        "AC-004": "signal-recurrence",
+        "AC-005": "signal-handling",
+        "AC-006": "signal-recompute-preservation",
         "AC-007": "usage-rollup",
         "AC-008": "usage-effective",
         "AC-009": "risk-governance",
@@ -206,7 +206,7 @@ def _acceptance_coverage(conn: sqlite3.Connection) -> dict[str, dict]:
         "AC-012": "enrichment-result",
         "AC-013": "fixed-account-audit",
         "AC-014": "public-console",
-        "AC-015": "story-default-queue",
+        "AC-015": "signal-default-queue",
         "AC-016": "minimum-validation-thresholds",
         "AC-017": "minimum-validation-stop-marker",
         "AC-018": "access-config-policy",
@@ -226,12 +226,12 @@ def _rule_fix_list(report: dict, thresholds: dict[str, float]) -> list[dict]:
                 "suggested_fix": "Run TD-011 real Codex session samples or a documented 7-day local data sample before release evaluation.",
             }
         )
-    if report["error_story_evidence_chain_pass_rate"] < thresholds["error"]:
+    if report["error_signal_evidence_group_pass_rate"] < thresholds["error"]:
         fixes.append(
             {
-                "rule_id": "story-evidence-chain",
-                "reason_code": "error_story_evidence_below_threshold",
-                "suggested_fix": "Add deterministic evidence projection rules for recurring error stories.",
+                "rule_id": "signal-evidence-groups",
+                "reason_code": "error_signal_evidence_below_threshold",
+                "suggested_fix": "Add deterministic evidence projection rules for recurring error signals.",
             }
         )
     if report["usage_explanation_pass_rate"] < thresholds["usage"]:
@@ -249,7 +249,7 @@ def _rule_fix_list(report: dict, thresholds: dict[str, float]) -> list[dict]:
             {
                 "rule_id": "flow-acceptance-coverage",
                 "reason_code": "db_objects_do_not_cover_all_prd_flows",
-                "suggested_fix": "Run collector, story handling, enrichment, policy and governance flows before release validation.",
+            "suggested_fix": "Run collector, signal handling, enrichment, policy and governance flows before release validation.",
             }
         )
     return fixes
@@ -259,8 +259,8 @@ def _flow_evidence(flow_id: str) -> list[str]:
     return {
         "FLOW-001": ["collectors"],
         "FLOW-002": ["observed_facts", "evidence_projections"],
-        "FLOW-003": ["observation_stories"],
-        "FLOW-004": ["story_handling_states", "audit_logs"],
+        "FLOW-003": ["behavior_signals"],
+        "FLOW-004": ["signal_decisions", "audit_logs"],
         "FLOW-005": ["enrichment_jobs", "enrichment_results"],
         "FLOW-006": ["usage_signals", "risk_signals"],
         "FLOW-007": ["effective_policies", "audit_logs"],
@@ -279,5 +279,5 @@ def _fact_count(conn: sqlite3.Connection, where: str) -> int:
     return int(conn.execute(f"select count(*) from observed_facts where {where}").fetchone()[0])
 
 
-def _story_count(conn: sqlite3.Connection, where: str) -> int:
-    return int(conn.execute(f"select count(*) from observation_stories where {where}").fetchone()[0])
+def _signal_count(conn: sqlite3.Connection, where: str) -> int:
+    return int(conn.execute(f"select count(*) from behavior_signals where {where}").fetchone()[0])

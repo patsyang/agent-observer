@@ -12,6 +12,7 @@ interface Props {
 export function ConversationDrawer({ detail, onClose }: Props) {
   const actionableHits = detail.hits.filter(isActionableHit);
   const technicalHits = detail.hits.filter((hit) => !isActionableHit(hit));
+  const conversationName = detail.session_title || detail.session_ref || detail.conversation_ref;
 
   return (
     <div className="drawer-backdrop" role="presentation">
@@ -19,8 +20,9 @@ export function ConversationDrawer({ detail, onClose }: Props) {
         <header className="drawer-header">
           <div>
             <span>会话</span>
-            <h2>{detail.conversation_ref}</h2>
+            <h2>{conversationName}</h2>
             <p>{formatDateTime(detail.started_at)} - {formatDateTime(detail.last_event_at)}</p>
+            {conversationName !== detail.conversation_ref && <small>{detail.conversation_ref}</small>}
           </div>
           <button className="ghost-button" onClick={onClose} type="button" aria-label="关闭会话详情">
             <X aria-hidden="true" size={16} />

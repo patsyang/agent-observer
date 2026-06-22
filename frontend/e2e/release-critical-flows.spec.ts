@@ -6,9 +6,9 @@ import { expect, test, type APIRequestContext } from '@playwright/test';
 import { enableEnrichment } from './support/api';
 import { E2E_API_BASE } from './support/urls';
 
-interface E2EStory {
-  story_id: string;
-  story_key: string;
+interface E2ESignal {
+  signal_id: string;
+  signal_kind: string;
 }
 
 function codexRecords() {
@@ -135,7 +135,7 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
 
   await page.goto('/');
   await expect(page.getByTestId('dashboard-page')).toBeVisible({ timeout: 15000 });
-  await expect(page.getByTestId('story-queue')).toBeVisible();
+  await expect(page.getByTestId('signal-queue')).toBeVisible();
   await expect(page.getByTestId('usage-governance')).toBeVisible();
   await page.getByTestId('nav-conversations').click();
   await expect(page.getByTestId('conversation-page')).toBeVisible();
@@ -143,23 +143,31 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   await expect(page.getByTestId('collectors-page')).toBeVisible();
   await expect(page.getByText(collectorId).first()).toBeVisible();
 
-  const storiesResponse = await request.get(`${E2E_API_BASE}/api/stories?include_hidden=true`);
-  const stories = (await storiesResponse.json()) as { stories: E2EStory[] };
-  const errorStory = stories.stories.find((story) => story.story_key.startsWith('error:'));
-  expect(errorStory).toBeTruthy();
-  expect(stories.stories.some((story) => story.story_key.startsWith('usage:'))).toBeFalsy();
-  const storyId = errorStory!.story_id;
-  const handle = await request.post(`${E2E_API_BASE}/api/stories/${storyId}/handle`, {
+  const signalsResponse = await request.get(`${E2E_API_BASE}/api/signals?window=all`);
+  const signals = (await signalsResponse.json()) as { signals: E2ESignal[] };
+  const failureSignal = signals.signals.find((signal) => signal.signal_kind === 'tool_failure_cluster');
+  expect(failureSignal).toBeTruthy();
+  const signalId = failureSignal!.signal_id;
+  const handle = await request.post(`${E2E_API_BASE}/api/signals/${signalId}/handle`, {
     data: { conclusion_code: 'known_issue', note: '已确认需要跟进' }
   });
   expect(handle.ok()).toBeTruthy();
-  const enrichment = await request.post(`${E2E_API_BASE}/api/stories/${storyId}/enrichments`, {
+  const enrichment = await request.post(`${E2E_API_BASE}/api/signals/${signalId}/enrichments`, {
     data: { capability_id: 'codex_tool_failure_context' }
   });
   expect(enrichment.ok()).toBeTruthy();
   execFileSync('cmd.exe', ['/d', '/s', '/c', 'agent-observer.cmd run-once'], { cwd: outputDir, encoding: 'utf-8' });
 
-  await enableEnrichment(request);
+  const currentPolicy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
+  const disabled = await request.patch(`${E2E_API_BASE}/api/policy`, {
+    data: { expected_version: currentPolicy.policy_version, enrichment_mode: 'disabled' }
+  });
+  expect(disabled.ok()).toBeTruthy();
+  const disabledPolicy = await disabled.json();
+  const enabled = await request.patch(`${E2E_API_BASE}/api/policy`, {
+    data: { expected_version: disabledPolicy.policy_version, enrichment_mode: 'enabled' }
+  });
+  expect(enabled.ok()).toBeTruthy();
 
   const validation = await request.post(`${E2E_API_BASE}/api/validation/minimum-experiment`);
   expect(validation.ok()).toBeTruthy();

@@ -15,11 +15,11 @@ import {
   fetchPolicy,
   fetchRecentAudit,
   fetchRiskSummary,
-  fetchStories,
-  fetchStoryDetail,
+  fetchSignals,
+  fetchSignalDetail,
   fetchUsageSummary,
-  handleStory,
-  markStoryRead,
+  handleSignal,
+  markSignalRead,
   requestEnrichment,
   updatePolicy
 } from './api/client';
@@ -27,7 +27,7 @@ import { AccessConfigDrawer } from './components/AccessConfigDrawer';
 import { CollectorsPage } from './pages/CollectorsPage';
 import { ConversationQueryPage } from './pages/ConversationQueryPage';
 import { DashboardPage } from './pages/DashboardPage';
-import { ObservationStoryDetailPage } from './pages/ObservationStoryDetailPage';
+import { SignalDetailPage } from './pages/SignalDetailPage';
 
 type View = 'dashboard' | 'collectors' | 'conversations';
 
@@ -39,9 +39,9 @@ const navItems: Array<{ view: View; label: string; desc: string; icon: typeof La
 
 export function App() {
   const [view, setView] = useState<View>('dashboard');
-  const [selectedStoryId, setSelectedStoryId] = useState<string | null>(null);
+  const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
-  const [returnStoryId, setReturnStoryId] = useState<string | null>(null);
+  const [returnSignalId, setReturnSignalId] = useState<string | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
@@ -63,9 +63,9 @@ export function App() {
               data-testid={`nav-${item.view}`}
               key={item.view}
               onClick={() => {
-                setSelectedStoryId(null);
+                setSelectedSignalId(null);
                 setSelectedFactId(null);
-                setReturnStoryId(null);
+                setReturnSignalId(null);
                 setView(item.view);
               }}
             >
@@ -96,29 +96,29 @@ export function App() {
             <p>围绕信号、会话输入输出和 collector 接入状态进行日常排查。</p>
           </div>
         </header>
-        {view === 'dashboard' && selectedStoryId === null && (
+        {view === 'dashboard' && selectedSignalId === null && (
           <DashboardPage
             loadDashboardSummary={fetchDashboardSummary}
-            loadStories={fetchStories}
+            loadSignals={fetchSignals}
             loadUsageSummary={fetchUsageSummary}
             loadRiskSummary={fetchRiskSummary}
-            onOpenStory={setSelectedStoryId}
+            onOpenSignal={setSelectedSignalId}
           />
         )}
-        {view === 'dashboard' && selectedStoryId !== null && (
-          <ObservationStoryDetailPage
-            storyId={selectedStoryId}
-            loadStoryDetail={fetchStoryDetail}
+        {view === 'dashboard' && selectedSignalId !== null && (
+          <SignalDetailPage
+            signalId={selectedSignalId}
+            loadSignalDetail={fetchSignalDetail}
             loadEnrichmentAvailability={fetchEnrichmentAvailability}
-            markRead={markStoryRead}
-            handleStory={handleStory}
+            markRead={markSignalRead}
+            handleSignal={handleSignal}
             requestEnrichment={requestEnrichment}
             cancelEnrichment={cancelEnrichment}
-            onBack={() => setSelectedStoryId(null)}
+            onBack={() => setSelectedSignalId(null)}
             onOpenFact={(factId) => {
               setSelectedFactId(factId);
-              setReturnStoryId(selectedStoryId);
-              setSelectedStoryId(null);
+              setReturnSignalId(selectedSignalId);
+              setSelectedSignalId(null);
               setView('conversations');
             }}
           />
@@ -129,10 +129,10 @@ export function App() {
             loadConversationDetail={fetchConversationDetail}
             loadConversationForFact={fetchConversationForFact}
             loadConversations={fetchConversations}
-            onBack={returnStoryId ? () => {
+            onBack={returnSignalId ? () => {
               setSelectedFactId(null);
-              setSelectedStoryId(returnStoryId);
-              setReturnStoryId(null);
+              setSelectedSignalId(returnSignalId);
+              setReturnSignalId(null);
               setView('dashboard');
             } : undefined}
             backLabel="返回信号"

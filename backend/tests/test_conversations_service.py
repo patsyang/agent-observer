@@ -104,6 +104,12 @@ def _source_refs(conversation: str, *, line: int | None = None, source_path_hash
     return refs
 
 
+def _source_refs_with_title(conversation: str, title: str) -> dict:
+    refs = _source_refs(conversation)
+    refs["session_title"] = title
+    return refs
+
+
 def test_query_conversations_groups_prompt_response_and_usage(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:
@@ -134,6 +140,32 @@ def test_query_conversations_groups_prompt_response_and_usage(tmp_path):
     assert row["token_usage"]["cached_input_units"] == 480
     assert row["token_usage"]["input_token_units"] == 800
     assert row["token_usage"]["cache_hit_rate"] == 0.6
+
+
+def test_query_conversations_exposes_codex_session_title(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        prompt = _item("title-prompt", "codex_prompt", "查看会话标题", (now - timedelta(minutes=5)).isoformat(), "conv-title")
+        prompt["source_refs"] = _source_refs_with_title("conv-title", "分析信号定义与类型-Grill")
+        response = _item("title-response", "codex_message", "已展示 Codex 会话名", (now - timedelta(minutes=4)).isoformat(), "conv-title")
+        response["source_refs"] = _source_refs_with_title("conv-title", "分析信号定义与类型-Grill")
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-conversation-title",
+                "protocol_version": "agent-observer-telemetry/v2",
+                "agent_version": "0.2.0",
+                "collector_id": "collector-codex",
+                "source": "codex",
+                "cursor": "cursor-title",
+                "items": [prompt, response],
+            },
+        )
+        result = query_conversations(conn, window="1h")
+        detail = get_conversation_query(conn, "conv-title")
+
+    assert result["conversations"][0]["session_title"] == "分析信号定义与类型-Grill"
+    assert detail["session_title"] == "分析信号定义与类型-Grill"
 
 
 def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):

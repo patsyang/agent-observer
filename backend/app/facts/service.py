@@ -23,7 +23,7 @@ def _fact(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict:
         "occurred_at": row["occurred_at"],
         "ingested_at": row["created_at"],
         "source": row["source"],
-        "promoted_to_story": bool(row["promoted_to_story"]),
+        "promoted_to_signal": bool(row["promoted_to_signal"]),
     }
     source_refs = _loads(row["source_refs_json"])
     source_specific = _loads(row["source_specific_json"])

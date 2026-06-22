@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 
-import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, StoriesResponse, TimeWindow, UsageSummary } from '../api/types';
+import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, SignalsResponse, TimeWindow, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
-import { StoryCard } from '../components/StoryCard';
+import { SignalCard } from '../components/SignalCard';
 import { TimeWindowTabs } from '../components/TimeWindowTabs';
 import { formatNumber } from '../utils/numberFormat';
 import {
@@ -20,10 +20,10 @@ import { UsageTrendChart } from './UsageTrendChart';
 
 interface Props {
   loadDashboardSummary: (window: TimeWindow) => Promise<DashboardSummary>;
-  loadStories: (options: { window: TimeWindow; queue: 'actionable' | 'all'; page?: number; page_size?: number }) => Promise<StoriesResponse>;
+  loadSignals: (options: { window: TimeWindow; page?: number; page_size?: number }) => Promise<SignalsResponse>;
   loadUsageSummary: (window: TimeWindow) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindow) => Promise<RiskSummary>;
-  onOpenStory: (storyId: string) => void;
+  onOpenSignal: (signalId: string) => void;
 }
 
 type LoadState =
@@ -34,7 +34,7 @@ type LoadState =
       collectors: CollectorsResponse;
       collectorCounts: DashboardSummary['collectors'];
       facts: FactsResponse;
-      stories: StoriesResponse;
+      signals: SignalsResponse;
       usage: UsageSummary;
       risks: RiskSummary;
     };
@@ -51,9 +51,9 @@ function Mini({ label, value }: { label: string; value: string }) {
 export function DashboardPage({
   loadDashboardSummary,
   loadRiskSummary,
-  loadStories,
+  loadSignals,
   loadUsageSummary,
-  onOpenStory
+  onOpenSignal
 }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [window, setWindow] = useState<TimeWindow>('1h');
@@ -71,12 +71,12 @@ export function DashboardPage({
             collectors: { collectors: summary.collectors.items },
             collectorCounts: summary.collectors,
             facts: { facts: summary.facts.items, total: summary.facts.total, page: 1, page_size: 5, has_more: summary.facts.total > summary.facts.items.length },
-            stories: {
-              stories: summary.stories.items,
-              total: summary.stories.total,
+            signals: {
+              signals: summary.signals.items,
+              total: summary.signals.total,
               page: 1,
               page_size: 20,
-              has_more: summary.stories.total > summary.stories.items.length
+              has_more: summary.signals.total > summary.signals.items.length
             },
             usage: emptyUsage(window),
             risks: { mode: 'summary', window, signals: summary.risks.top }
@@ -84,7 +84,7 @@ export function DashboardPage({
           setLastRefresh(new Date().toISOString());
         }
         return Promise.allSettled([
-          loadStories({ window, queue: 'actionable', page: 1, page_size: 20 }),
+          loadSignals({ window, page: 1, page_size: 20 }),
           loadUsageSummary(window),
           loadRiskSummary(window)
         ]);
@@ -93,10 +93,10 @@ export function DashboardPage({
         if (cancelled) return;
         setState((current) => {
           if (current.status !== 'ready') return current;
-          const [stories, usage, risks] = results;
+          const [signals, usage, risks] = results;
           return {
             ...current,
-            stories: stories.status === 'fulfilled' ? stories.value : current.stories,
+            signals: signals.status === 'fulfilled' ? signals.value : current.signals,
             usage: usage.status === 'fulfilled' ? usage.value : current.usage,
             risks: risks.status === 'fulfilled' ? risks.value : current.risks
           };
@@ -108,7 +108,7 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDashboardSummary, loadRiskSummary, loadStories, loadUsageSummary, refreshToken, window]);
+  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, window]);
 
   if (state.status === 'loading') {
     return (
@@ -132,15 +132,15 @@ export function DashboardPage({
   const onlineCollectors = state.collectors.collectors.filter((collector) => collector.source_status === 'online');
   const latestFact = state.facts.facts[0];
   const latestCollector = state.collectors.collectors[0];
-  const activeStories = state.stories.stories.filter((story) => story.attention_state !== 'handled_hidden');
+  const activeSignals = state.signals.signals.filter((signal) => signal.decision_state !== 'handled');
   const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
 
   return (
-    <div className="dashboard workbench" aria-label="观测信号运营台" data-testid="dashboard-page">
+    <div className="dashboard workbench" aria-label="行为风险信号台" data-testid="dashboard-page">
       <section className="context-bar">
         <div>
-          <strong>观测信号运营台</strong>
-          <span>默认只看最近 1 小时；信号队列只放需要人工判断的错误、风险和补证事项。</span>
+          <strong>行为风险信号台</strong>
+          <span>默认只看最近 1 小时；信号队列只放可以判断和下钻的行为风险模式。</span>
         </div>
         <div className="context-actions">
           <TimeWindowTabs value={window} onChange={setWindow} />
@@ -163,7 +163,7 @@ export function DashboardPage({
           note="在线 / 总数"
         />
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
-        <Metric label="待处理信号" value={formatNumber(state.stories.total ?? activeStories.length)} note="active / needs_review" />
+        <Metric label="待判断信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="unread / needs_review" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
       </section>
 
@@ -181,7 +181,7 @@ export function DashboardPage({
             <div className="context-stack">
               <Mini label="命中质量" value={qualitySummary(state.facts)} />
               <Mini label="待传 outbox" value={formatNumber(sumBacklog(state.collectors))} />
-              <Mini label="重点队列" value={queueSummary(activeStories.length)} />
+              <Mini label="重点队列" value={queueSummary(activeSignals.length)} />
             </div>
             {state.collectors.collectors.length === 0 ? (
               <p>还没有采集器注册。请下载 Windows 包并运行 start。</p>
@@ -204,21 +204,21 @@ export function DashboardPage({
           </div>
         </aside>
 
-        <section className="panel flush story-workbench" aria-label="观测信号" data-testid="story-queue">
+        <section className="panel flush signal-workbench" aria-label="行为风险信号" data-testid="signal-queue">
           <div className="panel-header">
-            <h2>观测信号队列</h2>
-            <span className="badge violet">{formatNumber(state.stories.total ?? activeStories.length)} 条待看</span>
+            <h2>行为风险信号</h2>
+            <span className="badge violet">{formatNumber(state.signals.total ?? activeSignals.length)} 条待看</span>
           </div>
-          <p className="panel-intro">每条信号都应能下钻到命中内容和所属会话，而不是宽泛聚合。</p>
+          <p className="panel-intro">每条信号都对应一个可判断的风险模式，并按会话、对象或失败类型组织证据。</p>
           <div className="panel-body">
-            {activeStories.length === 0 ? (
+            {activeSignals.length === 0 ? (
               <p>当前没有需要人工处理的信号；请确认 collector 已运行并有 Codex 会话内容入库。</p>
             ) : (
-              <div className="story-list">
-                {activeStories.map((story) => (
-                  <StoryCard key={story.story_id} story={story} onOpen={onOpenStory} />
+              <div className="signal-list">
+                {activeSignals.map((signal) => (
+                  <SignalCard key={signal.signal_id} signal={signal} onOpen={onOpenSignal} />
                 ))}
-                {state.stories.has_more && <div className="list-footer">更多信号请进入分页列表继续查看。</div>}
+                {state.signals.has_more && <div className="list-footer">更多信号请进入分页列表继续查看。</div>}
               </div>
             )}
           </div>

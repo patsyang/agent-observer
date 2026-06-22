@@ -1,17 +1,15 @@
 from __future__ import annotations
 
-from app.dev_server import _conversations_query_options, _path_part, _stories_query_options
+from app.dev_server_handlers import _conversations_query_options, _path_part, _signals_query_options
 
 
-def test_dev_server_forwards_story_window_and_queue_filters():
-    options = _stories_query_options("/api/stories?window=24h&queue=actionable&include_hidden=true")
+def test_dev_server_forwards_signal_window_filters():
+    options = _signals_query_options("/api/signals?window=24h&page=2&page_size=10")
 
     assert options == {
-        "include_hidden": True,
         "window": "24h",
-        "queue": "actionable",
-        "page": 1,
-        "page_size": 20,
+        "page": 2,
+        "page_size": 10,
     }
 
 

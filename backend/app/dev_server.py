@@ -9,7 +9,7 @@ from app.db.connection import connect
 from app.dev_server_handlers import (
     _conversations_query_options,
     _path_part,
-    _stories_query_options,
+    _signals_query_options,
     handle_delete,
     handle_get,
     handle_patch,

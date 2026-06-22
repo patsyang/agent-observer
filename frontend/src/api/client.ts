@@ -8,12 +8,12 @@ import type {
   CollectorsResponse,
   DashboardSummary,
   EffectivePolicy,
-  HandleStoryPayload,
-  ObservationStoryDetail,
+  HandleSignalPayload,
+  BehaviorSignalDetail,
   PolicyUpdatePayload,
   RecentAuditSummary,
   RiskSummary,
-  StoriesResponse,
+  SignalsResponse,
   TimeWindow,
   UsageSummary
 } from './types';
@@ -130,37 +130,35 @@ export function fetchRiskSummary(window: TimeWindow = '1h'): Promise<RiskSummary
   return readJson<RiskSummary>(`/api/risks/summary?mode=summary&window=${encodeURIComponent(window)}`);
 }
 
-export function fetchStories(
-  options: { includeHidden?: boolean; window?: TimeWindow; queue?: 'actionable' | 'all'; page?: number; page_size?: number } = {}
-): Promise<StoriesResponse> {
+export function fetchSignals(
+  options: { window?: TimeWindow; page?: number; page_size?: number } = {}
+): Promise<SignalsResponse> {
   const params = new URLSearchParams();
-  if (options.includeHidden) params.set('include_hidden', 'true');
   params.set('window', options.window ?? '1h');
-  params.set('queue', options.queue ?? 'actionable');
   params.set('page', String(options.page ?? 1));
   params.set('page_size', String(options.page_size ?? 20));
   const suffix = params.toString() ? `?${params.toString()}` : '';
-  return readJson<StoriesResponse>(`/api/stories${suffix}`);
+  return readJson<SignalsResponse>(`/api/signals${suffix}`);
 }
 
-export function fetchStoryDetail(storyId: string): Promise<ObservationStoryDetail> {
-  return readJson<ObservationStoryDetail>(`/api/stories/${storyId}`);
+export function fetchSignalDetail(signalId: string): Promise<BehaviorSignalDetail> {
+  return readJson<BehaviorSignalDetail>(`/api/signals/${signalId}`);
 }
 
-export function markStoryRead(storyId: string): Promise<ObservationStoryDetail> {
-  return postJson<ObservationStoryDetail>(`/api/stories/${storyId}/read`);
+export function markSignalRead(signalId: string): Promise<BehaviorSignalDetail> {
+  return postJson<BehaviorSignalDetail>(`/api/signals/${signalId}/read`);
 }
 
-export function handleStory(storyId: string, payload: HandleStoryPayload): Promise<ObservationStoryDetail> {
-  return postJson<ObservationStoryDetail>(`/api/stories/${storyId}/handle`, payload);
+export function handleSignal(signalId: string, payload: HandleSignalPayload): Promise<BehaviorSignalDetail> {
+  return postJson<BehaviorSignalDetail>(`/api/signals/${signalId}/handle`, payload);
 }
 
-export function fetchEnrichmentAvailability(storyId: string): Promise<EnrichmentAvailability> {
-  return readJson<EnrichmentAvailability>(`/api/stories/${storyId}/enrichments/availability`);
+export function fetchEnrichmentAvailability(signalId: string): Promise<EnrichmentAvailability> {
+  return readJson<EnrichmentAvailability>(`/api/signals/${signalId}/enrichments/availability`);
 }
 
-export function requestEnrichment(storyId: string, capabilityId: string): Promise<EnrichmentJob> {
-  return postJson<EnrichmentJob>(`/api/stories/${storyId}/enrichments`, { capability_id: capabilityId });
+export function requestEnrichment(signalId: string, capabilityId: string): Promise<EnrichmentJob> {
+  return postJson<EnrichmentJob>(`/api/signals/${signalId}/enrichments`, { capability_id: capabilityId });
 }
 
 export function cancelEnrichment(jobId: string): Promise<EnrichmentJob> {

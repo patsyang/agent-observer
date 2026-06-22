@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 from app.sensitivity import sensitive_matches_from_record
@@ -73,11 +74,20 @@ def _source_gap_fact(collector_id: str, sequence: int, observed_at: str, telemet
     }
 
 
-def _record_fact(collector_id: str, sequence: int, source_key: str, path: Path, line_number: int, record: dict) -> dict | None:
+def _record_fact(
+    collector_id: str,
+    sequence: int,
+    source_key: str,
+    path: Path,
+    line_number: int,
+    record: dict,
+    *,
+    session_titles: dict[str, str] | None = None,
+) -> dict | None:
     payload = _payload(record)
     event_type = _event_type(record, payload)
     occurred_at = _occurred_at(record)
-    refs = _source_refs(collector_id, sequence, source_key, path, line_number, record)
+    refs = _source_refs(collector_id, sequence, source_key, path, line_number, record, session_titles or {})
     event_id = _source_event_id(refs["source_path_hash"], line_number, event_type, occurred_at, record)
     common = {
         "source_event_id": event_id,
@@ -292,7 +302,15 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         },
     }
 
-def _source_refs(collector_id: str, sequence: int, source_key: str, path: Path, line_number: int, record: dict) -> dict:
+def _source_refs(
+    collector_id: str,
+    sequence: int,
+    source_key: str,
+    path: Path,
+    line_number: int,
+    record: dict,
+    session_titles: dict[str, str] | None = None,
+) -> dict:
     payload = _payload(record)
     session_ref = record.get("session_id") or record.get("session") or payload.get("id") or path.stem
     conversation_ref = (
@@ -303,7 +321,7 @@ def _source_refs(collector_id: str, sequence: int, source_key: str, path: Path, 
         or record.get("session")
         or path.stem
     )
-    return {
+    refs = {
         "collector_id": collector_id,
         "sequence": sequence,
         "source_key": source_key,
@@ -312,6 +330,28 @@ def _source_refs(collector_id: str, sequence: int, source_key: str, path: Path, 
         "conversation_ref": _ref(conversation_ref),
         "session_ref": _ref(session_ref),
     }
+    if title := _session_title(session_titles or {}, record, payload, path, session_ref):
+        refs["session_title"] = title
+    return refs
+
+def _session_title(session_titles: dict[str, str], record: dict, payload: dict, path: Path, session_ref: object) -> str:
+    for candidate in _session_title_candidates(record, payload, path, session_ref):
+        title = session_titles.get(candidate)
+        if title:
+            return title
+    return ""
+
+def _session_title_candidates(record: dict, payload: dict, path: Path, session_ref: object) -> list[str]:
+    values = [record.get("session_id"), record.get("session"), payload.get("id"), session_ref, path.stem]
+    match = re.search(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})", path.stem, re.IGNORECASE)
+    if match:
+        values.append(match.group(1))
+    result = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result
 
 def _source_event_id(path_hash: str, line_number: int, event_type: str, occurred_at: str, record: dict) -> str:
     native_id = record.get("id") or record.get("event_id") or record.get("call_id")

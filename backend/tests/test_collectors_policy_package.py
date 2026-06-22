@@ -10,7 +10,7 @@ from app.db.connection import SOURCE_STATUSES, connect
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import update_effective_policy
-from app.stories.service import list_stories
+from app.behavior_signals.service import list_signals
 
 
 def _write_codex_fixture(codex_home):
@@ -279,7 +279,7 @@ def test_package_server_url_can_be_overridden_for_e2e(tmp_path, monkeypatch):
     assert config["server_url"] == "http://127.0.0.1:8766"
 
 
-def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
+def test_collector_ingest_creates_chinese_facts_and_signal(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         facts = []
         batch = {
@@ -297,11 +297,11 @@ def test_collector_ingest_creates_chinese_facts_and_story(tmp_path):
         _write_codex_fixture(codex_home)
         facts.extend(collect_facts("package-test", 1, "safe_probe", codex_home=codex_home))
         result = ingest_telemetry(conn, batch)
-        stories = list_stories(conn)
+        signals = list_signals(conn, window="all")
         summaries = [row["summary"] for row in conn.execute("select summary from observed_facts order by fact_id").fetchall()]
 
     assert result["accepted"] >= 2
     assert any("采集器完成一次本机链路自检" in summary for summary in summaries)
     assert any("错误指纹" in summary for summary in summaries)
-    assert stories["stories"]
-    assert any("错误指纹" in story["conclusion"] for story in stories["stories"])
+    assert signals["signals"]
+    assert any(signal["signal_kind"] == "tool_failure_cluster" for signal in signals["signals"])

@@ -185,14 +185,14 @@ def test_source_event_id_is_idempotent_per_collector(tmp_path):
     assert projection_count == 6
 
 
-def test_low_evidence_fact_stays_queryable_when_error_story_is_built(tmp_path):
+def test_low_evidence_fact_stays_queryable_when_error_signal_is_built(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(conn, _batch())
         result = query_facts(conn, quality="low")
-        story_count = conn.execute("select count(*) from observation_stories").fetchone()[0]
+        signal_count = conn.execute("select count(*) from behavior_signals").fetchone()[0]
 
     assert len(result["facts"]) == 1
     assert result["facts"][0]["fact_id"] == "event-low-001"
     assert result["facts"][0]["quality"] == "low"
-    assert result["facts"][0]["promoted_to_story"] is False
-    assert story_count >= 1
+    assert result["facts"][0]["promoted_to_signal"] is False
+    assert signal_count >= 1

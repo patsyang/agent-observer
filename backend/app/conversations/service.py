@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
 from typing import Any
 
+from app.conversations.time_window import normalize_iso_param, window_cutoff
 from app.evidence.presentation import projection_preview
 
 def query_conversations(
@@ -122,8 +122,8 @@ def _conversation_rows(
 ) -> list[sqlite3.Row]:
     clauses = ["f.fact_type != 'collector_health'"]
     params: list[str] = []
-    normalized_start = _normalize_iso_param(start_at)
-    normalized_end = _normalize_iso_param(end_at)
+    normalized_start = normalize_iso_param(start_at)
+    normalized_end = normalize_iso_param(end_at)
     if normalized_start:
         clauses.append("datetime(f.occurred_at) >= datetime(?)")
         params.append(normalized_start)
@@ -131,7 +131,7 @@ def _conversation_rows(
         clauses.append("datetime(f.occurred_at) <= datetime(?)")
         params.append(normalized_end)
     if not normalized_start and not normalized_end:
-        cutoff = _window_cutoff(window)
+        cutoff = window_cutoff(window)
         if cutoff:
             clauses.append("datetime(f.occurred_at) >= datetime(?)")
             params.append(cutoff)
@@ -182,6 +182,7 @@ def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3
     return {
         "conversation_ref": conversation_ref,
         "session_ref": _first_value(ordered, "session_ref"),
+        "session_title": _session_title(ordered),
         "started_at": ordered[0]["occurred_at"],
         "last_event_at": ordered[-1]["occurred_at"],
         "prompt_preview": _truncate(prompt),
@@ -472,32 +473,21 @@ def _first_value(rows: list[sqlite3.Row], key: str) -> str:
     return ""
 
 
+def _session_title(rows: list[sqlite3.Row]) -> str:
+    for row in rows:
+        try:
+            refs = json.loads(row["source_refs_json"] or "{}")
+        except json.JSONDecodeError:
+            continue
+        title = str(refs.get("session_title") or "").strip()
+        if title:
+            return title
+    return ""
+
+
 def _truncate(value: str, limit: int = 220) -> str:
     normalized = " ".join(value.split())
     if len(normalized) <= limit:
         return normalized
     return f"{normalized[: limit - 1]}..."
 
-
-def _window_cutoff(window: str) -> str | None:
-    if window == "all":
-        return None
-    if window == "today":
-        local_start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-        return local_start.astimezone(UTC).isoformat()
-    hours = {"1h": 1, "2h": 2, "3h": 3, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return None
-    return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
-
-
-def _normalize_iso_param(value: str | None) -> str | None:
-    if not value:
-        return None
-    try:
-        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except ValueError:
-        return value
-    if parsed.tzinfo is None:
-        parsed = parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC).replace(microsecond=0).isoformat()

@@ -1,9 +1,9 @@
-import type { StoryEvidenceEntry } from '../api/types';
+import type { SignalEvidenceItem } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 import { factTypeLabel, formatDateTime } from '../pages/dashboardLabels';
 
 interface Props {
-  entries: StoryEvidenceEntry[];
+  entries: SignalEvidenceItem[];
   onOpenFact?: (factId: string) => void;
 }
 
@@ -85,7 +85,7 @@ export function EvidenceChainTable({ entries, onOpenFact }: Props) {
   );
 }
 
-function evidenceTypeLabel(entry: StoryEvidenceEntry): string {
+function evidenceTypeLabel(entry: SignalEvidenceItem): string {
   const normalized = entry.category.toLowerCase();
   if (normalized === 'codex_error') return 'Codex 错误';
   if (normalized === 'high_risk_operation') return '高风险操作';
@@ -118,7 +118,7 @@ function summaryText(summary: string): string {
     .replace('已生成错误指纹', '已记录错误指纹，可用于识别同类错误复发');
 }
 
-function sourceTypeText(entry: StoryEvidenceEntry): string {
+function sourceTypeText(entry: SignalEvidenceItem): string {
   const event = eventTypeText(entry.source_event_type);
   const source = entry.source_label || sourceLabelFromRef(entry.evidence_ref);
   return `${source} · ${event}`;
@@ -167,7 +167,7 @@ function rawStatusLabel(rawAvailable?: boolean, rawStatus?: string): string {
   return '未上传原文，可查看摘要和字段';
 }
 
-function technicalRefLabel(entry: StoryEvidenceEntry): string {
+function technicalRefLabel(entry: SignalEvidenceItem): string {
   const factPart = entry.fact_id ? `命中引用 ${shortRef(entry.fact_id)}` : '补证结果';
   return `${factPart} · 引用 ${shortRef(entry.evidence_ref)}`;
 }

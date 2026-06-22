@@ -2,7 +2,7 @@ import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { DashboardSummary, RiskSummary, StoriesResponse, UsageSummary } from '../api/types';
+import type { DashboardSummary, RiskSummary, SignalsResponse, UsageSummary } from '../api/types';
 import { DashboardPage } from './DashboardPage';
 
 const usage: UsageSummary = {
@@ -101,29 +101,29 @@ const summary: DashboardSummary = {
       summary: '采集器完成一次安全自检，状态、游标和 outbox 已结构化上报。',
       occurred_at: '2026-06-19T11:30:03+08:00',
       source: 'codex',
-      promoted_to_story: false
+      promoted_to_signal: false
     }
     ]
   },
-  stories: { total: 0, items: [] },
+  signals: { total: 0, items: [] },
   risks: { total: 1, top: risks.signals }
 };
 
-const storyPage: StoriesResponse = { stories: [], total: 0, page: 1, page_size: 20, has_more: false };
+const signalPage: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
 
 describe('DashboardPage', () => {
   it('renders signals and usage trend instead of usage anomaly investigation', async () => {
     const loadDashboardSummary = vi.fn(async () => summary);
-    const loadStories = vi.fn(async () => storyPage);
+    const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
     render(
       <DashboardPage
         loadDashboardSummary={loadDashboardSummary}
-        loadStories={loadStories}
+        loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
-        onOpenStory={() => {}}
+        onOpenSignal={() => {}}
       />
     );
 
@@ -131,7 +131,7 @@ describe('DashboardPage', () => {
     expect(screen.getByLabelText('用量趋势')).toBeInTheDocument();
     expect(screen.getByLabelText('选择时间范围内 token 用量与缓存命中折线图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
-    expect(screen.getByText('观测信号队列')).toBeInTheDocument();
+    expect(screen.getByText('行为风险信号')).toBeInTheDocument();
     expect(screen.getByText('采集器自检')).toBeInTheDocument();
     expect(screen.queryByText(/最近命中：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
@@ -145,7 +145,7 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/Conversation：conversation-001 \/ 2,040/)).toBeInTheDocument();
     expect(screen.getByText(/未识别活动：1,015/)).toBeInTheDocument();
     expect(screen.getAllByText(/敏感对象触达 \/ 配置：1,001/).length).toBeGreaterThan(0);
-    expect(loadStories).toHaveBeenCalledWith({ window: '1h', queue: 'actionable', page: 1, page_size: 20 });
+    expect(loadSignals).toHaveBeenCalledWith({ window: '1h', page: 1, page_size: 20 });
     expect(loadUsageSummary).toHaveBeenCalledWith('1h');
     expect(loadRiskSummary).toHaveBeenCalledWith('1h');
     expect(loadDashboardSummary).toHaveBeenCalledWith('1h');
@@ -154,20 +154,20 @@ describe('DashboardPage', () => {
   it('refreshes dashboard data without changing the selected time window', async () => {
     const user = userEvent.setup();
     const loadDashboardSummary = vi.fn(async () => summary);
-    const loadStories = vi.fn(async () => storyPage);
+    const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
     render(
       <DashboardPage
         loadDashboardSummary={loadDashboardSummary}
-        loadStories={loadStories}
+        loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
-        onOpenStory={() => {}}
+        onOpenSignal={() => {}}
       />
     );
 
-    await screen.findByText('观测信号队列');
+    await screen.findByText('行为风险信号');
     await user.click(screen.getByRole('button', { name: '24小时' }));
     await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('24h'));
     expect(loadRiskSummary).toHaveBeenLastCalledWith('24h');

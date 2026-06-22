@@ -69,7 +69,7 @@ SCHEMA_SQL = """
           severity text not null,
           summary text not null,
           occurred_at text not null,
-          promoted_to_story integer not null default 0,
+          promoted_to_signal integer not null default 0,
           source_refs_json text not null,
           source_specific_json text not null,
           content_preview text not null default '',
@@ -141,34 +141,35 @@ SCHEMA_SQL = """
           object_type text not null default 'unknown'
         );
 
-        create table if not exists observation_stories (
-          story_id text primary key,
-          story_key text not null unique,
+        create table if not exists behavior_signals (
+          signal_id text primary key,
+          signal_key text not null unique,
+          signal_kind text not null,
+          title text not null,
+          why_it_matters text not null,
+          severity text not null,
+          confidence text not null,
           priority_score integer not null,
-          evidence_refs_json text not null,
+          affected_scope_json text not null,
+          evidence_groups_json text not null,
+          linked_conversations_json text not null,
           usage_summary_json text not null,
           enrichment_status_summary_json text not null,
-          attention_state text not null,
-          current_snapshot_json text not null,
+          suggested_actions_json text not null,
+          decision_state text not null,
           snapshot_hash text not null,
-          conclusion text not null,
-          impact_objects_json text not null,
-          suggested_action text not null,
-          story_type text not null,
           first_seen_at text not null,
           last_seen_at text not null,
           last_event_at text not null,
           occurrence_count integer not null,
-          primary_object_type text not null,
-          primary_object_value text not null,
           latest_fact_id text,
           latest_summary text not null,
           updated_at text not null
         );
 
-        create table if not exists story_handling_states (
-          story_id text primary key,
-          handling_state text not null,
+        create table if not exists signal_decisions (
+          signal_id text primary key,
+          decision_state text not null,
           conclusion_code text,
           note text,
           updated_by text not null,
@@ -187,7 +188,7 @@ SCHEMA_SQL = """
 
         create table if not exists enrichment_jobs (
           job_id text primary key,
-          story_id text not null,
+          signal_id text not null,
           collector_id text,
           capability_id text not null,
           status text not null,
@@ -202,7 +203,7 @@ SCHEMA_SQL = """
         create table if not exists enrichment_results (
           result_id text primary key,
           job_id text not null unique,
-          story_id text not null,
+          signal_id text not null,
           capability_id text not null,
           output_schema text not null,
           status text not null,
@@ -290,10 +291,10 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on error_signature_facts(category, signature_key);
         create index if not exists idx_evidence_projections_fact_id
           on evidence_projections(fact_id);
-        create index if not exists idx_observation_stories_attention_last_event
-          on observation_stories(attention_state, last_event_at desc);
-        create index if not exists idx_observation_stories_type_last_event
-          on observation_stories(story_type, last_event_at desc);
+        create index if not exists idx_behavior_signals_decision_last_event
+          on behavior_signals(decision_state, last_event_at desc);
+        create index if not exists idx_behavior_signals_kind_last_event
+          on behavior_signals(signal_kind, last_event_at desc);
         """
     )
 

@@ -4,16 +4,16 @@ import { Search, X } from 'lucide-react';
 import type { EnrichmentAvailability, EnrichmentJob } from '../api/types';
 
 interface Props {
-  storyId: string;
+  signalId: string;
   availability: EnrichmentAvailability;
-  requestEnrichment: (storyId: string, capabilityId: string) => Promise<EnrichmentJob>;
+  requestEnrichment: (signalId: string, capabilityId: string) => Promise<EnrichmentJob>;
   cancelEnrichment: (jobId: string) => Promise<EnrichmentJob>;
   onChanged?: () => Promise<void>;
 }
 
 type MutationState = 'idle' | 'submitting' | 'success' | 'error';
 
-export function EnrichmentPanel({ storyId, availability, requestEnrichment, cancelEnrichment, onChanged }: Props) {
+export function EnrichmentPanel({ signalId, availability, requestEnrichment, cancelEnrichment, onChanged }: Props) {
   const [activeJob, setActiveJob] = useState<EnrichmentJob | null>(availability.active_job ?? null);
   const [mutationState, setMutationState] = useState<MutationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
@@ -65,7 +65,7 @@ export function EnrichmentPanel({ storyId, availability, requestEnrichment, canc
     setMutationState('submitting');
     setMessage(null);
     try {
-      const job = await requestEnrichment(storyId, capabilityId);
+      const job = await requestEnrichment(signalId, capabilityId);
       setActiveJob(job);
       setMutationState('success');
       setMessage(`补证 ${enrichmentJobStatusLabel(job.status)}`);

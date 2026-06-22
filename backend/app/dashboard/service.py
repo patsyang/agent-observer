@@ -5,12 +5,12 @@ from datetime import UTC, datetime, timedelta
 
 from app.collectors.service import list_collectors
 from app.facts.service import query_facts
-from app.stories.service import list_stories
+from app.behavior_signals.service import list_signals
 
 
 def get_dashboard_summary(conn: sqlite3.Connection, window: str = "1h") -> dict:
     collectors = list_collectors(conn)
-    stories = list_stories(conn, window=window, queue="actionable", page=1, page_size=5)
+    signals = list_signals(conn, window=window, page=1, page_size=5)
     facts = query_facts(conn, window=window, include_health=False, page=1, page_size=5, time_basis="occurred")
     risks = _risk_top(conn, window)
     return {
@@ -22,9 +22,9 @@ def get_dashboard_summary(conn: sqlite3.Connection, window: str = "1h") -> dict:
             "offline": sum(1 for collector in collectors if collector["source_status"] == "offline"),
             "items": collectors[:5],
         },
-        "stories": {
-            "total": stories["total"],
-            "items": stories["stories"],
+        "signals": {
+            "total": signals["total"],
+            "items": signals["signals"],
         },
         "facts": {
             "total": facts["total"],

@@ -224,7 +224,7 @@ def test_packaged_collector_runs_tool_failure_enrichment_from_local_sessions(tmp
                     "status": "pending",
                     "command": {
                         "command_id": "collect_codex_tool_failure_context",
-                        "story_id": "story-001",
+                        "signal_id": "signal-001",
                         "capability_id": "codex_tool_failure_context",
                         "evidence_refs": [{"conversation_ref": "conversation-package"}],
                     },

@@ -12,7 +12,7 @@ export interface ObservedFact {
   occurred_at: string;
   ingested_at?: string;
   source: string;
-  promoted_to_story: boolean;
+  promoted_to_signal: boolean;
   source_event_type?: string;
   source_label?: string;
   content_preview?: string;

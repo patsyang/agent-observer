@@ -375,3 +375,31 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     assert any(fact.get("error_signature", {}).get("signature_key", "").startswith("codex_error:function_call_output") for fact in facts)
     assert any(fact.get("projection", {}).get("command_category") == "test" for fact in facts)
     assert not [fact for fact in facts if fact["category"] == "sensitive_touch"]
+
+
+def test_codex_source_template_attaches_latest_session_title(tmp_path):
+    codex_home = tmp_path / ".codex"
+    _write_session(codex_home)
+    (codex_home / "session_index.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"id": "session-001", "thread_name": "旧会话名", "updated_at": "2026-06-18T09:00:00Z"}),
+                json.dumps({"id": "session-001", "thread_name": "分析信号定义与类型-Grill", "updated_at": "2026-06-18T10:00:00Z"}),
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    facts = collect_facts(
+        "collector-codex-title",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    business_facts = [fact for fact in facts if fact["category"] != "collector_health"]
+    assert business_facts
+    assert {fact["source_refs"]["session_title"] for fact in business_facts} == {"分析信号定义与类型-Grill"}

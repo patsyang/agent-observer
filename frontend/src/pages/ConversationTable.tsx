@@ -28,6 +28,7 @@ export function ConversationTable({
           <tr>
             <th>序号</th>
             <th>时间戳</th>
+            <th>Codex 会话名</th>
             <th>提交 Prompt</th>
             <th>响应内容</th>
           </tr>
@@ -44,6 +45,7 @@ export function ConversationTable({
             >
               <td data-label="序号">{formatNumber((meta.page - 1) * meta.page_size + index + 1)}</td>
               <td data-label="时间戳">{formatDateTime(row.last_event_at)}</td>
+              <td data-label="Codex 会话名"><span className="content-preview">{row.session_title || row.session_ref || '未知会话'}</span></td>
               <td data-label="提交 Prompt"><span className="content-preview">{row.prompt_preview || '暂无 Prompt'}</span></td>
               <td data-label="响应内容"><span className="content-preview">{row.response_preview || '暂无响应'}</span></td>
             </tr>

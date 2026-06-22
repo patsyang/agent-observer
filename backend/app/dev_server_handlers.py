@@ -26,7 +26,7 @@ from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.risks.service import get_risk_summary
-from app.stories.service import get_story_detail, handle_story, list_stories, mark_story_read, rebuild_stories
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, rebuild_signals
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
 
@@ -52,12 +52,10 @@ def _query_int(query: dict[str, list[str]], key: str, default: int) -> int:
         return default
 
 
-def _stories_query_options(raw_path: str) -> dict:
+def _signals_query_options(raw_path: str) -> dict:
     query = parse_qs(urlparse(raw_path).query)
     return {
-        "include_hidden": _query_bool(query, "include_hidden", False),
         "window": _query_one(query, "window", "all"),
-        "queue": _query_one(query, "queue", "all"),
         "page": _query_int(query, "page", 1),
         "page_size": _query_int(query, "page_size", 20),
     }
@@ -118,18 +116,18 @@ def handle_get(handler) -> None:
                 return handler._json(200, get_effective_policy(conn))
             if path == "/api/audit/recent":
                 return handler._json(200, recent_audit(conn))
-            if path == "/api/stories":
-                return handler._json(200, list_stories(conn, **_stories_query_options(handler.path)))
-            if path.startswith("/api/stories/") and path.endswith("/enrichments/availability"):
+            if path == "/api/signals":
+                return handler._json(200, list_signals(conn, **_signals_query_options(handler.path)))
+            if path.startswith("/api/signals/") and path.endswith("/enrichments/availability"):
                 try:
                     return handler._json(200, get_enrichment_availability(conn, path.split("/")[3]))
                 except LookupError:
-                    return handler._json(404, {"error": "story not found"})
-            if path.startswith("/api/stories/"):
+                    return handler._json(404, {"error": "signal not found"})
+            if path.startswith("/api/signals/"):
                 try:
-                    return handler._json(200, get_story_detail(conn, path.split("/")[3]))
+                    return handler._json(200, get_signal_detail(conn, path.split("/")[3]))
                 except LookupError:
-                    return handler._json(404, {"error": "story not found"})
+                    return handler._json(404, {"error": "signal not found"})
             if path == "/api/client-package/config":
                 return handler._json(200, build_windows_package(conn))
             if path == "/api/client-package/windows":
@@ -203,27 +201,27 @@ def _handle_post_locked(handler, conn, path: str, payload: dict) -> None:
                 return handler._json(200, ingest_telemetry(conn, payload))
             except ValueError as exc:
                 return handler._json(400, {"error": str(exc)})
-        if path == "/api/stories/rebuild":
-            return handler._json(200, rebuild_stories(conn, reason=payload.get("reason", "api")))
+        if path == "/api/signals/rebuild":
+            return handler._json(200, rebuild_signals(conn, reason=payload.get("reason", "api")))
         if path == "/api/validation/minimum-experiment":
             return handler._json(200, run_minimum_validation_experiment(conn))
-        if path.startswith("/api/stories/") and path.endswith("/read"):
+        if path.startswith("/api/signals/") and path.endswith("/read"):
             try:
-                return handler._json(200, mark_story_read(conn, path.split("/")[3]))
+                return handler._json(200, mark_signal_read(conn, path.split("/")[3]))
             except LookupError:
-                return handler._json(404, {"error": "story not found"})
-        if path.startswith("/api/stories/") and path.endswith("/handle"):
+                return handler._json(404, {"error": "signal not found"})
+        if path.startswith("/api/signals/") and path.endswith("/handle"):
             try:
-                return handler._json(200, handle_story(conn, path.split("/")[3], payload.get("conclusion_code"), payload.get("note")))
+                return handler._json(200, handle_signal(conn, path.split("/")[3], payload.get("conclusion_code"), payload.get("note")))
             except LookupError:
-                return handler._json(404, {"error": "story not found"})
+                return handler._json(404, {"error": "signal not found"})
             except ValueError as exc:
                 return handler._json(400, {"error": str(exc)})
-        if path.startswith("/api/stories/") and path.endswith("/enrichments"):
+        if path.startswith("/api/signals/") and path.endswith("/enrichments"):
             try:
                 return handler._json(200, request_enrichment(conn, path.split("/")[3], payload.get("capability_id", "")))
             except LookupError:
-                return handler._json(404, {"error": "story not found"})
+                return handler._json(404, {"error": "signal not found"})
             except ValueError as exc:
                 return handler._json(400, {"error": str(exc)})
         if path.startswith("/api/enrichments/") and path.endswith("/cancel"):

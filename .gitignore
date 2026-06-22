@@ -46,6 +46,11 @@ vite*.log
 
 # Local runtime inspection scripts
 data/runtime/inspect_*.py
+data/tmp-validation.json
+
+# Local dev helper scripts (use python scripts/ao.py as persistent entry)
+scripts/*.cmd
+scripts/*.ps1
 
 # SQLite runtime files (locks, WAL, backups)
 *.sqlite-shm
@@ -84,3 +89,4 @@ frontend/data/runtime/
 
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite
+backend/data/packages/

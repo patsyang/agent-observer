@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -8,6 +8,7 @@ import { ConversationQueryPage } from './ConversationQueryPage';
 const detail: ConversationDetail = {
   conversation_ref: 'conv-alpha',
   session_ref: 'session-alpha',
+  session_title: '分析信号定义与类型-Grill',
   started_at: '2026-06-21T01:00:00+00:00',
   last_event_at: '2026-06-21T01:04:00+00:00',
   prompt_preview: '请检查观测总览',
@@ -82,6 +83,8 @@ describe('ConversationQueryPage', () => {
     );
 
     expect(await screen.findByText('序号')).toBeInTheDocument();
+    expect(screen.getByText('Codex 会话名')).toBeInTheDocument();
+    expect(screen.getByText('分析信号定义与类型-Grill')).toBeInTheDocument();
     expect(screen.getByText('时间戳')).toBeInTheDocument();
     expect(screen.getAllByText('提交 Prompt').length).toBeGreaterThan(0);
     expect(screen.getAllByText('响应内容').length).toBeGreaterThan(0);
@@ -135,8 +138,11 @@ describe('ConversationQueryPage', () => {
       />
     );
 
-    expect(await screen.findByLabelText('会话详情')).toBeInTheDocument();
+    const drawer = await screen.findByLabelText('会话详情');
+    expect(drawer).toBeInTheDocument();
     expect(loadConversationForFact).toHaveBeenCalledWith('risk-alpha');
+    expect(within(drawer).getByRole('heading', { name: '分析信号定义与类型-Grill' })).toBeInTheDocument();
+    expect(within(drawer).getByText('conv-alpha')).toBeInTheDocument();
     expect(screen.getByText('模型调用累计有效 token')).toBeInTheDocument();
     expect(screen.getByText('缓存命中 token')).toBeInTheDocument();
     expect(screen.getByText('60.0%')).toBeInTheDocument();
