@@ -80,7 +80,7 @@ def within_range(value: str, window: str, start_at: str | None = None, end_at: s
 
 def bucket_size_minutes(window: str, start_at: str | None = None, end_at: str | None = None) -> int:
     if window == "1h":
-        return 1
+        return 5
     if window == "3h":
         return 15
     if window == "6h":
@@ -98,7 +98,7 @@ def bucket_size_minutes(window: str, start_at: str | None = None, end_at: str | 
         return 24 * 60
     seconds = max(0, (end - start).total_seconds())
     if seconds <= 60 * 60:
-        return 1
+        return 5
     if seconds <= 6 * 60 * 60:
         return 15
     if seconds <= 24 * 60 * 60:

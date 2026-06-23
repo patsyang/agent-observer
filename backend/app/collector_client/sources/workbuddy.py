@@ -81,6 +81,8 @@ def _candidate_files(root: Path, cutoff: datetime) -> list[Path]:
         for path in base.rglob("*"):
             if not path.is_file() or path.suffix.lower() not in {".json", ".jsonl", ".ndjson"}:
                 continue
+            if name == "audit-log" and path.name.lower() == "state.json":
+                continue
             try:
                 stat = path.stat()
             except OSError:
@@ -552,7 +554,40 @@ def _occurred_at(record: dict) -> str:
         return datetime.fromtimestamp(value, UTC).replace(microsecond=0).isoformat()
     if isinstance(raw, str) and raw:
         return raw
+    if trace_time := _trace_occurred_at(record):
+        return trace_time
     return _now()
+
+
+def _trace_occurred_at(record: dict) -> str:
+    candidates: list[str] = []
+    trace = record.get("trace") if isinstance(record.get("trace"), dict) else {}
+    for key in ("endedAt", "ended_at", "updatedAt", "updated_at", "createdAt", "created_at", "startedAt", "started_at"):
+        value = trace.get(key)
+        if isinstance(value, str) and value:
+            candidates.append(value)
+    spans = record.get("spans")
+    if isinstance(spans, list):
+        for span in spans:
+            if not isinstance(span, dict):
+                continue
+            for key in ("endedAt", "ended_at", "startedAt", "started_at"):
+                value = span.get(key)
+                if isinstance(value, str) and value:
+                    candidates.append(value)
+    parsed = [(_parse_iso_time(value), value) for value in candidates]
+    parsed = [(dt, value) for dt, value in parsed if dt is not None]
+    if not parsed:
+        return ""
+    latest, _raw = max(parsed, key=lambda item: item[0])
+    return latest.astimezone(UTC).replace(microsecond=0).isoformat()
+
+
+def _parse_iso_time(value: str) -> datetime | None:
+    try:
+        return datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError:
+        return None
 
 
 def _now() -> str:

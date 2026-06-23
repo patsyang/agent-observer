@@ -107,6 +107,9 @@ def test_workbuddy_trace_model_info_is_fallback_usage(tmp_path):
                     "callCount": 1,
                 },
             },
+            "spans": [
+                {"startedAt": "2026-06-21T12:15:52.449Z", "endedAt": "2026-06-21T12:34:26.005Z"},
+            ],
             "sessionId": "session-a",
         },
     )
@@ -127,6 +130,7 @@ def test_workbuddy_trace_model_info_is_fallback_usage(tmp_path):
     assert usage["usage"]["cached_input_tokens"] == 800
     assert usage["usage"]["output_tokens"] == 120
     assert usage["usage"]["model"] == "glm-5.1"
+    assert usage["occurred_at"] == "2026-06-21T12:34:26+00:00"
 
 
 def test_workbuddy_project_usage_suppresses_trace_fallback_by_request_id(tmp_path):
@@ -166,6 +170,32 @@ def test_workbuddy_project_usage_suppresses_trace_fallback_by_request_id(tmp_pat
     assert len(usage_bearing_facts) == 1
     assert usage_bearing_facts[0]["usage"]["units"] == 550
     assert not any(fact["category"] == "usage" for fact in result.facts)
+
+
+def test_workbuddy_audit_state_file_is_not_collected_as_business_event(tmp_path):
+    root = tmp_path / ".workbuddy"
+    _write_json(
+        root / "audit-log" / "state.json",
+        {
+            "closedSegments": ["2026-06-22.jsonl"],
+            "currentSegment": "2026-06-23.jsonl",
+            "lastHash": "abc",
+            "sequence": 180,
+        },
+    )
+
+    result = collect_workbuddy_source(
+        SourceConfig("workbuddy-local", "workbuddy", "workbuddy_local", "WorkBuddy Local", root, True),
+        collector_id="collector-a",
+        sequence=1,
+        telemetry_mode="safe_probe",
+        history_window_days=7,
+        max_events=20,
+        cursor={},
+    )
+
+    assert result.status == "online"
+    assert result.facts == []
 
 
 def _write_json(path, payload):

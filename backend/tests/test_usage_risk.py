@@ -199,14 +199,14 @@ def test_usage_summary_read_does_not_write_rollup_rows(tmp_path):
 def test_usage_summary_includes_time_trend(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(conn, _usage_risk_batch())
-        summary = get_usage_summary(conn, window="1h")
+    summary = get_usage_summary(conn, window="1h")
 
     assert summary["trend"]
-    assert summary["trend"][0]["effective_units"] == 175
-    assert summary["trend"][0]["unknown_units"] == 15
-    assert summary["trend"][0]["cached_input_units"] == 90
-    assert summary["trend"][0]["input_token_units"] == 250
-    assert summary["trend"][0]["cache_hit_rate"] == 0.36
+    usage_bucket = next(row for row in summary["trend"] if row["effective_units"] == 175)
+    assert usage_bucket["unknown_units"] == 15
+    assert usage_bucket["cached_input_units"] == 90
+    assert usage_bucket["input_token_units"] == 250
+    assert usage_bucket["cache_hit_rate"] == 0.36
     assert summary["totals"]["cached_input_units"] == 90
     assert summary["totals"]["input_token_units"] == 250
     assert summary["totals"]["cache_hit_rate"] == 0.36
@@ -239,7 +239,7 @@ def test_total_only_usage_does_not_affect_cache_hit_denominator(tmp_path):
     assert summary["totals"]["cache_hit_rate"] == 0.4
 
 
-def test_usage_summary_one_hour_uses_one_minute_trend_buckets(tmp_path):
+def test_usage_summary_one_hour_uses_five_minute_zero_filled_trend_buckets(tmp_path):
     first_at = (datetime.now(UTC) - timedelta(minutes=10)).replace(second=0, microsecond=0)
     second_at = first_at + timedelta(minutes=1)
     with connect(tmp_path / "observer.sqlite") as conn:
@@ -250,15 +250,17 @@ def test_usage_summary_one_hour_uses_one_minute_trend_buckets(tmp_path):
         ingest_telemetry(conn, batch)
         summary = get_usage_summary(conn, window="1h")
 
-    assert summary["bucket_size_minutes"] == 1
-    assert len(summary["trend"]) == 2
-    assert [row["effective_units"] for row in summary["trend"]] == [120, 40]
+    assert summary["bucket_size_minutes"] == 5
+    assert len(summary["trend"]) >= 12
+    assert sum(row["effective_units"] for row in summary["trend"]) == 160
+    assert any(row["effective_units"] == 0 for row in summary["trend"])
 
 
 def test_usage_summary_today_uses_hourly_trend_buckets(tmp_path):
     local_start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
-    first_at = (local_start + timedelta(hours=1, minutes=10)).astimezone(UTC).replace(microsecond=0).isoformat()
-    second_at = (local_start + timedelta(hours=2, minutes=30)).astimezone(UTC).replace(microsecond=0).isoformat()
+    local_now = datetime.now().astimezone()
+    first_at = (local_start + timedelta(minutes=10)).astimezone(UTC).replace(microsecond=0).isoformat()
+    second_at = local_now.astimezone(UTC).replace(microsecond=0).isoformat()
     with connect(tmp_path / "observer.sqlite") as conn:
         batch = _usage_risk_batch()
         batch["items"] = [dict(batch["items"][0]), dict(batch["items"][1])]
@@ -268,8 +270,9 @@ def test_usage_summary_today_uses_hourly_trend_buckets(tmp_path):
         summary = get_usage_summary(conn, window="today")
 
     assert summary["bucket_size_minutes"] == 60
-    assert len(summary["trend"]) == 2
-    assert {row["effective_units"] for row in summary["trend"]} == {120, 40}
+    assert len(summary["trend"]) >= local_now.hour + 1
+    assert sum(row["effective_units"] for row in summary["trend"]) == 160
+    assert summary["trend"][0]["bucket"] == local_start.astimezone(UTC).isoformat()
     assert all(row["bucket"].endswith(":00:00+00:00") for row in summary["trend"])
 
 
@@ -290,8 +293,9 @@ def test_usage_summary_custom_range_uses_adaptive_trend_buckets(tmp_path):
 
     assert summary["bucket_size_minutes"] == 15
     assert summary["totals"]["effective_units"] == 160
-    assert len(summary["trend"]) == 2
-    assert [row["effective_units"] for row in summary["trend"]] == [120, 40]
+    assert len(summary["trend"]) >= 24
+    assert sum(row["effective_units"] for row in summary["trend"]) == 160
+    assert any(row["effective_units"] == 0 for row in summary["trend"])
 
 
 @pytest.mark.parametrize(
@@ -321,8 +325,9 @@ def test_usage_summary_short_windows_exclude_history_and_use_subday_buckets(
 
     assert summary["bucket_size_minutes"] == expected_bucket_minutes
     assert summary["totals"]["effective_units"] == 120
-    assert [row["effective_units"] for row in summary["trend"]] == [120]
-    bucket_at = datetime.fromisoformat(summary["trend"][0]["bucket"])
+    assert sum(row["effective_units"] for row in summary["trend"]) == 120
+    assert any(row["effective_units"] == 0 for row in summary["trend"])
+    bucket_at = datetime.fromisoformat(next(row["bucket"] for row in summary["trend"] if row["effective_units"] == 120))
     inside = datetime.fromisoformat(inside_at)
     assert timedelta(0) <= inside - bucket_at < timedelta(minutes=expected_bucket_minutes)
 
@@ -338,22 +343,22 @@ def test_usage_summary_week_uses_local_day_trend_bucket(tmp_path):
         summary = get_usage_summary(conn, window="week")
 
     assert summary["bucket_size_minutes"] == 24 * 60
-    assert summary["trend"] == [
-        {
-            "bucket": local_start.astimezone(UTC).isoformat(),
-            "effective_units": 120,
-            "unknown_units": 0,
-            "cached_input_units": 80,
-            "input_token_units": 200,
-            "output_token_units": 0,
-            "total_token_units": 200,
-            "cache_write_input_units": 0,
-            "reasoning_output_units": 0,
-            "credit_total": 0.0,
-            "cache_observed_input_units": 200,
-            "cache_hit_rate": 0.4,
-        }
-    ]
+    usage_bucket = next(row for row in summary["trend"] if row["effective_units"] == 120)
+    assert usage_bucket == {
+        "bucket": local_start.astimezone(UTC).isoformat(),
+        "effective_units": 120,
+        "unknown_units": 0,
+        "cached_input_units": 80,
+        "input_token_units": 200,
+        "output_token_units": 0,
+        "total_token_units": 200,
+        "cache_write_input_units": 0,
+        "reasoning_output_units": 0,
+        "credit_total": 0.0,
+        "cache_observed_input_units": 200,
+        "cache_hit_rate": 0.4,
+    }
+    assert len(summary["trend"]) >= datetime.now().astimezone().weekday() + 1
 
 
 def test_usage_summary_filters_by_agent_type(tmp_path):
@@ -405,9 +410,9 @@ def test_usage_summary_filters_by_agent_type(tmp_path):
         workbuddy_summary = get_usage_summary(conn, window="1h", agent_type="workbuddy")
 
     assert codex_summary["totals"]["effective_units"] == 175
-    assert codex_summary["trend"][0]["effective_units"] == 175
+    assert sum(row["effective_units"] for row in codex_summary["trend"]) == 175
     assert workbuddy_summary["totals"]["effective_units"] == 300
-    assert workbuddy_summary["trend"][0]["effective_units"] == 300
+    assert sum(row["effective_units"] for row in workbuddy_summary["trend"]) == 300
 
 
 def test_risk_summary_uses_projection_refs_and_object_counts(tmp_path):

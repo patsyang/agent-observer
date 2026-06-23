@@ -26,7 +26,7 @@ def query_conversations(
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
-    rows = _conversation_rows(
+    activity_rows = _conversation_rows(
         conn,
         window=window,
         start_at=start_at,
@@ -34,7 +34,11 @@ def query_conversations(
         agent_type=agent_type,
         source_id=source_id,
     )
-    conversations = [_summary(conn, ref, facts) for ref, facts in _group_by_conversation(rows).items()]
+    conversations = []
+    for ref in _group_by_conversation(activity_rows):
+        rows = _summary_rows(conn, ref, agent_type=agent_type, source_id=source_id)
+        if rows:
+            conversations.append(_summary(conn, ref, rows))
     conversations = [item for item in conversations if _has_input_or_output(item)]
     conversations = filter_conversations(
         conversations,
@@ -183,6 +187,46 @@ def _conversation_rows(
         params,
     ).fetchall()
 
+def _summary_rows(conn: sqlite3.Connection, conversation_ref: str, *, agent_type: str | None, source_id: str | None) -> list[sqlite3.Row]:
+    turn = _parse_turn_ref(conversation_ref)
+    if turn is not None:
+        return _filter_rows(_turn_detail_rows(conn, turn), agent_type=agent_type, source_id=source_id)
+    clauses = [
+        "coalesce(nullif(f.conversation_ref, ''), nullif(f.session_ref, ''), f.fact_id) = ?",
+        "f.fact_type != 'collector_health'",
+    ]
+    params: list[str] = [conversation_ref]
+    if agent_type:
+        clauses.append("f.agent_type = ?")
+        params.append(agent_type)
+    if source_id:
+        clauses.append("f.source_id = ?")
+        params.append(source_id)
+    where = " and ".join(clauses)
+    return conn.execute(
+        f"""
+        select f.*, p.projection_id, p.category as projection_category,
+               p.projection_json, p.upload_raw, p.raw_content
+        from observed_facts f
+        left join evidence_projections p on p.projection_id = (
+          select projection_id from evidence_projections
+          where fact_id = f.fact_id
+          order by projection_id
+          limit 1
+        )
+        where {where}
+        order by f.occurred_at, f.fact_id
+        """,
+        params,
+    ).fetchall()
+
+def _filter_rows(rows: list[sqlite3.Row], *, agent_type: str | None, source_id: str | None) -> list[sqlite3.Row]:
+    return [
+        row
+        for row in rows
+        if (not agent_type or row["agent_type"] == agent_type) and (not source_id or row["source_id"] == source_id)
+    ]
+
 def _group_by_conversation(rows: list[sqlite3.Row]) -> dict[str, list[sqlite3.Row]]:
     grouped: dict[str, list[sqlite3.Row]] = {}
     buckets: dict[tuple[str, str], list[sqlite3.Row]] = {}
@@ -231,7 +275,8 @@ def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3
 def _has_input_or_output(item: dict) -> bool:
     has_prompt = bool(item["prompt_preview"] or item.get("_prompt_search_text"))
     has_response = bool(item["response_preview"] or item.get("_response_search_text"))
-    return has_prompt and has_response
+    has_usage = int(item.get("token_usage", {}).get("model_call_count") or 0) > 0
+    return (has_prompt and has_response) or has_usage
 
 def _public_summary(item: dict) -> dict:
     return {key: value for key, value in item.items() if not key.startswith("_")}

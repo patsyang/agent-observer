@@ -214,7 +214,7 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
     assert start_payload["running"] is False
     assert start_payload["cursor"]["last_sequence"] == 3
     assert calls.count(("POST", "/api/collectors/register")) == 1
-    assert calls.count(("POST", "/api/telemetry/ingest")) == 2
+    assert calls.count(("POST", "/api/telemetry/ingest")) == 1
     assert calls.count(("POST", "/api/collectors/package-test/heartbeat")) >= 4
     assert calls.count(("GET", "/api/collectors/package-test/enrichments/next")) == 2
     assert any(item.get("raw_content") for batch in uploaded_batches[1:] for item in batch["items"])

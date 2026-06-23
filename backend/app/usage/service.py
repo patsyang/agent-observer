@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from app.time_ranges import bucket_size_minutes, bucket_start_iso, range_bounds_iso, within_range, window_cutoff
+from app.time_ranges import bucket_size_minutes, bucket_start_iso, parse_iso, range_bounds, range_bounds_iso, within_range, window_cutoff
 
 
 ROLLUP_SCOPES = ("total", "session", "conversation", "project", "account", "activity_tag")
@@ -222,7 +222,7 @@ def _usage_trend(
     start_at: str | None = None,
     end_at: str | None = None,
 ) -> list[dict]:
-    buckets: dict[str, dict[str, int]] = {}
+    buckets = _empty_trend_buckets(rows, window, bucket_minutes, start_at, end_at)
     for row in rows:
         if not within_range(row["occurred_at"], window, start_at, end_at):
             continue
@@ -240,6 +240,46 @@ def _usage_trend(
         {"bucket": bucket, **values, "credit_total": round(float(values["credit_total"]), 4), "cache_hit_rate": _ratio(values["cached_input_units"], values["cache_observed_input_units"])}
         for bucket, values in sorted(buckets.items())
     ]
+
+
+def _empty_trend_buckets(
+    rows: list[sqlite3.Row],
+    window: str,
+    bucket_minutes: int,
+    start_at: str | None,
+    end_at: str | None,
+) -> dict[str, dict[str, int | float]]:
+    start, end = _trend_bounds(rows, window, start_at, end_at)
+    if not start or not end:
+        return {}
+    buckets: dict[str, dict[str, int | float]] = {}
+    current = parse_iso(bucket_start_iso(start.isoformat(), bucket_minutes))
+    last = parse_iso(bucket_start_iso(end.isoformat(), bucket_minutes))
+    if not current or not last:
+        return buckets
+    step = timedelta(minutes=bucket_minutes)
+    while current <= last:
+        buckets[current.isoformat()] = {"effective_units": 0, "unknown_units": 0, **_zero_metrics()}
+        current += step
+    return buckets
+
+
+def _trend_bounds(
+    rows: list[sqlite3.Row],
+    window: str,
+    start_at: str | None,
+    end_at: str | None,
+) -> tuple[datetime | None, datetime | None]:
+    start, end = range_bounds(window, start_at, end_at)
+    if end is None and start is not None:
+        end = datetime.now(UTC)
+    if start is not None:
+        return start, end
+    occurred_values = [parse_iso(row["occurred_at"]) for row in rows]
+    occurred = [value for value in occurred_values if value is not None]
+    if not occurred:
+        return None, None
+    return min(occurred), max(occurred)
 
 
 def _metric_totals(rows: list[sqlite3.Row], window: str, start_at: str | None = None, end_at: str | None = None) -> dict[str, int | float]:

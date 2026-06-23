@@ -31,7 +31,7 @@ def collect_facts(
         codex_home=root,
         history_window_days=history_window_days,
         max_events=max_events,
-        cursor=cursor or {},
+        cursor={} if cursor is None else cursor,
     )
 
 def _codex_facts(

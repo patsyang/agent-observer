@@ -191,6 +191,68 @@ def test_query_conversations_groups_prompt_response_and_usage(tmp_path):
     assert row["token_usage"]["cache_hit_rate"] == 0.6
 
 
+def test_query_conversations_uses_recent_activity_to_show_full_context(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-conversation-recent-activity",
+                "protocol_version": "agent-observer-telemetry/v3",
+                "agent_version": "0.3.0",
+                "collector_id": "collector-codex",
+                "source": "codex",
+                "source_id": "codex-local",
+                "agent_type": "codex",
+                "source_kind": "codex_local",
+                "cursor": "cursor-recent-activity",
+                "items": [
+                    _item("activity-prompt", "agent_prompt", "两小时前的输入", (now - timedelta(hours=2)).isoformat(), "conv-activity"),
+                    _item("activity-response", "agent_response", "两小时前的输出", (now - timedelta(hours=2, minutes=-1)).isoformat(), "conv-activity"),
+                    _usage("activity-usage", 64, (now - timedelta(minutes=10)).isoformat(), "conv-activity", input_tokens=100, cached_input_tokens=40),
+                ],
+            },
+        )
+        result = query_conversations(conn, window="1h")
+
+    assert result["total"] == 1
+    row = result["conversations"][0]
+    assert row["conversation_ref"] == "conv-activity"
+    assert row["prompt_preview"] == "两小时前的输入"
+    assert row["response_preview"] == "两小时前的输出"
+    assert row["token_usage"]["effective_units"] == 64
+
+
+def test_query_conversations_includes_usage_only_activity(tmp_path):
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-conversation-usage-only",
+                "protocol_version": "agent-observer-telemetry/v3",
+                "agent_version": "0.3.0",
+                "collector_id": "collector-workbuddy",
+                "source": "workbuddy",
+                "source_id": "workbuddy-local",
+                "agent_type": "workbuddy",
+                "source_kind": "workbuddy_local",
+                "cursor": "cursor-usage-only",
+                "items": [
+                    _usage("usage-only", 128, (now - timedelta(minutes=5)).isoformat(), "conv-usage-only", input_tokens=256, cached_input_tokens=128),
+                ],
+            },
+        )
+        result = query_conversations(conn, window="1h")
+
+    assert result["total"] == 1
+    row = result["conversations"][0]
+    assert row["conversation_ref"] == "conv-usage-only"
+    assert row["prompt_preview"] == ""
+    assert row["response_preview"] == ""
+    assert row["token_usage"]["effective_units"] == 128
+
+
 def test_query_conversations_exposes_codex_session_title(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:

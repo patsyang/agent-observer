@@ -177,6 +177,49 @@ def test_v2_file_cursor_keeps_call_context_across_append_cycles(tmp_path):
     assert timeout_fact["projection"]["run_id"] == "run_append_context"
 
 
+def test_v2_file_cursor_persists_when_initial_cursor_is_empty(tmp_path):
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    path = sessions / "empty-cursor-start.jsonl"
+    records = [
+        {
+            "timestamp": f"2026-06-19T00:0{index}:00.000Z",
+            "type": "usage",
+            "total_tokens": 100 + index,
+            "conversation_id": f"conversation-{index}",
+            "session_id": "empty-cursor-start",
+        }
+        for index in range(4)
+    ]
+    path.write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
+    cursor = {}
+
+    first = collect_facts(
+        "collector-codex-empty-cursor",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=2,
+        cursor=cursor,
+    )
+    second = collect_facts(
+        "collector-codex-empty-cursor",
+        2,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=2,
+        cursor=cursor,
+    )
+
+    first_ids = {fact["source_event_id"] for fact in first}
+    second_ids = {fact["source_event_id"] for fact in second}
+    assert cursor["sources"]
+    assert len(first_ids) == 2
+    assert len(second_ids) == 2
+    assert first_ids.isdisjoint(second_ids)
+
+
 def test_v2_file_cursor_reads_only_current_cycle_batch(tmp_path, monkeypatch):
     codex_home = tmp_path / ".codex"
     sessions = codex_home / "sessions"
