@@ -49,9 +49,9 @@ export function App() {
       <aside className="sidebar" aria-label="主导航">
         <div className="brand">
           <div className="brand-mark">AO</div>
-          <div>
+          <div className="brand-copy">
             <strong>Agent Observer</strong>
-            <span>本地智能体观测台</span>
+            <span>终端智能体运行观测</span>
           </div>
         </div>
         <nav className="side-nav" aria-label="主导航">

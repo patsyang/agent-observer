@@ -53,6 +53,8 @@ describe('UsageTrendChart', () => {
     expect(screen.getByText(/真实消耗 120，缓存命中 60/)).toBeInTheDocument();
     expect(screen.getByText(/真实消耗 530，缓存命中 49,940/)).toBeInTheDocument();
     expect(screen.getByText(/真实消耗最高 · 时间段：1,109,150/)).toBeInTheDocument();
+    expect(container.querySelector('.usage-trend-note-row')).toContainElement(screen.getByText(/真实消耗最高 · 时间段：1,109,150/));
+    expect(container.querySelector('.usage-trend-footer')).not.toBeInTheDocument();
     expect(screen.getAllByText(/08:05-08:09/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/当前范围缓存命中合计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/有效峰值/)).not.toBeInTheDocument();

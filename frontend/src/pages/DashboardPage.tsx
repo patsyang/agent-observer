@@ -12,7 +12,6 @@ import {
   latestFactTitle,
 } from './dashboardLabels';
 import { DashboardAccessPanel } from './DashboardAccessPanel';
-import { UsageGovernanceSummary } from './UsageGovernanceSummary';
 import { UsageTrendChart } from './UsageTrendChart';
 
 interface Props {
@@ -43,6 +42,10 @@ function Mini({ label, value }: { label: string; value: string }) {
       <strong>{value}</strong>
     </div>
   );
+}
+
+function formatPercent(value?: number): string {
+  return `${((value ?? 0) * 100).toFixed(1)}%`;
 }
 
 export function DashboardPage({
@@ -180,13 +183,14 @@ export function DashboardPage({
           note="在线 / 总数"
         />
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
-        <Metric label="待判断信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="unread / needs_review" />
+        <Metric label="有效用量 (Token)" value={formatNumber(state.usage.totals.effective_units)} note="真实消耗" />
+        <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
+        <Metric label="待处理信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />
       </section>
 
       <div className="usage-row" data-testid="usage-row">
         <UsageTrendChart usage={state.usage} />
-        <UsageGovernanceSummary usage={state.usage} risks={state.risks} compact pendingSignalCount={state.signals.total ?? activeSignals.length} />
       </div>
 
       <div className="workbench-grid">

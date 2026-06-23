@@ -56,6 +56,11 @@ textarea {
   width: 32px;
 }
 
+.brand-copy {
+  display: grid;
+  gap: 2px;
+}
+
 .brand strong,
 .brand span,
 .side-card span,
@@ -64,11 +69,21 @@ textarea {
   display: block;
 }
 
+.brand strong {
+  font-size: 15px;
+  line-height: 1.2;
+}
+
 .brand span,
 .side-card span,
 .side-card small,
 small {
   color: #667085;
+}
+
+.brand span {
+  font-size: 12px;
+  line-height: 1.2;
 }
 
 .side-nav {
@@ -335,7 +350,7 @@ a {
 }
 
 .metrics {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
 .dashboard-grid {
@@ -356,7 +371,7 @@ a {
   align-items: stretch;
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(680px, 1fr) clamp(230px, 14vw, 280px);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .usage-row > .panel {
@@ -462,37 +477,6 @@ a {
   font-size: 23px;
   line-height: 1;
   white-space: nowrap;
-}
-
-.summary-band--compact .panel-body {
-  display: grid;
-  gap: 0;
-}
-
-.summary-band--compact .metric-grid {
-  align-content: stretch;
-  grid-template-columns: 1fr;
-  grid-template-rows: repeat(3, minmax(54px, 1fr));
-  margin-bottom: 0;
-}
-
-.summary-band--compact .metric {
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  min-height: 54px;
-}
-
-.summary-band--compact .metric strong {
-  font-size: 19px;
-}
-
-.summary-band--compact .metric--compact {
-  gap: 6px;
-}
-
-.summary-band--compact .metric--compact strong {
-  margin-top: 0;
 }
 
 .metric small {
@@ -983,7 +967,12 @@ a {
 .signal-insight-grid {
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(360px, 2fr) repeat(4, minmax(130px, 1fr));
+  grid-template-columns:
+    minmax(320px, 1.4fr)
+    minmax(240px, 0.95fr)
+    minmax(120px, 0.52fr)
+    minmax(120px, 0.52fr)
+    minmax(110px, 0.48fr);
   margin: 14px 0;
 }
 
@@ -1008,10 +997,7 @@ a {
   line-height: 1.35;
   min-width: 0;
   overflow-wrap: anywhere;
-}
-
-.signal-insight-card:not(.signal-insight-card--wide) strong {
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .signal-conversation-grid,
@@ -1754,13 +1740,32 @@ textarea {
 }
 
 .usage-trend .panel-body {
-  min-height: 158px;
+  min-height: 148px;
+}
+
+.usage-trend-note-row {
+  align-items: center;
+  color: #667085;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  justify-content: space-between;
+  margin-bottom: 6px;
 }
 
 .usage-trend-note {
   color: #667085;
   font-size: 12px;
-  margin: 0 0 8px;
+  margin: 0;
+}
+
+.usage-trend-peak {
+  color: #475467;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  margin-left: auto;
+  text-align: right;
 }
 
 .usage-trend-header-meta {
@@ -1814,7 +1819,7 @@ textarea {
 
 .usage-trend-chart {
   display: block;
-  height: 158px;
+  height: 148px;
   max-width: none;
   min-width: 560px;
   overflow: visible;
@@ -1849,16 +1854,6 @@ textarea {
 .usage-trend-axis-label {
   fill: #667085;
   font-size: 10px;
-}
-
-.usage-trend-footer {
-  align-items: center;
-  color: #667085;
-  display: flex;
-  flex-wrap: wrap;
-  font-size: 12px;
-  gap: 8px;
-  justify-content: space-between;
 }
 
 .drawer-section label {

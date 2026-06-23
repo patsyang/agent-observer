@@ -132,10 +132,10 @@ describe('DashboardPage', () => {
       />
     );
 
-    expect(await screen.findByLabelText('使用与风险治理')).toBeInTheDocument();
+    const coreMetrics = await screen.findByLabelText('核心指标');
     expect(screen.getByLabelText('用量趋势')).toBeInTheDocument();
     expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('用量趋势'));
-    expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('使用与风险治理'));
+    expect(screen.queryByLabelText('使用与风险治理')).not.toBeInTheDocument();
     expect(await screen.findByTestId('dashboard-sidebar-context')).toHaveTextContent('接入与筛选');
     expect(screen.getByLabelText('选择时间范围内真实消耗 token 与缓存命中 token 柱状图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
@@ -147,19 +147,18 @@ describe('DashboardPage', () => {
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
     expect(screen.getByText('1 / 6')).toBeInTheDocument();
     expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument();
-    const governance = screen.getByLabelText('使用与风险治理');
-    expect(within(governance).getByText('有效用量 (Token)')).toBeInTheDocument();
-    expect(within(governance).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
-    expect(within(governance).getByText('待处理信号')).toBeInTheDocument();
-    expect(within(governance).getByText('3,175')).toBeInTheDocument();
-    expect(within(governance).getByText('900')).toBeInTheDocument();
-    expect(within(governance).getByText('0')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('有效用量 (Token)')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('待处理信号')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('3,175')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('900')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('0')).toBeInTheDocument();
     expect(screen.getByText(/缓存 900（30.0%）/)).toBeInTheDocument();
-    expect(within(governance).queryByText('未知活动')).not.toBeInTheDocument();
-    expect(within(governance).queryByText('模型调用有效 token')).not.toBeInTheDocument();
-    expect(within(governance).queryByText('当前队列待看')).not.toBeInTheDocument();
-    expect(within(governance).queryByText(/活动：/)).not.toBeInTheDocument();
-    expect(within(governance).queryByText(/风险：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('未知活动')).not.toBeInTheDocument();
+    expect(screen.queryByText('模型调用有效 token')).not.toBeInTheDocument();
+    expect(screen.queryByText('当前队列待看')).not.toBeInTheDocument();
+    expect(screen.queryByText(/活动：/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/风险：/)).not.toBeInTheDocument();
     expect(screen.getByLabelText('筛选工作区')).toBeInTheDocument();
     expect(loadSignals).toHaveBeenCalledWith({ window: '1h', workspace_query: '', page: 1, page_size: 20 });
     expect(loadUsageSummary).toHaveBeenCalledWith('1h');

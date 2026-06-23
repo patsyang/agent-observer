@@ -18,7 +18,7 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
   const peakPoint = points[peakIndex];
   const minWidth = Math.max(560, Math.max(1, points.length) * 96);
   const width = Math.max(minWidth, containerWidth);
-  const height = 158;
+  const height = 148;
   const valueLabelTop = 15;
   const valueLabelGap = 14;
   const plotTop = 50;
@@ -59,9 +59,14 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
           <p>当前时间范围暂无用量数据。</p>
         ) : (
           <>
-            <p className="usage-trend-note">
-              每根柱表示该时间段内 token 合计，不是瞬时消耗；{bucketLabel(usage.window)}。
-            </p>
+            <div className="usage-trend-note-row">
+              <p className="usage-trend-note">
+                每根柱表示该时间段内 token 合计，不是瞬时消耗；{bucketLabel(usage.window)}。
+              </p>
+              <span className="usage-trend-peak">
+                真实消耗最高 · 时间段：{formatNumber(effectivePeak)}{peakPoint ? ` · ${bucketRangeLabel(peakPoint.bucket, usage.window)}` : ''}
+              </span>
+            </div>
             <div className="usage-trend-scroll" ref={chartHostRef}>
               <svg
                 className="usage-trend-chart"
@@ -98,9 +103,6 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
                   );
                 })}
               </svg>
-            </div>
-            <div className="usage-trend-footer">
-              <span>真实消耗最高 · 时间段：{formatNumber(effectivePeak)}{peakPoint ? ` · ${bucketRangeLabel(peakPoint.bucket, usage.window)}` : ''}</span>
             </div>
           </>
         )}
