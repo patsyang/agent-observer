@@ -250,9 +250,10 @@ a {
   background: #ffffff;
   border: 1px solid #d7ddd2;
   border-radius: 8px;
+  container-type: inline-size;
   display: grid;
   gap: 14px;
-  grid-template-columns: minmax(620px, 1.1fr) minmax(520px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr);
   padding: 12px;
 }
 
@@ -310,14 +311,20 @@ a {
 }
 
 .context-actions {
+  align-items: center;
+  column-gap: 18px;
   display: grid;
-  grid-template-columns: auto minmax(210px, 280px) auto minmax(128px, 170px);
-  min-height: 72px;
+  grid-template-columns: minmax(360px, 480px) minmax(180px, 220px) minmax(280px, 1fr) 40px auto;
+  min-height: 48px;
+  row-gap: 12px;
+  width: 100%;
 }
 
 .refresh-stamp {
+  align-self: center;
   color: #667085;
   font-size: 12px;
+  margin-top: 0;
   white-space: nowrap;
 }
 
@@ -327,13 +334,59 @@ a {
   display: flex;
   font-size: 13px;
   font-weight: 700;
-  gap: 6px;
+  gap: 10px;
+  margin: 0;
   white-space: nowrap;
 }
 
+.compact-filter span {
+  color: inherit;
+  font-size: inherit;
+  line-height: inherit;
+  margin-top: 0;
+}
+
 .compact-filter input {
+  min-height: 36px;
   min-width: 0;
   width: 100%;
+}
+
+.compact-filter select {
+  min-height: 36px;
+  min-width: 116px;
+  width: 100%;
+}
+
+.dashboard-time-filter .conversation-range-picker {
+  min-width: 0;
+  width: 100%;
+}
+
+.dashboard-time-filter {
+  min-width: 0;
+}
+
+.icon-button.dashboard-refresh-button {
+  align-self: center;
+  height: 36px;
+  min-width: 40px;
+  padding: 0;
+  width: 40px;
+}
+
+@container (max-width: 1080px) {
+  .context-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-refresh-button {
+    justify-self: end;
+  }
+
+  .refresh-stamp {
+    justify-self: start;
+  }
 }
 
 .mini-grid,
@@ -1233,6 +1286,31 @@ mark {
   padding: 4px 8px;
 }
 
+.source-list {
+  display: grid;
+  gap: 6px;
+}
+
+.source-pill {
+  align-items: center;
+  background: #f7fbfb;
+  border: 1px solid #c9e6e2;
+  border-radius: 6px;
+  display: grid;
+  gap: 2px;
+  padding: 6px 8px;
+}
+
+.source-pill strong {
+  color: #243442;
+  font-size: 13px;
+}
+
+.source-pill small {
+  color: #667085;
+  font-size: 12px;
+}
+
 table {
   background: #ffffff;
   border-collapse: collapse;
@@ -1514,12 +1592,31 @@ textarea {
 }
 
 .conversation-toolbar {
+  align-items: stretch;
+  background: #fbfaf6;
+  border: 1px solid #edf0e8;
+  border-radius: 8px;
+  display: grid;
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 12px;
+  width: 100%;
+}
+
+.conversation-filter-row {
   align-items: center;
   display: grid;
   gap: 10px;
-  grid-template-columns: minmax(150px, .75fr) minmax(190px, 1fr) minmax(190px, 1fr) 392px 34px;
-  margin: 0 0 12px;
+  min-width: 0;
   width: 100%;
+}
+
+.conversation-filter-row--primary {
+  grid-template-columns: minmax(300px, 1.15fr) minmax(140px, 180px) minmax(220px, 1fr);
+}
+
+.conversation-filter-row--secondary {
+  grid-template-columns: minmax(260px, 1fr) minmax(260px, 1fr) 40px;
 }
 
 .conversation-page {
@@ -1527,21 +1624,21 @@ textarea {
 }
 
 .conversation-time-group {
-  align-items: center;
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  display: grid;
+  gap: 6px;
   min-width: 0;
   position: relative;
 }
 
 .conversation-inline-field {
-  align-items: center;
-  display: flex;
+  display: grid;
   gap: 6px;
   margin: 0;
   min-width: 0;
-  white-space: nowrap;
+}
+
+.conversation-toolbar > .conversation-inline-field {
+  min-width: 0;
 }
 
 .conversation-field-label {
@@ -1554,13 +1651,18 @@ textarea {
   min-width: 0;
 }
 
-.conversation-toolbar > .conversation-inline-field input {
+.conversation-inline-field select {
+  min-width: 0;
+}
+
+.conversation-toolbar .conversation-inline-field input,
+.conversation-toolbar .conversation-inline-field select {
   width: 100%;
 }
 
 .conversation-range-picker {
-  flex: 0 0 340px;
   position: relative;
+  width: 100%;
 }
 
 .conversation-range-trigger {
@@ -1578,7 +1680,7 @@ textarea {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
-  width: 340px;
+  width: 100%;
 }
 
 .conversation-range-trigger::after {
@@ -1596,16 +1698,16 @@ textarea {
   gap: 10px;
   padding: 10px;
   position: absolute;
-  right: 0;
+  left: 0;
   top: calc(100% + 6px);
-  width: 340px;
+  width: min(360px, calc(100vw - 72px));
   z-index: 30;
 }
 
 .conversation-quick-range-list {
   display: grid;
   gap: 6px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .conversation-quick-range-list .compact-button {
@@ -1625,7 +1727,7 @@ textarea {
 }
 
 .conversation-range-panel input {
-  width: 316px;
+  width: 100%;
 }
 
 .conversation-range-actions {
@@ -1635,13 +1737,38 @@ textarea {
 
 .conversation-search-button {
   align-items: center;
+  align-self: end;
   display: inline-flex;
-  flex: 0 0 34px;
-  height: 34px;
+  height: 36px;
   justify-content: center;
-  min-width: 34px;
+  min-width: 40px;
   padding: 0;
-  width: 34px;
+  width: 40px;
+}
+
+@media (max-width: 1120px) {
+  .context-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .dashboard-refresh-button {
+    justify-self: end;
+  }
+
+  .refresh-stamp {
+    justify-self: start;
+  }
+}
+
+@media (max-width: 860px) {
+  .conversation-filter-row--primary,
+  .conversation-filter-row--secondary {
+    grid-template-columns: 1fr;
+  }
+
+  .conversation-search-button {
+    justify-self: end;
+  }
 }
 
 .conversation-table {
@@ -1660,13 +1787,17 @@ textarea {
   width: 132px;
 }
 
+.conversation-table__source {
+  width: 132px;
+}
+
 .conversation-table__session {
   width: 172px;
 }
 
 .conversation-table__prompt,
 .conversation-table__response {
-  width: 28%;
+  width: 24%;
 }
 
 .conversation-drawer {
@@ -1870,6 +2001,37 @@ textarea {
 
 .package-grid {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.performance-grid {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.performance-grid label {
+  background: #fbfaf6;
+  border: 1px solid #e1e6ec;
+  border-radius: 8px;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.performance-grid span {
+  color: #344054;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.performance-grid input {
+  min-width: 0;
+  width: 100%;
+}
+
+.performance-grid small {
+  color: #667085;
+  font-size: 12px;
 }
 
 .section-title-row,
@@ -2090,6 +2252,7 @@ textarea {
 
   .drawer-meta,
   .package-grid,
+  .performance-grid,
   .drawer-actions {
     grid-template-columns: 1fr;
   }

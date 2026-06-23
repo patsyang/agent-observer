@@ -3,7 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+
+from app.time_ranges import window_cutoff_iso
 
 
 def now_iso() -> str:
@@ -32,10 +34,4 @@ def signal_id(signal_key: str) -> str:
 
 
 def window_cutoff(window: str) -> str | None:
-    if window == "all":
-        return None
-    hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return None
-    return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
-
+    return window_cutoff_iso(window)

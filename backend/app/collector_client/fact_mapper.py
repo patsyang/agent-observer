@@ -28,52 +28,9 @@ from app.collector_client.telemetry_utils import (
     top_type as _top_type,
 )
 from app.collector_client.tool_execution import command_excerpt, command_text
+from app.collector_client.usage_contract import normalized_usage_projection, usage_signal_from_projection
 
 DESTRUCTIVE_OPERATIONS = {"delete", "remove", "rm", "overwrite", "chmod", "permission_change"}
-
-
-def _health_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool) -> dict:
-    return {
-        "source_event_id": f"{collector_id}-health-{sequence}",
-        "fact_type": "collector_health",
-        "category": "collector_health",
-        "quality": "high",
-        "severity": "low",
-        "summary": "采集器完成一次本机链路自检，状态、游标和 outbox 已结构化上报。",
-        "occurred_at": observed_at,
-        "raw_hash": _hash("health", collector_id, sequence, observed_at, telemetry_mode),
-        "span": "collector:self-check",
-        "source_refs": {"collector_id": collector_id, "sequence": sequence, "source_key": f"health:{sequence}"},
-        "source_specific": {"telemetry_mode": telemetry_mode, "probe": "collector_self_check"},
-        "projection": {
-            "collector_id": collector_id,
-            "cursor_sequence": sequence,
-            "codex_session_dir_present": source_available,
-            "uploaded_raw_content": True,
-        },
-    }
-
-
-def _source_gap_fact(collector_id: str, sequence: int, observed_at: str, telemetry_mode: str, source_available: bool) -> dict:
-    status = "已检测到 Codex 会话目录，但本轮没有发现新的可投影事件。"
-    severity = "low"
-    if not source_available:
-        status = "未检测到 Codex 会话目录，当前只能上传最小化链路自检摘要。"
-        severity = "high"
-    return {
-        "source_event_id": f"{collector_id}-source-status-{sequence}",
-        "fact_type": "collector_health",
-        "category": "collector_source_status",
-        "quality": "high",
-        "severity": severity,
-        "summary": f"{status} 当前采集器固定上传原始输入输出。",
-        "occurred_at": observed_at,
-        "raw_hash": _hash("source-status", collector_id, sequence, observed_at, telemetry_mode, str(source_available)),
-        "span": "collector:source-probe",
-        "source_refs": {"collector_id": collector_id, "sequence": sequence, "source_key": f"source-status:{sequence}"},
-        "source_specific": {"telemetry_mode": telemetry_mode, "probe": "codex_session_dir_presence"},
-        "projection": {"source_kind": "codex_sessions", "source_available": source_available, "raw_content_uploaded": True},
-    }
 
 
 def _record_fact(
@@ -99,7 +56,7 @@ def _record_fact(
         "raw_hash": _hash(_stable_projection(record, include_values=False)),
         "source_refs": refs,
         "source_specific": {
-            "codex_event_type": event_type,
+            "event_type": event_type,
             "source_template": "codex.local.sessions.v1",
             "validation_sample": record.get("validation_sample"),
         },
@@ -149,7 +106,6 @@ def _usage_fact(common: dict, record: dict) -> dict:
     payload = _payload(record)
     info = payload.get("info") if isinstance(payload.get("info"), dict) else {}
     last_usage = info.get("last_token_usage") if isinstance(info.get("last_token_usage"), dict) else {}
-    units = _effective_usage_units(record, last_usage)
     tags = record.get("activity_tags") or record.get("activity_tag") or _activity_tags(record)
     if isinstance(tags, str):
         activity_tag = _clean(tags)
@@ -159,34 +115,41 @@ def _usage_fact(common: dict, record: dict) -> dict:
         activity_tag = "unknown"
     session_id = _ref(record.get("session_id") or record.get("session") or payload.get("turn_id") or "unknown")
     conversation_id = _ref(record.get("conversation_id") or record.get("conversation") or payload.get("turn_id") or "unknown")
+    projection = normalized_usage_projection(
+        activity_tag=activity_tag,
+        input_tokens=last_usage.get("input_tokens"),
+        output_tokens=last_usage.get("output_tokens"),
+        total_tokens=last_usage.get("total_tokens") or record.get("total_tokens") or record.get("tokens") or record.get("units"),
+        cached_input_tokens=last_usage.get("cached_input_tokens"),
+        reasoning_output_tokens=last_usage.get("reasoning_output_tokens"),
+        model=info.get("model") or record.get("model"),
+        provider=info.get("provider") or record.get("provider"),
+        cache_observed=bool(last_usage) and "cached_input_tokens" in last_usage,
+    )
+    projection.update(
+        {
+            "tag_count": len(tags) if isinstance(tags, list) else 1,
+            "model_context_window": int(info.get("model_context_window") or 0),
+            "context_total_tokens": _int(last_usage.get("total_tokens")),
+        }
+    )
+    units = int(projection["units"])
     return {
         **common,
         "fact_type": "usage",
         "category": "usage",
         "quality": "high" if activity_tag != "unknown" else "low",
         "severity": "medium" if units >= 100 else "low",
-        "summary": f"Codex 会话产生 {units} token 相关用量，活动标签为 {activity_tag}。",
-        "projection": {
-            "units": units,
-            "activity_tag": activity_tag,
-            "tag_count": len(tags) if isinstance(tags, list) else 1,
-            "model_context_window": int(info.get("model_context_window") or 0),
-            "input_tokens": _int(last_usage.get("input_tokens")),
-            "cached_input_tokens": _int(last_usage.get("cached_input_tokens")),
-            "output_tokens": _int(last_usage.get("output_tokens")),
-            "reasoning_output_tokens": _int(last_usage.get("reasoning_output_tokens")),
-            "context_total_tokens": _int(last_usage.get("total_tokens")),
-            "unit_basis": "non_cached_input_plus_output",
-        },
-        "usage": {
-            "scope": "session",
-            "units": units,
-            "activity_tag": activity_tag,
-            "session_id": session_id,
-            "conversation_id": conversation_id,
-            "project_ref": common["source_refs"].get("workspace_id") or _ref(record.get("project") or "unknown"),
-            "account_ref": _ref(record.get("account") or "local"),
-        },
+        "summary": f"Agent 会话产生 {units} token 相关用量，活动标签为 {activity_tag}。",
+        "projection": projection,
+        "usage": usage_signal_from_projection(
+            projection,
+            scope="session",
+            session_id=session_id,
+            conversation_id=conversation_id,
+            project_ref=common["source_refs"].get("workspace_id") or _ref(record.get("project") or "unknown"),
+            account_ref=_ref(record.get("account") or "local"),
+        ),
     }
 
 def _effective_usage_units(record: dict, last_usage: dict) -> int:
@@ -294,7 +257,7 @@ def _low_evidence_fact(common: dict, record: dict) -> dict:
         "category": "uncategorized",
         "quality": "low",
         "severity": "low",
-        "summary": "Codex 会话出现未归类但来源合法的低证据事件，已保留为低证据命中候选。",
+        "summary": "Agent 会话出现未归类但来源合法的低证据事件，已保留为低证据命中候选。",
         "projection": {
             "observed_keys": sorted(_safe_key(key) for key in record.keys())[:12],
             "payload_type": _payload_type(record),
@@ -327,7 +290,7 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         "category": "tool_call" if "call_output" not in payload_type else "tool_result",
         "quality": "high",
         "severity": "low",
-        "summary": f"Codex 调用工具 {tool_name}，类别 {command_category or payload_type}，已提取工具调用摘要。",
+        "summary": f"Agent 调用工具 {tool_name}，类别 {command_category or payload_type}，已提取工具调用摘要。",
         "projection": {
             "tool_name": tool_name,
             "payload_type": payload_type,

@@ -1,26 +1,29 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { RefreshCw } from 'lucide-react';
 
-import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, SignalsResponse, TimeWindow, UsageSummary } from '../api/types';
+import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, SignalsResponse, TimeWindowParam, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
 import { SignalCard } from '../components/SignalCard';
-import { TimeWindowTabs } from '../components/TimeWindowTabs';
+import { quickTimeOptions } from '../components/timeRangeOptions';
 import { formatNumber } from '../utils/numberFormat';
 import {
   emptyUsage,
   formatDateTime,
-  latestFactTitle,
 } from './dashboardLabels';
 import { DashboardAccessPanel } from './DashboardAccessPanel';
+import { TimeRangePicker } from './TimeRangePicker';
 import { UsageTrendChart } from './UsageTrendChart';
 
 interface Props {
-  loadDashboardSummary: (window: TimeWindow) => Promise<DashboardSummary>;
-  loadSignals: (options: { window: TimeWindow; workspace_query?: string; page?: number; page_size?: number }) => Promise<SignalsResponse>;
-  loadUsageSummary: (window: TimeWindow) => Promise<UsageSummary>;
-  loadRiskSummary: (window: TimeWindow) => Promise<RiskSummary>;
+  loadDashboardSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<DashboardSummary>;
+  loadSignals: (options: { window: TimeWindowParam; start_at?: string; end_at?: string; workspace_query?: string; agent_type?: AgentType; page?: number; page_size?: number }) => Promise<SignalsResponse>;
+  loadUsageSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<UsageSummary>;
+  loadRiskSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<RiskSummary>;
   onOpenSignal: (signalId: string) => void;
 }
+
+type AgentType = '' | 'codex' | 'workbuddy';
 
 type LoadState =
   | { status: 'loading' }
@@ -35,15 +38,6 @@ type LoadState =
       risks: RiskSummary;
     };
 
-function Mini({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="mini">
-      <span>{label}</span>
-      <strong>{value}</strong>
-    </div>
-  );
-}
-
 function formatPercent(value?: number): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
 }
@@ -56,8 +50,14 @@ export function DashboardPage({
   onOpenSignal
 }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
-  const [window, setWindow] = useState<TimeWindow>('1h');
-  const [workspaceQuery, setWorkspaceQuery] = useState('');
+  const [submittedFilters, setSubmittedFilters] = useState({
+    window: '1h' as TimeWindowParam | '',
+    start_at: '',
+    end_at: '',
+    agentType: '' as AgentType,
+    workspaceQuery: '',
+  });
+  const [draftFilters, setDraftFilters] = useState(submittedFilters);
   const [refreshToken, setRefreshToken] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
   const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null);
@@ -68,8 +68,10 @@ export function DashboardPage({
 
   useEffect(() => {
     let cancelled = false;
+    const { agentType, end_at, start_at, window, workspaceQuery } = submittedFilters;
+    const requestWindow: TimeWindowParam = window || 'custom';
     setState({ status: 'loading' });
-    loadDashboardSummary(window)
+    loadDashboardSummary(requestWindow, agentType, start_at, end_at)
       .then((summary) => {
         if (!cancelled) {
           setState({
@@ -84,15 +86,15 @@ export function DashboardPage({
               page_size: 20,
               has_more: summary.signals.total > summary.signals.items.length
             },
-            usage: emptyUsage(window),
-            risks: { mode: 'summary', window, signals: summary.risks.top }
+            usage: emptyUsage(requestWindow),
+            risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top }
           });
           setLastRefresh(new Date().toISOString());
         }
         return Promise.allSettled([
-          loadSignals({ window, workspace_query: workspaceQuery.trim(), page: 1, page_size: 20 }),
-          loadUsageSummary(window),
-          loadRiskSummary(window)
+          loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, page: 1, page_size: 20 }),
+          loadUsageSummary(requestWindow, agentType, start_at, end_at),
+          loadRiskSummary(requestWindow, agentType, start_at, end_at)
         ]);
       })
       .then((results) => {
@@ -114,7 +116,7 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, window, workspaceQuery]);
+  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, submittedFilters]);
 
   if (state.status === 'loading') {
     return (
@@ -136,10 +138,12 @@ export function DashboardPage({
   }
 
   const onlineCollectors = state.collectors.collectors.filter((collector) => collector.source_status === 'online');
-  const latestFact = state.facts.facts[0];
-  const latestCollector = state.collectors.collectors[0];
   const activeSignals = state.signals.signals.filter((signal) => signal.decision_state !== 'handled');
   const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
+  const submitFilters = () => {
+    setSubmittedFilters({ ...draftFilters, workspaceQuery: draftFilters.workspaceQuery.trim() });
+    setRefreshToken((value) => value + 1);
+  };
 
   return (
     <div className="dashboard workbench" aria-label="行为风险信号台" data-testid="dashboard-page">
@@ -154,25 +158,47 @@ export function DashboardPage({
       )}
       <section className="context-bar">
         <div className="context-actions">
-          <TimeWindowTabs value={window} onChange={setWindow} />
+          <div className="compact-filter dashboard-time-filter">
+            <span>时间</span>
+            <TimeRangePicker
+              end={draftFilters.end_at}
+              onApply={(value) => setDraftFilters((current) => ({ ...current, ...value }))}
+              options={quickTimeOptions}
+              start={draftFilters.start_at}
+              window={draftFilters.window}
+            />
+          </div>
+          <label className="compact-filter">
+            Agent类型
+            <select
+              aria-label="筛选Agent类型"
+              onChange={(event) => setDraftFilters((current) => ({ ...current, agentType: event.target.value as AgentType }))}
+              value={draftFilters.agentType}
+            >
+              <option value="">全部</option>
+              <option value="codex">Codex</option>
+              <option value="workbuddy">WorkBuddy</option>
+            </select>
+          </label>
           <label className="compact-filter">
             工作区
             <input
               aria-label="筛选工作区"
-              onChange={(event) => setWorkspaceQuery(event.target.value)}
+              onChange={(event) => setDraftFilters((current) => ({ ...current, workspaceQuery: event.target.value }))}
               placeholder="别名/路径"
-              value={workspaceQuery}
+              value={draftFilters.workspaceQuery}
             />
           </label>
-          <button className="compact-button" onClick={() => setRefreshToken((value) => value + 1)} type="button">
-            刷新
+          <button
+            aria-label="刷新"
+            className="icon-button dashboard-refresh-button"
+            onClick={submitFilters}
+            title="刷新"
+            type="button"
+          >
+            <RefreshCw aria-hidden="true" size={16} />
           </button>
           <span className="refresh-stamp">最后刷新 {formatDateTime(lastRefresh)}</span>
-        </div>
-        <div className="mini-grid">
-          <Mini label="当前采集器" value={latestCollector?.display_name ?? '未注册'} />
-          <Mini label="最近命中" value={latestFactTitle(latestFact)} />
-          <Mini label="最近心跳" value={formatDateTime(latestCollector?.last_heartbeat_at)} />
         </div>
       </section>
 
@@ -183,7 +209,7 @@ export function DashboardPage({
           note="在线 / 总数"
         />
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
-        <Metric label="有效用量 (Token)" value={formatNumber(state.usage.totals.effective_units)} note="真实消耗" />
+        <Metric label="有效用量 (Token)" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
         <Metric label="待处理信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />

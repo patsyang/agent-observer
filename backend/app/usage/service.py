@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
+
+from app.time_ranges import bucket_size_minutes, bucket_start_iso, range_bounds_iso, within_range, window_cutoff
 
 
 ROLLUP_SCOPES = ("total", "session", "conversation", "project", "account", "activity_tag")
@@ -40,19 +42,48 @@ def build_usage_rollups(conn: sqlite3.Connection, window: str = "24h") -> dict:
     return _read_usage_summary(conn, window=window)
 
 
-def get_usage_summary(conn: sqlite3.Connection, window: str = "24h") -> dict:
+def get_usage_summary(
+    conn: sqlite3.Connection,
+    window: str = "24h",
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> dict:
     if conn.execute("select count(*) from usage_signals").fetchone()[0] == 0:
-        return _empty_summary(window)
-    rows = _usage_rows(conn, window)
-    grouped = _group_usage_rows(rows, window)
+        return _empty_summary(window, start_at, end_at)
+    rows = _usage_rows(conn, window, agent_type, start_at, end_at)
+    grouped = _group_usage_rows(rows, window, start_at, end_at)
     rollups = [_rollup_payload(window, key, entry) for key, entry in sorted(grouped.items())]
-    return _summary_payload(window, rollups, trend=_usage_trend(rows, window), cache_totals=_cache_totals(rows, window))
+    bucket_minutes = bucket_size_minutes(window, start_at, end_at)
+    return _summary_payload(
+        window,
+        rollups,
+        trend=_usage_trend(rows, window, bucket_minutes, start_at, end_at),
+        metric_totals=_metric_totals(rows, window, start_at, end_at),
+        bucket_minutes=bucket_minutes,
+    )
 
 
-def _usage_rows(conn: sqlite3.Connection, window: str) -> list[sqlite3.Row]:
-    cutoff = _window_cutoff(window)
-    where = "where of.occurred_at >= ?" if cutoff else ""
-    params = (cutoff.isoformat(),) if cutoff else ()
+def _usage_rows(
+    conn: sqlite3.Connection,
+    window: str,
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> list[sqlite3.Row]:
+    start, end = range_bounds_iso(window, start_at, end_at)
+    clauses = []
+    params: list[str] = []
+    if start:
+        clauses.append("of.occurred_at >= ?")
+        params.append(start)
+    if end:
+        clauses.append("of.occurred_at <= ?")
+        params.append(end)
+    if agent_type:
+        clauses.append("of.agent_type = ?")
+        params.append(agent_type)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
     return conn.execute(
         f"""
         select us.*, ep.projection_id, ep.projection_json, of.occurred_at
@@ -65,9 +96,10 @@ def _usage_rows(conn: sqlite3.Connection, window: str) -> list[sqlite3.Row]:
     ).fetchall()
 
 
-def _empty_summary(window: str) -> dict:
+def _empty_summary(window: str, start_at: str | None = None, end_at: str | None = None) -> dict:
     return {
         "window": window,
+        "bucket_size_minutes": bucket_size_minutes(window, start_at, end_at),
         "rollups": [],
         "trend": [],
         "totals": {
@@ -75,6 +107,12 @@ def _empty_summary(window: str) -> dict:
             "unknown_units": 0,
             "cached_input_units": 0,
             "input_token_units": 0,
+            "output_token_units": 0,
+            "total_token_units": 0,
+            "cache_write_input_units": 0,
+            "reasoning_output_units": 0,
+            "credit_total": 0,
+            "cache_observed_input_units": 0,
             "cache_hit_rate": 0,
         },
     }
@@ -104,10 +142,15 @@ def _read_usage_summary(conn: sqlite3.Connection, window: str = "24h") -> dict:
     return _summary_payload(window, rollups)
 
 
-def _group_usage_rows(rows: list[sqlite3.Row], window: str) -> dict[tuple[str, str, str], dict]:
+def _group_usage_rows(
+    rows: list[sqlite3.Row],
+    window: str,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> dict[tuple[str, str, str], dict]:
     grouped: dict[tuple[str, str, str], dict] = {}
     for row in rows:
-        if not _within_window(row["occurred_at"], window):
+        if not within_range(row["occurred_at"], window, start_at, end_at):
             continue
         values = {
             "total": "all",
@@ -140,72 +183,105 @@ def _rollup_payload(window: str, key: tuple[str, str, str], entry: dict) -> dict
     }
 
 
-def _summary_payload(window: str, rollups: list[dict], trend: list[dict] | None = None, cache_totals: dict | None = None) -> dict:
+def _summary_payload(
+    window: str,
+    rollups: list[dict],
+    trend: list[dict] | None = None,
+    metric_totals: dict | None = None,
+    bucket_minutes: int | None = None,
+) -> dict:
     unknown_units = sum(row["units"] for row in rollups if row["activity_tag"] == "unknown")
-    cache_totals = cache_totals or {"cached_input_units": 0, "input_token_units": 0}
-    cached_input_units = int(cache_totals["cached_input_units"])
-    input_token_units = int(cache_totals["input_token_units"])
+    metric_totals = metric_totals or _zero_metrics()
+    cached_input_units = int(metric_totals["cached_input_units"])
+    cache_observed_input_units = int(metric_totals["cache_observed_input_units"])
     return {
         "window": window,
+        "bucket_size_minutes": bucket_minutes or bucket_size_minutes(window),
         "rollups": rollups,
         "trend": trend or [],
         "totals": {
             "effective_units": sum(row["units"] for row in rollups if row["scope"] == "total"),
             "unknown_units": unknown_units,
+            "input_token_units": int(metric_totals["input_token_units"]),
+            "output_token_units": int(metric_totals["output_token_units"]),
+            "total_token_units": int(metric_totals["total_token_units"]),
             "cached_input_units": cached_input_units,
-            "input_token_units": input_token_units,
-            "cache_hit_rate": _ratio(cached_input_units, input_token_units),
+            "cache_write_input_units": int(metric_totals["cache_write_input_units"]),
+            "reasoning_output_units": int(metric_totals["reasoning_output_units"]),
+            "credit_total": round(float(metric_totals["credit_total"]), 4),
+            "cache_observed_input_units": cache_observed_input_units,
+            "cache_hit_rate": _ratio(cached_input_units, cache_observed_input_units),
         },
     }
 
 
-def _usage_trend(rows: list[sqlite3.Row], window: str) -> list[dict]:
+def _usage_trend(
+    rows: list[sqlite3.Row],
+    window: str,
+    bucket_minutes: int,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> list[dict]:
     buckets: dict[str, dict[str, int]] = {}
     for row in rows:
-        if not _within_window(row["occurred_at"], window):
+        if not within_range(row["occurred_at"], window, start_at, end_at):
             continue
-        bucket = _trend_bucket(row["occurred_at"], window)
+        bucket = bucket_start_iso(row["occurred_at"], bucket_minutes)
         entry = buckets.setdefault(
             bucket,
-            {
-                "effective_units": 0,
-                "unknown_units": 0,
-                "cached_input_units": 0,
-                "input_token_units": 0,
-            },
+            {"effective_units": 0, "unknown_units": 0, **_zero_metrics()},
         )
         units = int(row["units"] or 0)
         entry["effective_units"] += units
         if row["activity_tag"] == "unknown":
             entry["unknown_units"] += units
-        cache = _cache_metrics(row)
-        entry["cached_input_units"] += cache["cached_input_units"]
-        entry["input_token_units"] += cache["input_token_units"]
+        _add_metrics(entry, _row_metrics(row))
     return [
-        {"bucket": bucket, **values, "cache_hit_rate": _ratio(values["cached_input_units"], values["input_token_units"])}
+        {"bucket": bucket, **values, "credit_total": round(float(values["credit_total"]), 4), "cache_hit_rate": _ratio(values["cached_input_units"], values["cache_observed_input_units"])}
         for bucket, values in sorted(buckets.items())
     ]
 
 
-def _cache_totals(rows: list[sqlite3.Row], window: str) -> dict[str, int]:
-    totals = {"cached_input_units": 0, "input_token_units": 0}
+def _metric_totals(rows: list[sqlite3.Row], window: str, start_at: str | None = None, end_at: str | None = None) -> dict[str, int | float]:
+    totals = _zero_metrics()
     for row in rows:
-        if not _within_window(row["occurred_at"], window):
+        if not within_range(row["occurred_at"], window, start_at, end_at):
             continue
-        cache = _cache_metrics(row)
-        totals["cached_input_units"] += cache["cached_input_units"]
-        totals["input_token_units"] += cache["input_token_units"]
+        _add_metrics(totals, _row_metrics(row))
     return totals
 
 
-def _cache_metrics(row: sqlite3.Row) -> dict[str, int]:
-    try:
-        projection = json.loads(row["projection_json"] or "{}")
-    except (TypeError, ValueError, KeyError):
-        projection = {}
-    cached = _int(projection.get("cached_input_tokens"))
-    input_tokens = _int(projection.get("input_tokens"))
-    return {"cached_input_units": cached, "input_token_units": input_tokens}
+def _zero_metrics() -> dict[str, int | float]:
+    return {
+        "input_token_units": 0,
+        "output_token_units": 0,
+        "total_token_units": 0,
+        "cached_input_units": 0,
+        "cache_write_input_units": 0,
+        "reasoning_output_units": 0,
+        "credit_total": 0.0,
+        "cache_observed_input_units": 0,
+    }
+
+
+def _add_metrics(target: dict[str, int | float], values: dict[str, int | float]) -> None:
+    for key, value in values.items():
+        target[key] += value
+
+
+def _row_metrics(row: sqlite3.Row) -> dict[str, int | float]:
+    input_tokens = _int(row["input_tokens"])
+    cache_observed = bool(row["cache_observed"]) and input_tokens > 0
+    return {
+        "input_token_units": input_tokens,
+        "output_token_units": _int(row["output_tokens"]),
+        "total_token_units": _int(row["total_tokens"]),
+        "cached_input_units": _int(row["cached_input_tokens"]),
+        "cache_write_input_units": _int(row["cache_write_input_tokens"]),
+        "reasoning_output_units": _int(row["reasoning_output_tokens"]),
+        "credit_total": _float(row["credit"]),
+        "cache_observed_input_units": input_tokens if cache_observed else 0,
+    }
 
 
 def _ratio(numerator: int, denominator: int) -> float:
@@ -221,39 +297,12 @@ def _int(value: object) -> int:
         return 0
 
 
-def _trend_bucket(value: str, window: str) -> str:
+def _float(value: object) -> float:
     try:
-        occurred = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        return float(value or 0)
     except (TypeError, ValueError):
-        return str(value)
-    if occurred.tzinfo is None:
-        occurred = occurred.replace(tzinfo=UTC)
-    occurred = occurred.astimezone(UTC)
-    if window == "1h":
-        minute = (occurred.minute // 5) * 5
-        return occurred.replace(minute=minute, second=0, microsecond=0).isoformat()
-    if window == "24h":
-        return occurred.replace(minute=0, second=0, microsecond=0).isoformat()
-    return occurred.replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-
-
-def _within_window(value: str, window: str) -> bool:
-    if window == "all":
-        return True
-    hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return True
-    try:
-        occurred = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    except (TypeError, ValueError):
-        return True
-    if occurred.tzinfo is None:
-        occurred = occurred.replace(tzinfo=UTC)
-    return occurred >= datetime.now(UTC) - timedelta(hours=hours)
+        return 0.0
 
 
 def _window_cutoff(window: str) -> datetime | None:
-    hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return None
-    return datetime.now(UTC) - timedelta(hours=hours)
+    return window_cutoff(window)

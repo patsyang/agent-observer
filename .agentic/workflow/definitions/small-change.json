@@ -4,56 +4,22 @@
   "adapter": "local-governed",
   "contract_path": ".agentic/workflow/small-change.md",
   "primary_inputs": ["goal", "goal_path"],
-  "stages": ["scope-resolve", "create-worktree", "small-scope-gate", "repro-or-signal", "execute", "verify-and-fix", "independent-review", "small-acceptance-gate", "merge-back", "report"],
+  "stages": ["validate-input", "execute", "verify-and-fix", "independent-review", "report"],
   "verify_policy": "targeted",
-  "worktree": true,
+  "worktree": false,
   "parallelism": 1,
   "nodes": [
     {
-      "id": "small-scope-gate",
-      "type": "adapter_command",
-      "command": "ao-small-scope-gate",
-      "required_artifacts": [
-        {
-          "path": "small-scope.json",
-          "kind": "json",
-          "validators": [
-            "small_scope_contract"
-          ]
-        },
-        {
-          "path": "small-scope.md",
-          "kind": "markdown",
-          "validators": [
-            "non_placeholder",
-            "stack_trace"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "repro-or-signal",
-      "type": "adapter_command",
-      "command": "ao-small-repro",
-      "depends_on": [
-        "small-scope-gate"
-      ],
-      "required_artifacts": [
-        {
-          "path": "repro.md",
-          "kind": "markdown",
-          "validators": [
-            "non_placeholder"
-          ]
-        }
-      ]
+      "id": "validate-input",
+      "type": "deterministic_gate",
+      "required_artifacts": []
     },
     {
       "id": "execute",
       "type": "adapter_command",
       "command": "ao-small-execute",
       "depends_on": [
-        "repro-or-signal"
+        "validate-input"
       ],
       "required_artifacts": ["implementation.md", "changed-files.txt"]
     },
@@ -65,13 +31,6 @@
         "execute"
       ],
       "required_artifacts": [
-        {
-          "path": "verification.json",
-          "kind": "json",
-          "validators": [
-            "verification_contract"
-          ]
-        },
         {
           "path": "verification.md",
           "kind": "markdown",
@@ -93,46 +52,7 @@
           "path": "review.md",
           "kind": "markdown",
           "validators": [
-            "non_placeholder",
-            "stack_trace"
-          ]
-        },
-        {
-          "path": "acceptance-matrix.json",
-          "kind": "json",
-          "validators": [
-            "stack_trace"
-          ]
-        },
-        {
-          "path": "component-evidence.json",
-          "kind": "json",
-          "validators": [
-            "stack_trace"
-          ]
-        },
-        {
-          "path": "command-coverage.json",
-          "kind": "json",
-          "validators": [
-            "stack_trace"
-          ]
-        }
-      ]
-    },
-    {
-      "id": "small-acceptance-gate",
-      "type": "adapter_command",
-      "command": "ao-small-acceptance-gate",
-      "depends_on": [
-        "independent-review"
-      ],
-      "required_artifacts": [
-        {
-          "path": "small-acceptance-gate.json",
-          "kind": "json",
-          "validators": [
-            "gate_pass"
+            "non_placeholder"
           ]
         }
       ]

@@ -15,6 +15,7 @@ import type {
   RiskSummary,
   SignalsResponse,
   TimeWindow,
+  TimeWindowParam,
   UsageSummary
 } from './types';
 
@@ -64,8 +65,28 @@ export function fetchCollectors(): Promise<CollectorsResponse> {
   return readJson<CollectorsResponse>('/api/collectors');
 }
 
-export function fetchDashboardSummary(window: TimeWindow = '1h'): Promise<DashboardSummary> {
-  return readJson<DashboardSummary>(`/api/dashboard/summary?window=${encodeURIComponent(window)}`);
+type AgentTypeFilter = '' | 'codex' | 'workbuddy';
+
+function addAgentFilter(params: URLSearchParams, agentType?: AgentTypeFilter | string): void {
+  if (agentType) params.set('agent_type', agentType);
+}
+
+function addTimeRange(params: URLSearchParams, window: TimeWindowParam | '' = '1h', startAt = '', endAt = ''): void {
+  params.set('window', window || (startAt || endAt ? 'custom' : '1h'));
+  if (startAt) params.set('start_at', startAt);
+  if (endAt) params.set('end_at', endAt);
+}
+
+export function fetchDashboardSummary(
+  window: TimeWindowParam = '1h',
+  agentType: AgentTypeFilter = '',
+  startAt = '',
+  endAt = ''
+): Promise<DashboardSummary> {
+  const params = new URLSearchParams();
+  addTimeRange(params, window, startAt, endAt);
+  addAgentFilter(params, agentType);
+  return readJson<DashboardSummary>(`/api/dashboard/summary?${params.toString()}`);
 }
 
 export function deleteCollector(collectorId: string): Promise<{ collector_id: string; removed: boolean; reason_code: string }> {
@@ -100,17 +121,25 @@ export function fetchConversations(
     prompt_query?: string;
     response_query?: string;
     workspace_query?: string;
+    agent_type?: string;
+    source_id?: string;
     page?: number;
     page_size?: number;
   } = {}
 ): Promise<ConversationsResponse> {
   const params = new URLSearchParams();
-  if (filters.window) params.set('window', filters.window);
+  if (filters.window) {
+    params.set('window', filters.window);
+  } else if (filters.start_at || filters.end_at) {
+    params.set('window', 'custom');
+  }
   if (filters.start_at) params.set('start_at', filters.start_at);
   if (filters.end_at) params.set('end_at', filters.end_at);
   if (filters.prompt_query) params.set('prompt_query', filters.prompt_query);
   if (filters.response_query) params.set('response_query', filters.response_query);
   if (filters.workspace_query) params.set('workspace_query', filters.workspace_query);
+  if (filters.agent_type) params.set('agent_type', filters.agent_type);
+  if (filters.source_id) params.set('source_id', filters.source_id);
   params.set('page', String(filters.page ?? 1));
   params.set('page_size', String(filters.page_size ?? 50));
   return readJson<ConversationsResponse>(`/api/conversations?${params.toString()}`);
@@ -124,20 +153,46 @@ export function fetchConversationForFact(factId: string): Promise<ConversationDe
   return readJson<ConversationDetail>(`/api/conversations/by-fact/${encodeURIComponent(factId)}`);
 }
 
-export function fetchUsageSummary(window: TimeWindow = '1h'): Promise<UsageSummary> {
-  return readJson<UsageSummary>(`/api/usage/summary?window=${encodeURIComponent(window)}`);
+export function fetchUsageSummary(
+  window: TimeWindowParam = '1h',
+  agentType: AgentTypeFilter = '',
+  startAt = '',
+  endAt = ''
+): Promise<UsageSummary> {
+  const params = new URLSearchParams();
+  addTimeRange(params, window, startAt, endAt);
+  addAgentFilter(params, agentType);
+  return readJson<UsageSummary>(`/api/usage/summary?${params.toString()}`);
 }
 
-export function fetchRiskSummary(window: TimeWindow = '1h'): Promise<RiskSummary> {
-  return readJson<RiskSummary>(`/api/risks/summary?mode=summary&window=${encodeURIComponent(window)}`);
+export function fetchRiskSummary(
+  window: TimeWindowParam = '1h',
+  agentType: AgentTypeFilter = '',
+  startAt = '',
+  endAt = ''
+): Promise<RiskSummary> {
+  const params = new URLSearchParams();
+  params.set('mode', 'summary');
+  addTimeRange(params, window, startAt, endAt);
+  addAgentFilter(params, agentType);
+  return readJson<RiskSummary>(`/api/risks/summary?${params.toString()}`);
 }
 
 export function fetchSignals(
-  options: { window?: TimeWindow; workspace_query?: string; page?: number; page_size?: number } = {}
+  options: {
+    window?: TimeWindowParam | '';
+    start_at?: string;
+    end_at?: string;
+    workspace_query?: string;
+    agent_type?: AgentTypeFilter | string;
+    page?: number;
+    page_size?: number;
+  } = {}
 ): Promise<SignalsResponse> {
   const params = new URLSearchParams();
-  params.set('window', options.window ?? '1h');
+  addTimeRange(params, options.window ?? '1h', options.start_at, options.end_at);
   if (options.workspace_query) params.set('workspace_query', options.workspace_query);
+  addAgentFilter(params, options.agent_type);
   params.set('page', String(options.page ?? 1));
   params.set('page_size', String(options.page_size ?? 20));
   const suffix = params.toString() ? `?${params.toString()}` : '';

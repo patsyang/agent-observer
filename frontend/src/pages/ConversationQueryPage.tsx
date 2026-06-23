@@ -1,30 +1,28 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Search } from 'lucide-react';
 
-import type { ConversationDetail, ConversationSummary, ConversationsResponse, ConversationTimeWindow } from '../api/types';
+import type { ConversationDetail, ConversationSummary, ConversationsResponse, TimeWindowParam } from '../api/types';
+import { quickTimeOptions } from '../components/timeRangeOptions';
 import { ConversationDrawer } from './ConversationDrawer';
 import { ConversationTable } from './ConversationTable';
 import { TimeRangePicker } from './TimeRangePicker';
 
 type Filters = {
-  window: ConversationTimeWindow | '';
+  window: TimeWindowParam | '';
   start_at: string;
   end_at: string;
   prompt_query: string;
   response_query: string;
   workspace_query: string;
+  agent_type: string;
+  source_id: string;
   page: number;
   page_size: number;
 };
 
+type AgentType = '' | 'codex' | 'workbuddy';
+
 const PAGE_SIZE = 50;
-const windowOptions: Array<{ value: ConversationTimeWindow; label: string }> = [
-  { value: '1h', label: '1小时' },
-  { value: '2h', label: '2小时' },
-  { value: '3h', label: '3小时' },
-  { value: '24h', label: '24小时' },
-  { value: 'today', label: '今天' },
-];
 
 export function ConversationQueryPage({
   initialFactId,
@@ -43,7 +41,7 @@ export function ConversationQueryPage({
 }) {
   const [filters, setFilters] = useState<Filters>(defaultFilters);
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'error'>('loading');
-  const [draftFilters, setDraftFilters] = useState<Pick<Filters, 'window' | 'start_at' | 'end_at' | 'prompt_query' | 'response_query' | 'workspace_query'>>(defaultFilters);
+  const [draftFilters, setDraftFilters] = useState<Pick<Filters, 'window' | 'start_at' | 'end_at' | 'prompt_query' | 'response_query' | 'workspace_query' | 'agent_type' | 'source_id'>>(defaultFilters);
   const [rows, setRows] = useState<ConversationSummary[]>([]);
   const [meta, setMeta] = useState({ total: 0, page: 1, page_size: PAGE_SIZE, has_more: false });
   const [detail, setDetail] = useState<ConversationDetail | null>(null);
@@ -97,13 +95,16 @@ export function ConversationQueryPage({
   };
 
   const submitSearch = () => {
+    const requestWindow = draftFilters.window || (draftFilters.start_at || draftFilters.end_at ? 'custom' : '1h');
     updateFilters({
-      window: draftFilters.window,
+      window: requestWindow,
       start_at: draftFilters.start_at,
       end_at: draftFilters.end_at,
       prompt_query: draftFilters.prompt_query.trim(),
       response_query: draftFilters.response_query.trim(),
       workspace_query: draftFilters.workspace_query.trim(),
+      agent_type: draftFilters.agent_type.trim(),
+      source_id: draftFilters.source_id.trim(),
     });
   };
 
@@ -119,47 +120,55 @@ export function ConversationQueryPage({
       )}
 
       <div className="conversation-toolbar" aria-label="会话筛选">
-        <TextFilter
-          testId="workspace-query"
-          label="工作区"
-          onChange={(workspace_query) => updateDraftFilters({ workspace_query })}
-          onSubmit={submitSearch}
-          value={draftFilters.workspace_query}
-        />
-        <TextFilter
-          testId="prompt-query"
-          label="提交 Prompt"
-          onChange={(prompt_query) => updateDraftFilters({ prompt_query })}
-          onSubmit={submitSearch}
-          value={draftFilters.prompt_query}
-        />
-        <TextFilter
-          testId="response-query"
-          label="响应内容"
-          onChange={(response_query) => updateDraftFilters({ response_query })}
-          onSubmit={submitSearch}
-          value={draftFilters.response_query}
-        />
-        <div className="conversation-time-group">
-          <span className="conversation-field-label">时间</span>
-          <TimeRangePicker
-            end={draftFilters.end_at}
-            onApply={({ window, start_at, end_at }) => updateDraftFilters({ window, start_at, end_at })}
-            options={windowOptions}
-            start={draftFilters.start_at}
-            window={draftFilters.window}
+        <div className="conversation-filter-row conversation-filter-row--primary">
+          <div className="conversation-time-group">
+            <span className="conversation-field-label">时间</span>
+            <TimeRangePicker
+              end={draftFilters.end_at}
+              onApply={(value) => updateDraftFilters(value)}
+              options={quickTimeOptions}
+              start={draftFilters.start_at}
+              window={draftFilters.window}
+            />
+          </div>
+          <AgentTypeSelect
+            onChange={(agent_type) => updateDraftFilters({ agent_type })}
+            value={draftFilters.agent_type as AgentType}
+          />
+          <TextFilter
+            testId="workspace-query"
+            label="工作区"
+            onChange={(workspace_query) => updateDraftFilters({ workspace_query })}
+            onSubmit={submitSearch}
+            value={draftFilters.workspace_query}
           />
         </div>
-        <button
-          aria-label="搜索会话"
-          className="icon-button conversation-search-button"
-          data-testid="conversation-search"
-          onClick={submitSearch}
-          title="搜索会话"
-          type="button"
-        >
-          <Search aria-hidden="true" size={16} />
-        </button>
+        <div className="conversation-filter-row conversation-filter-row--secondary">
+          <TextFilter
+            testId="prompt-query"
+            label="提交 Prompt"
+            onChange={(prompt_query) => updateDraftFilters({ prompt_query })}
+            onSubmit={submitSearch}
+            value={draftFilters.prompt_query}
+          />
+          <TextFilter
+            testId="response-query"
+            label="响应内容"
+            onChange={(response_query) => updateDraftFilters({ response_query })}
+            onSubmit={submitSearch}
+            value={draftFilters.response_query}
+          />
+          <button
+            aria-label="搜索会话"
+            className="icon-button conversation-search-button"
+            data-testid="conversation-search"
+            onClick={submitSearch}
+            title="搜索会话"
+            type="button"
+          >
+            <Search aria-hidden="true" size={16} />
+          </button>
+        </div>
       </div>
 
       {state === 'loading' && <p>正在加载会话</p>}
@@ -180,6 +189,30 @@ export function ConversationQueryPage({
   );
 }
 
+function AgentTypeSelect({
+  onChange,
+  value,
+}: {
+  onChange: (value: AgentType) => void;
+  value: AgentType;
+}) {
+  return (
+    <label className="conversation-inline-field">
+      Agent类型
+      <select
+        aria-label="Agent类型"
+        data-testid="agent-type-query"
+        onChange={(event) => onChange(event.target.value as AgentType)}
+        value={value}
+      >
+        <option value="">全部</option>
+        <option value="codex">Codex</option>
+        <option value="workbuddy">WorkBuddy</option>
+      </select>
+    </label>
+  );
+}
+
 const defaultFilters: Filters = {
   window: '1h',
   start_at: '',
@@ -187,6 +220,8 @@ const defaultFilters: Filters = {
   prompt_query: '',
   response_query: '',
   workspace_query: '',
+  agent_type: '',
+  source_id: '',
   page: 1,
   page_size: PAGE_SIZE,
 };
@@ -195,12 +230,14 @@ function TextFilter({
   label,
   onChange,
   onSubmit,
+  placeholder = '关键字模糊搜索',
   testId,
   value,
 }: {
   label: string;
   onChange: (value: string) => void;
   onSubmit: () => void;
+  placeholder?: string;
   testId: string;
   value: string;
 }) {
@@ -217,7 +254,7 @@ function TextFilter({
             onSubmit();
           }
         }}
-        placeholder="关键字模糊搜索"
+        placeholder={placeholder}
       />
     </label>
   );

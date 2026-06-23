@@ -12,10 +12,11 @@ from app.validation.service import (
     FLOW_IDS,
     run_minimum_validation_experiment,
 )
+from source_payloads import default_sources
 
 CLIENT_PROTOCOL = {
-    "protocol_version": "agent-observer-telemetry/v2",
-    "agent_version": "0.2.0",
+    "protocol_version": "agent-observer-telemetry/v3",
+    "agent_version": "0.3.0",
 }
 
 
@@ -68,10 +69,13 @@ def _validation_batch(
         items.append(item)
     return {
         "batch_id": "batch-validation-001",
-        "protocol_version": "agent-observer-telemetry/v2",
-        "agent_version": "0.2.0",
+        "protocol_version": "agent-observer-telemetry/v3",
+        "agent_version": "0.3.0",
         "collector_id": "collector-codex",
         "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
         "cursor": "cursor-validation-001",
         "items": items,
     }
@@ -126,9 +130,10 @@ def test_minimum_validation_emits_pass_report_for_documented_7_day_local_sample(
                 "hostname": "validation-host",
                 "windows_username": "validation-user",
                 **CLIENT_PROTOCOL,
+                "sources": default_sources(),
             },
         )
-        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"})
+        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running", "sources": default_sources()})
         ingest_telemetry(
             conn,
             _validation_batch(validation_sample="documented_7_day_local_sample", occurred_at=dates),
@@ -210,9 +215,10 @@ def test_minimum_validation_qualifies_real_local_codex_template_without_fixture_
                 "hostname": "validation-host",
                 "windows_username": "validation-user",
                 **CLIENT_PROTOCOL,
+                "sources": default_sources(),
             },
         )
-        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running"})
+        heartbeat(conn, "collector-codex", {**CLIENT_PROTOCOL, "source_status": "online", "reason_code": "start_running", "sources": default_sources()})
         ingest_telemetry(conn, batch)
         rebuild_signals(conn, reason="minimum-validation")
         signal_id = conn.execute("select signal_id from behavior_signals order by rowid limit 1").fetchone()["signal_id"]

@@ -179,7 +179,7 @@ def test_codex_source_template_extracts_structured_facts_with_raw_content_by_def
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"tool_execution_failure", "usage", "destructive_operation", "sensitive_content_exposure", "codex_message"} <= categories
+    assert {"tool_execution_failure", "usage", "destructive_operation", "sensitive_content_exposure", "agent_response"} <= categories
     assert "uncategorized" not in categories
     assert any(fact.get("error_signature") for fact in facts if fact["category"] == "tool_execution_failure")
     assert any(fact.get("usage", {}).get("activity_tag") == "shell_debug" for fact in facts)
@@ -188,7 +188,7 @@ def test_codex_source_template_extracts_structured_facts_with_raw_content_by_def
     assert sensitive_fact["projection"]["object_type"] == "credential"
     assert sensitive_fact["projection"]["sensitive_categories"] == ["token"]
     assert sensitive_fact["projection"]["sensitive_matches"][0]["match_type"] == "authorization_bearer"
-    message_fact = next(fact for fact in facts if fact["category"] == "codex_message")
+    message_fact = next(fact for fact in facts if fact["category"] == "agent_response")
     assert message_fact["projection"]["role"] == "unknown"
     assert message_fact["projection"]["content_length"] == 0
     assert "raw_content" in message_fact
@@ -275,7 +275,7 @@ def test_codex_source_template_groups_records_without_conversation_id_by_session
     refs = {
         fact["source_refs"]["conversation_ref"]
         for fact in facts
-        if fact["category"] in {"codex_prompt", "codex_message", "tool_call"}
+        if fact["category"] in {"agent_prompt", "agent_response", "tool_call"}
     }
     assert len(refs) == 1
 
@@ -362,9 +362,9 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"tool_call", "tool_execution_failure", "usage", "file_change", "codex_prompt", "codex_reasoning"} <= categories
-    prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
-    assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
+    assert {"tool_call", "tool_execution_failure", "usage", "file_change", "agent_prompt", "agent_reasoning"} <= categories
+    prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
+    assert prompt_fact["summary"] == "记录到 用户 Prompt，已上传原始内容。"
     assert prompt_fact["projection"]["content_length"] == len("请检查 Dashboard 为什么看不到原始 Prompt")
     assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
     assert "请检查 Dashboard" in json.dumps(prompt_fact, ensure_ascii=False)
@@ -448,7 +448,7 @@ def test_codex_source_template_attaches_workspace_label_from_global_state(tmp_pa
         cursor={"last_sequence": 0, "sources": {}},
     )
 
-    prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
+    prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
     refs = prompt_fact["source_refs"]
     assert refs["workspace_label"] == "Agent Observer"
     assert refs["workspace_path"].endswith("agent-observer")

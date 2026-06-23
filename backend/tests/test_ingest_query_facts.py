@@ -12,7 +12,7 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
     value = {
         "source_event_id": event_id,
         "fact_type": "content",
-        "category": "codex_prompt",
+        "category": "agent_prompt",
         "quality": "high",
         "severity": "low",
         "summary": "记录到 Codex 用户 Prompt，已上传原始内容。",
@@ -27,7 +27,7 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
             "session_ref": f"session-{event_id}",
             "source_path_hash": f"path-{event_id}",
         },
-        "source_specific": {"codex_event_type": "message"},
+        "source_specific": {"event_type": "message"},
     }
     value.update(overrides)
     return value
@@ -36,10 +36,13 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
 def _batch(batch_id: str, items: list[dict]) -> dict:
     return {
         "batch_id": batch_id,
-        "protocol_version": "agent-observer-telemetry/v2",
-        "agent_version": "0.2.0",
+        "protocol_version": "agent-observer-telemetry/v3",
+        "agent_version": "0.3.0",
         "collector_id": "collector-codex",
         "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
         "cursor": batch_id,
         "items": items,
     }
@@ -73,7 +76,7 @@ def test_query_facts_filters_time_window_and_hides_health_by_default(tmp_path):
                         severity="high",
                         summary="旧错误不应出现在 1 小时默认窗口。",
                         projection={"tool": "shell"},
-                        source_specific={"codex_event_type": "tool_result"},
+                        source_specific={"event_type": "tool_result"},
                     ),
                 ],
             ),
@@ -267,7 +270,7 @@ def test_low_evidence_preview_uses_event_shape_instead_of_generic_boilerplate(tm
         result = query_facts(conn, window="1h", include_health=False)
 
     preview = result["facts"][0]["content_preview"]
-    assert preview == "未归类 Codex 事件：事件类型 response_item，可用字段 type, content, role"
+    assert preview == "未归类 Agent 事件：事件类型 response_item，可用字段 type, content, role"
     assert "低证据命中候选" not in preview
 
 
@@ -301,7 +304,7 @@ def test_ingest_stores_raw_evidence_when_projection_upload_raw_is_enabled(tmp_pa
                             }
                         ],
                         "source_refs": {"conversation_ref": "conv-raw"},
-                        "source_specific": {"codex_event_type": "tool_result"},
+                        "source_specific": {"event_type": "tool_result"},
                     }
                 ],
             ),

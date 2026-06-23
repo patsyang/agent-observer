@@ -1,4 +1,4 @@
-import type { TimeWindow } from './types.facts';
+import type { TimeWindowParam } from './types.facts';
 
 export interface UsageRollup {
   rollup_id: string;
@@ -12,6 +12,7 @@ export interface UsageRollup {
 
 export interface UsageSummary {
   window: string;
+  bucket_size_minutes: number;
   rollups: UsageRollup[];
   trend: Array<{
     bucket: string;
@@ -19,6 +20,12 @@ export interface UsageSummary {
     unknown_units: number;
     cached_input_units: number;
     input_token_units: number;
+    output_token_units: number;
+    total_token_units: number;
+    cache_write_input_units: number;
+    reasoning_output_units: number;
+    credit_total: number;
+    cache_observed_input_units: number;
     cache_hit_rate: number;
   }>;
   totals: {
@@ -26,6 +33,12 @@ export interface UsageSummary {
     unknown_units: number;
     cached_input_units: number;
     input_token_units: number;
+    output_token_units: number;
+    total_token_units: number;
+    cache_write_input_units: number;
+    reasoning_output_units: number;
+    credit_total: number;
+    cache_observed_input_units: number;
     cache_hit_rate: number;
   };
 }
@@ -44,6 +57,6 @@ export interface RiskSummarySignal {
 
 export interface RiskSummary {
   mode?: 'summary' | 'detailed';
-  window?: TimeWindow;
+  window?: TimeWindowParam;
   signals: RiskSummarySignal[];
 }

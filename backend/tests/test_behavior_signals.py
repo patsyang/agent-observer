@@ -20,7 +20,7 @@ def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
         "span": f"event:{event_id}",
         "raw_hash": f"hash-{event_id}",
         "source_refs": {"conversation_ref": "conversation-1"},
-        "source_specific": {"codex_event_type": "tool_result"},
+        "source_specific": {"event_type": "tool_result"},
     }
 
 
@@ -45,10 +45,13 @@ def _ingest(conn, items: list[dict]) -> None:
         conn,
         {
             "batch_id": f"batch-{items[0]['source_event_id']}",
-            "protocol_version": "agent-observer-telemetry/v2",
-            "agent_version": "0.2.0",
+            "protocol_version": "agent-observer-telemetry/v3",
+            "agent_version": "0.3.0",
             "collector_id": "collector-codex",
             "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
             "cursor": "cursor",
             "items": items,
         },
@@ -56,7 +59,7 @@ def _ingest(conn, items: list[dict]) -> None:
 
 
 def test_tool_execution_failure_is_explainable_signal(tmp_path):
-    prompt = _base_item("prompt-1", "codex_prompt", "event")
+    prompt = _base_item("prompt-1", "agent_prompt", "event")
     prompt["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "修复工具失败上下文"}
     prompt["projection"] = {"role": "user", "prompt_text": "请修复工具失败"}
     prompt["raw_content"] = {"text": "请修复工具失败"}

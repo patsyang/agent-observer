@@ -3,7 +3,8 @@ from __future__ import annotations
 import sqlite3
 from collections import Counter, defaultdict
 
-from app.behavior_signals.common import dumps, now_iso, signal_id, snapshot_hash, window_cutoff
+from app.behavior_signals.common import dumps, now_iso, signal_id, snapshot_hash
+from app.time_ranges import range_bounds_iso
 from app.behavior_signals.evidence import enrichment_status_summary, usage_summary
 from app.behavior_signals.execution import build_execution_timeouts, build_tool_execution_failures
 from app.behavior_signals.presentation import row_to_signal
@@ -55,6 +56,9 @@ def list_signals(
     conn: sqlite3.Connection,
     window: str = "all",
     workspace_query: str | None = None,
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -63,17 +67,25 @@ def list_signals(
     offset = (current_page - 1) * limit
     clauses = ["bs.decision_state != 'handled'"]
     params: list[str] = []
-    cutoff = window_cutoff(window)
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
     if cutoff:
         clauses.append("coalesce(bs.last_event_at, bs.updated_at) >= ?")
         params.append(cutoff)
+    if range_end:
+        clauses.append("coalesce(bs.last_event_at, bs.updated_at) <= ?")
+        params.append(range_end)
+    if agent_type:
+        clauses.append("latest.agent_type = ?")
+        params.append(agent_type)
     where = f"where {' and '.join(clauses)}"
+    latest_join = "left join observed_facts latest on latest.fact_id = bs.latest_fact_id"
     if not workspace_query:
         total = conn.execute(
             f"""
             select count(*) as total
             from behavior_signals bs
             left join signal_decisions sd on sd.signal_id = bs.signal_id
+            {latest_join}
             {where}
             """,
             params,
@@ -83,6 +95,7 @@ def list_signals(
             select bs.*, sd.conclusion_code as decision_conclusion_code, sd.note as decision_note
             from behavior_signals bs
             left join signal_decisions sd on sd.signal_id = bs.signal_id
+            {latest_join}
             {where}
             order by bs.priority_score desc, coalesce(bs.last_event_at, bs.updated_at) desc, bs.signal_key
             limit ? offset ?
@@ -101,6 +114,7 @@ def list_signals(
         select bs.*, sd.conclusion_code as decision_conclusion_code, sd.note as decision_note
         from behavior_signals bs
         left join signal_decisions sd on sd.signal_id = bs.signal_id
+        {latest_join}
         {where}
         order by bs.priority_score desc, coalesce(bs.last_event_at, bs.updated_at) desc, bs.signal_key
         """,

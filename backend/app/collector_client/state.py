@@ -12,10 +12,11 @@ def load_state(path: Path) -> dict:
         if not path.exists():
             return _default_state()
         state = json.loads(path.read_text(encoding="utf-8"))
-    state.setdefault("schema_version", 2)
+    state.setdefault("schema_version", 3)
     state.setdefault("cursor", {})
     state["cursor"].setdefault("last_sequence", 0)
     state["cursor"].setdefault("sources", {})
+    state["cursor"].setdefault("source_cursors", {})
     state["cursor"].setdefault("backfill", {})
     state.setdefault("outbox", [])
     state.setdefault("last_upload_at", None)
@@ -30,7 +31,7 @@ def load_state(path: Path) -> dict:
 def save_state(path: Path, state: dict) -> None:
     with _STATE_LOCK:
         path.parent.mkdir(parents=True, exist_ok=True)
-        state.setdefault("schema_version", 2)
+        state.setdefault("schema_version", 3)
         tmp_path = path.with_suffix(path.suffix + ".tmp")
         tmp_path.write_text(json.dumps(state, indent=2, sort_keys=True), encoding="utf-8")
         tmp_path.replace(path)
@@ -46,7 +47,7 @@ def patch_state(path: Path, fields: dict) -> dict:
 
 def _default_state() -> dict:
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "running": False,
         "runtime_phase": "idle",
         "reason_code": "started",
@@ -54,6 +55,7 @@ def _default_state() -> dict:
         "cursor": {
             "last_sequence": 0,
             "sources": {},
+            "source_cursors": {},
             "backfill": {},
         },
         "outbox": [],

@@ -349,11 +349,11 @@ def test_codex_source_template_uploads_raw_prompt_by_default(tmp_path):
         cursor={"last_sequence": 0, "sources": {}},
     )
 
-    prompt_fact = next(fact for fact in facts if fact["category"] == "codex_prompt")
-    assert prompt_fact["summary"] == "记录到 Codex 用户 Prompt，已上传原始内容。"
+    prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
+    assert prompt_fact["summary"] == "记录到 用户 Prompt，已上传原始内容。"
     assert "请检查 Dashboard 为什么看不到原始 Prompt" in prompt_fact["raw_content"]
     assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
-    reasoning_fact = next(fact for fact in facts if fact["category"] == "codex_reasoning")
+    reasoning_fact = next(fact for fact in facts if fact["category"] == "agent_reasoning")
     assert reasoning_fact["projection"]["content_length"] == len("模型正在判断证据链刷新路径")
 
 

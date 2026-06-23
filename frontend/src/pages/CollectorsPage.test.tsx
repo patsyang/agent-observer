@@ -12,14 +12,24 @@ function collector(status: Collector['source_status']): Collector {
     display_name: `Collector ${status}`,
     hostname_hash: 'host-hash',
     windows_username_hash: 'user-hash',
-    agent_type: 'codex',
-    protocol_version: 'agent-observer-telemetry/v2',
-    agent_version: '0.2.0',
+    protocol_version: 'agent-observer-telemetry/v3',
+    agent_version: '0.3.0',
     source_status: status,
     reason_code: status,
     policy_version: 1,
     last_heartbeat_at: '2026-06-18T00:00:00Z',
-    outbox_backlog: status === 'degraded' ? 5 : 0
+    outbox_backlog: status === 'degraded' ? 5 : 0,
+    sources: [{
+      source_id: `codex-${status}`,
+      collector_id: `collector-${status}`,
+      agent_type: 'codex',
+      source_kind: 'codex_local',
+      display_name: `Codex ${status}`,
+      capabilities: { raw_upload_default: true },
+      source_status: status,
+      reason_code: status,
+      last_seen_at: '2026-06-18T00:00:00Z'
+    }]
   };
 }
 

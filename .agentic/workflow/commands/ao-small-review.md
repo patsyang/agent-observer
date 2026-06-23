@@ -1,12 +1,9 @@
 # ao-small review
 
-只读审查小修改、diff、repro、small scope 和验证证据。不得修改代码。
+只读审查小修改、真实 diff、实现说明和验证证据。不得修改代码。
 
 必须写入：
 
 - `$AO_ARTIFACTS_DIR/review.md`
-- `$AO_ARTIFACTS_DIR/acceptance-matrix.json`
-- `$AO_ARTIFACTS_DIR/component-evidence.json`
-- `$AO_ARTIFACTS_DIR/command-coverage.json`
 
-review 必须确认没有越界修改，验收证据必须存在。
+review 必须按 P0/P1/P2 输出发现；存在 P0/P1 或未处理 P2 时不得通过。

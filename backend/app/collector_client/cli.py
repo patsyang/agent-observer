@@ -52,6 +52,7 @@ def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
                 "enrichment": str(exc),
             },
         )
+    codex_home = config.source_root("codex_local")
     return _json_result(
         0,
         {
@@ -59,8 +60,19 @@ def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
             "collector_id": config.collector_id,
             "server_url": config.server_url,
             "state_path": str(config.state_path),
-            "codex_home": str(config.codex_home),
-            "codex_sessions_present": (config.codex_home / "sessions").exists(),
+            "sources": [
+                {
+                    "source_id": source.source_id,
+                    "agent_type": source.agent_type,
+                    "source_kind": source.source_kind,
+                    "root": str(source.root),
+                    "enabled": source.enabled,
+                    "present": source.root.exists(),
+                }
+                for source in config.sources
+            ],
+            "codex_home": str(codex_home),
+            "codex_sessions_present": (codex_home / "sessions").exists(),
             "evidence_mode": config.evidence_mode,
             "server_reachable": True,
             "enrichment_pull": True,
@@ -72,16 +84,22 @@ def _human_log_line(payload: dict[str, object]) -> str:
     mode = str(payload.get("mode") or "")
     now = datetime.now().strftime("%H:%M:%S")
     if mode == "started":
-        return f"[{now}] 启动 collector: {payload.get('collector_id')}，原始输入输出上传已启用"
+        return f"[{now}] 启动 collector: {payload.get('collector_id')}，采集 {_human_sources(payload)}，原始输入输出上传已启用"
     if mode == "cycle_started":
-        return f"[{now}] 第 {payload.get('cycle')} 轮采集开始"
+        return f"[{now}] 第 {payload.get('cycle')} 轮采集开始: {_human_sources(payload)}"
+    if mode == "source_started":
+        return f"[{now}] {_source_label(payload)} 开始采集"
+    if mode == "source_completed":
+        return _human_source_completed_line(now, payload)
+    if mode == "upload_completed":
+        return _human_upload_completed_line(now, payload)
     if mode == "cycle":
         return _human_cycle_line(now, payload)
     if mode == "cycle_error":
         return _human_cycle_error_line(now, payload)
     if mode == "waiting":
         seconds = _display_wait_seconds(int(payload.get("seconds_until_next_cycle") or 0))
-        return f"[{now}] 运行中，等待下一轮采集，剩余 {seconds} 秒"
+        return f"[{now}] 等待下一轮采集：{seconds} 秒"
     if mode == "stopped":
         return f"[{now}] collector 已停止，outbox 剩余 {payload.get('outbox_backlog', 0)} 条"
     if payload.get("status") == "error":
@@ -99,17 +117,84 @@ def _human_cycle_line(now: str, payload: dict[str, object]) -> str:
     return (
         f"[{now}] 第 {payload.get('cycle')} 轮完成: "
         f"生成 {generated} 条事实，上传 {payload.get('uploaded', 0)} 条"
-        f"{type_text}，补证 {enrichments}，outbox {payload.get('outbox_backlog', 0)}，耗时 {duration_ms / 1000:.1f}s"
+        f"{type_text}；{_human_source_counts(payload)}，补证 {enrichments}，outbox {payload.get('outbox_backlog', 0)}，耗时 {duration_ms / 1000:.1f}s"
     )
 
 
 def _human_cycle_error_line(now: str, payload: dict[str, object]) -> str:
     duration_ms = int(payload.get("last_cycle_duration_ms") or 0)
-    error = str(payload.get("error") or payload.get("last_error") or "未知错误")
+    error = _safe_error_text(payload.get("error") or payload.get("last_error") or "未知错误")
     return (
         f"[{now}] 第 {payload.get('cycle')} 轮失败: {error}，"
         f"outbox {payload.get('outbox_backlog', 0)}，耗时 {duration_ms / 1000:.1f}s，下轮继续重试"
     )
+
+
+def _human_source_completed_line(now: str, payload: dict[str, object]) -> str:
+    label = _source_label(payload)
+    status = str(payload.get("source_status") or "")
+    reason = str(payload.get("reason_code") or status or "source_error")
+    duration_ms = int(payload.get("duration_ms") or 0)
+    if status == "degraded" or reason == "source_error":
+        return f"[{now}] {label} 采集失败：{reason}，下轮继续"
+    return f"[{now}] {label} 完成：生成 {int(payload.get('generated') or 0)} 条，耗时 {duration_ms / 1000:.1f}s"
+
+
+def _human_upload_completed_line(now: str, payload: dict[str, object]) -> str:
+    duration_ms = int(payload.get("duration_ms") or 0)
+    return (
+        f"[{now}] 上传完成：{int(payload.get('uploaded') or 0)} 条，"
+        f"{int(payload.get('batches') or 0)} 批，outbox {int(payload.get('outbox_backlog') or 0)}，耗时 {duration_ms / 1000:.1f}s"
+    )
+
+
+def _safe_error_text(value: object) -> str:
+    text = str(value or "未知错误")
+    if _looks_like_path(text):
+        return "采集或上传失败"
+    return text
+
+
+def _human_sources(payload: dict[str, object]) -> str:
+    summaries = payload.get("sources_summary")
+    if not isinstance(summaries, list):
+        return "全部 Agent"
+    labels = [_source_label(item) for item in summaries if isinstance(item, dict)]
+    return "、".join(label for label in labels if label) or "全部 Agent"
+
+
+def _human_source_counts(payload: dict[str, object]) -> str:
+    summaries = payload.get("sources_summary")
+    if not isinstance(summaries, list):
+        return "按 Agent 未分组"
+    parts = []
+    for item in summaries:
+        if not isinstance(item, dict):
+            continue
+        label = _source_label(item)
+        generated = int(item.get("generated") or 0)
+        status = str(item.get("status") or "")
+        reason = str(item.get("reason_code") or "")
+        detail = _human_type_counts(item.get("types") if isinstance(item.get("types"), dict) else {})
+        suffix = detail if generated else f"（{reason or status}）"
+        parts.append(f"{label} {generated} 条{suffix}")
+    return "；".join(parts) if parts else "按 Agent 未分组"
+
+
+def _source_label(item: dict[str, object]) -> str:
+    agent_type = str(item.get("agent_type") or "").strip().lower()
+    if agent_type in {"codex", "workbuddy"}:
+        return {"codex": "Codex", "workbuddy": "WorkBuddy"}[agent_type]
+    default_label = agent_type or "未知 Agent"
+    display_name = str(item.get("display_name") or "").strip()
+    if display_name and display_name.lower() not in {agent_type, f"{agent_type} local"} and not _looks_like_path(display_name):
+        return display_name
+    return default_label
+
+
+def _looks_like_path(value: str) -> bool:
+    lowered = value.lower()
+    return any(marker in lowered for marker in ("\\", "/", ".json", ".jsonl", ".ndjson", ".codex", ".workbuddy", "users", ":"))
 
 
 def _human_type_counts(types: dict[str, object]) -> str:
@@ -118,7 +203,6 @@ def _human_type_counts(types: dict[str, object]) -> str:
         "risk": "风险",
         "usage": "用量",
         "tool": "工具",
-        "collector_health": "自检",
         "unknown": "未归类",
     }
     parts = [f"{label} {int(types[key])}" for key, label in labels.items() if int(types.get(key) or 0) > 0]
@@ -136,7 +220,7 @@ def main() -> int:
     json_mode = "--json" in argv
     argv = [arg for arg in argv if arg != "--json"]
     command = argv[0] if argv else "status"
-    human_start = command == "start" and not json_mode and sys.stdout.isatty()
+    human_start = command == "start" and not json_mode
 
     def emit_line(line: str) -> None:
         if not human_start:

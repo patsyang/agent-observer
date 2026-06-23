@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
@@ -6,22 +6,29 @@ import type { DashboardSummary, RiskSummary, SignalsResponse, UsageSummary } fro
 import { DashboardPage } from './DashboardPage';
 
 const usage: UsageSummary = {
-  window: '24h',
+  window: 'today',
+  bucket_size_minutes: 60,
   totals: {
     effective_units: 3175,
     unknown_units: 1015,
     cached_input_units: 900,
     input_token_units: 3000,
+    output_token_units: 1075,
+    total_token_units: 4075,
+    cache_write_input_units: 0,
+    reasoning_output_units: 0,
+    credit_total: 0,
+    cache_observed_input_units: 3000,
     cache_hit_rate: 0.3
   },
   trend: [
-    { bucket: '2026-06-21T01:00:00+00:00', effective_units: 100, unknown_units: 0, cached_input_units: 20, input_token_units: 100, cache_hit_rate: 0.2 },
-    { bucket: '2026-06-21T01:05:00+00:00', effective_units: 3075, unknown_units: 1015, cached_input_units: 880, input_token_units: 2900, cache_hit_rate: 0.3034 }
+    { bucket: '2026-06-21T01:00:00+00:00', effective_units: 100, unknown_units: 0, cached_input_units: 20, input_token_units: 100, output_token_units: 20, total_token_units: 120, cache_write_input_units: 0, reasoning_output_units: 0, credit_total: 0, cache_observed_input_units: 100, cache_hit_rate: 0.2 },
+    { bucket: '2026-06-21T01:05:00+00:00', effective_units: 3075, unknown_units: 1015, cached_input_units: 880, input_token_units: 2900, output_token_units: 1055, total_token_units: 3955, cache_write_input_units: 0, reasoning_output_units: 0, credit_total: 0, cache_observed_input_units: 2900, cache_hit_rate: 0.3034 }
   ],
   rollups: [
     {
-      rollup_id: '24h:session:session-001:implementation',
-      window: '24h',
+      rollup_id: 'today:session:session-001:implementation',
+      window: 'today',
       scope: 'session',
       scope_value: 'session-001',
       units: 1120,
@@ -29,8 +36,8 @@ const usage: UsageSummary = {
       evidence_refs: ['proj-usage-effective-001']
     },
     {
-      rollup_id: '24h:conversation:conversation-001:bug_fix',
-      window: '24h',
+      rollup_id: 'today:conversation:conversation-001:bug_fix',
+      window: 'today',
       scope: 'conversation',
       scope_value: 'conversation-001',
       units: 2040,
@@ -38,8 +45,8 @@ const usage: UsageSummary = {
       evidence_refs: ['proj-usage-fix-001']
     },
     {
-      rollup_id: '24h:activity_tag:unknown:unknown',
-      window: '24h',
+      rollup_id: 'today:activity_tag:unknown:unknown',
+      window: 'today',
       scope: 'activity_tag',
       scope_value: 'unknown',
       units: 1015,
@@ -48,6 +55,40 @@ const usage: UsageSummary = {
     }
   ]
 };
+
+function usageWithTotal(total: number): UsageSummary {
+  return {
+    window: '1h',
+    bucket_size_minutes: 1,
+    totals: {
+      effective_units: total,
+      unknown_units: 0,
+      cached_input_units: 0,
+      input_token_units: total,
+      output_token_units: 0,
+      total_token_units: total,
+      cache_write_input_units: 0,
+      reasoning_output_units: 0,
+      credit_total: 0,
+      cache_observed_input_units: total,
+      cache_hit_rate: 0
+    },
+    trend: [
+      { bucket: '2026-06-21T01:00:00+00:00', effective_units: total, unknown_units: 0, cached_input_units: 0, input_token_units: total, output_token_units: 0, total_token_units: total, cache_write_input_units: 0, reasoning_output_units: 0, credit_total: 0, cache_observed_input_units: total, cache_hit_rate: 0 }
+    ],
+    rollups: [
+      {
+        rollup_id: `1h:total:all:${total}`,
+        window: '1h',
+        scope: 'total',
+        scope_value: 'all',
+        units: total,
+        activity_tag: 'all',
+        evidence_refs: []
+      }
+    ]
+  };
+}
 
 const risks: RiskSummary = {
   signals: [
@@ -74,9 +115,8 @@ const summary: DashboardSummary = {
       display_name: 'windows-collector',
       hostname_hash: 'host-hash',
       windows_username_hash: 'user-hash',
-      agent_type: 'codex',
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0',
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
       source_status: 'online',
       reason_code: 'run_once',
       policy_version: 1,
@@ -85,7 +125,18 @@ const summary: DashboardSummary = {
       runtime_phase: 'uploading',
       last_seen_at: '2026-06-19T11:30:03+08:00',
       last_cycle_duration_ms: 3100,
-      last_error: null
+      last_error: null,
+      sources: [{
+        source_id: 'codex-local',
+        collector_id: 'windows-collector',
+        agent_type: 'codex',
+        source_kind: 'codex_local',
+        display_name: 'Codex Local',
+        capabilities: { raw_upload_default: true },
+        source_status: 'online',
+        reason_code: 'run_once',
+        last_seen_at: '2026-06-19T11:30:03+08:00'
+      }]
     }
     ]
   },
@@ -137,12 +188,12 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('用量趋势'));
     expect(screen.queryByLabelText('使用与风险治理')).not.toBeInTheDocument();
     expect(await screen.findByTestId('dashboard-sidebar-context')).toHaveTextContent('接入与筛选');
-    expect(screen.getByLabelText('选择时间范围内真实消耗 token 与缓存命中 token 柱状图')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择时间范围内有效 token 与缓存命中 token 柱状图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('行为风险信号')).toBeInTheDocument();
     expect(screen.queryByText('行为风险信号台')).not.toBeInTheDocument();
     expect(screen.queryByText(/默认只看最近 1 小时/)).not.toBeInTheDocument();
-    expect(screen.getByText('采集器自检')).toBeInTheDocument();
+    expect(screen.getByText('会话内容')).toBeInTheDocument();
     expect(screen.queryByText(/最近命中：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
     expect(screen.getByText('1 / 6')).toBeInTheDocument();
@@ -153,20 +204,66 @@ describe('DashboardPage', () => {
     expect(within(coreMetrics).getByText('3,175')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('900')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('0')).toBeInTheDocument();
-    expect(screen.getByText(/缓存 900（30.0%）/)).toBeInTheDocument();
+    expect(screen.getByText(/有效Token 3,175/)).toBeInTheDocument();
     expect(screen.queryByText('未知活动')).not.toBeInTheDocument();
     expect(screen.queryByText('模型调用有效 token')).not.toBeInTheDocument();
     expect(screen.queryByText('当前队列待看')).not.toBeInTheDocument();
     expect(screen.queryByText(/活动：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/风险：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('当前采集器')).not.toBeInTheDocument();
+    expect(screen.queryByText('最近命中')).not.toBeInTheDocument();
     expect(screen.getByLabelText('筛选工作区')).toBeInTheDocument();
-    expect(loadSignals).toHaveBeenCalledWith({ window: '1h', workspace_query: '', page: 1, page_size: 20 });
-    expect(loadUsageSummary).toHaveBeenCalledWith('1h');
-    expect(loadRiskSummary).toHaveBeenCalledWith('1h');
-    expect(loadDashboardSummary).toHaveBeenCalledWith('1h');
+    expect(screen.getByLabelText('筛选Agent类型')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText('时间范围：1小时'));
+    expect(screen.getByRole('button', { name: '今天' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '本周' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '6小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '12小时' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '24小时' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '7天' })).not.toBeInTheDocument();
+    expect(loadSignals).toHaveBeenCalledWith({ window: '1h', start_at: '', end_at: '', workspace_query: '', agent_type: '', page: 1, page_size: 20 });
+    expect(loadUsageSummary).toHaveBeenCalledWith('1h', '', '', '');
+    expect(loadRiskSummary).toHaveBeenCalledWith('1h', '', '', '');
+    expect(loadDashboardSummary).toHaveBeenCalledWith('1h', '', '', '');
   });
 
   it('refreshes dashboard data without changing the selected time window', async () => {
+    const user = userEvent.setup();
+    const loadDashboardSummary = vi.fn(async () => summary);
+    const loadSignals = vi.fn(async () => signalPage);
+    const loadUsageSummary = vi.fn(async (_window, agentType) => (
+      agentType === 'workbuddy' ? usageWithTotal(222) : usageWithTotal(111)
+    ));
+    const loadRiskSummary = vi.fn(async () => risks);
+    render(
+      <DashboardPage
+        loadDashboardSummary={loadDashboardSummary}
+        loadSignals={loadSignals}
+        loadUsageSummary={loadUsageSummary}
+        loadRiskSummary={loadRiskSummary}
+        onOpenSignal={() => {}}
+      />
+    );
+
+    await screen.findByText('行为风险信号');
+    await user.click(screen.getByLabelText('时间范围：1小时'));
+    await user.click(screen.getByRole('button', { name: '今天' }));
+    await user.selectOptions(screen.getByLabelText('筛选Agent类型'), 'workbuddy');
+    expect(loadDashboardSummary).toHaveBeenCalledTimes(1);
+    expect(loadRiskSummary).toHaveBeenCalledTimes(1);
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('today', 'workbuddy', '', ''));
+    await waitFor(() => expect(within(screen.getByLabelText('核心指标')).getByText('222')).toBeInTheDocument());
+    expect(screen.getAllByText(/有效Token 222/).length).toBeGreaterThanOrEqual(1);
+    expect(loadRiskSummary).toHaveBeenLastCalledWith('today', 'workbuddy', '', '');
+    expect(loadDashboardSummary).toHaveBeenCalledTimes(2);
+    expect(loadRiskSummary).toHaveBeenCalledTimes(2);
+    expect(screen.getByText(/最后刷新/)).toBeInTheDocument();
+  });
+
+  it('submits custom time range only after refresh', async () => {
     const user = userEvent.setup();
     const loadDashboardSummary = vi.fn(async () => summary);
     const loadSignals = vi.fn(async () => signalPage);
@@ -183,14 +280,27 @@ describe('DashboardPage', () => {
     );
 
     await screen.findByText('行为风险信号');
-    await user.click(screen.getByRole('button', { name: '24小时' }));
-    await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('24h'));
-    expect(loadRiskSummary).toHaveBeenLastCalledWith('24h');
+    await user.click(screen.getByLabelText('时间范围：1小时'));
+    fireEvent.change(screen.getByLabelText('开始'), { target: { value: '2026-06-21T01:00:00' } });
+    fireEvent.change(screen.getByLabelText('结束'), { target: { value: '2026-06-21T03:00:00' } });
+    await user.click(screen.getByRole('button', { name: '确认' }));
+    expect(loadDashboardSummary).toHaveBeenCalledTimes(1);
+
     await user.click(screen.getByRole('button', { name: '刷新' }));
-    await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('24h'));
-    expect(loadRiskSummary).toHaveBeenLastCalledWith('24h');
-    expect(loadDashboardSummary).toHaveBeenCalledTimes(3);
-    expect(loadRiskSummary).toHaveBeenCalledTimes(3);
-    expect(screen.getByText(/最后刷新/)).toBeInTheDocument();
+    await waitFor(() => expect(loadDashboardSummary).toHaveBeenCalledTimes(2));
+    const expectedStart = new Date('2026-06-21T01:00:00').toISOString();
+    const expectedEnd = new Date('2026-06-21T03:00:00').toISOString();
+    expect(loadDashboardSummary).toHaveBeenLastCalledWith('custom', '', expectedStart, expectedEnd);
+    expect(loadSignals).toHaveBeenLastCalledWith({
+      window: 'custom',
+      start_at: expectedStart,
+      end_at: expectedEnd,
+      workspace_query: '',
+      agent_type: '',
+      page: 1,
+      page_size: 20,
+    });
+    expect(loadUsageSummary).toHaveBeenLastCalledWith('custom', '', expectedStart, expectedEnd);
+    expect(loadRiskSummary).toHaveBeenLastCalledWith('custom', '', expectedStart, expectedEnd);
   });
 });

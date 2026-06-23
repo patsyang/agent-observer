@@ -6,13 +6,30 @@ from datetime import UTC, datetime, timedelta
 from app.collectors.service import list_collectors
 from app.facts.service import query_facts
 from app.behavior_signals.service import list_signals
+from app.time_ranges import range_bounds_iso, window_cutoff_iso
 
 
-def get_dashboard_summary(conn: sqlite3.Connection, window: str = "1h") -> dict:
-    collectors = list_collectors(conn)
-    signals = list_signals(conn, window=window, page=1, page_size=5)
-    facts = query_facts(conn, window=window, include_health=False, page=1, page_size=5, time_basis="occurred")
-    risks = _risk_top(conn, window)
+def get_dashboard_summary(
+    conn: sqlite3.Connection,
+    window: str = "1h",
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> dict:
+    collectors = _filter_collectors(list_collectors(conn), agent_type)
+    signals = list_signals(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+    facts = query_facts(
+        conn,
+        window=window,
+        agent_type=agent_type,
+        include_health=False,
+        page=1,
+        page_size=5,
+        time_basis="occurred",
+        start_at=start_at,
+        end_at=end_at,
+    )
+    risks = _risk_top(conn, window, agent_type, start_at, end_at)
     return {
         "window": window,
         "collectors": {
@@ -38,13 +55,35 @@ def get_dashboard_summary(conn: sqlite3.Connection, window: str = "1h") -> dict:
     }
 
 
-def _risk_top(conn: sqlite3.Connection, window: str) -> list[dict]:
+def _filter_collectors(collectors: list[dict], agent_type: str | None) -> list[dict]:
+    if not agent_type:
+        return collectors
+    return [
+        collector
+        for collector in collectors
+        if any(source.get("agent_type") == agent_type for source in collector.get("sources", []))
+    ]
+
+
+def _risk_top(
+    conn: sqlite3.Connection,
+    window: str,
+    agent_type: str | None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> list[dict]:
     clauses = []
     params: list[str] = []
-    cutoff = _window_cutoff(window)
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
     if cutoff:
         clauses.append("of.occurred_at >= ?")
         params.append(cutoff)
+    if range_end:
+        clauses.append("of.occurred_at <= ?")
+        params.append(range_end)
+    if agent_type:
+        clauses.append("of.agent_type = ?")
+        params.append(agent_type)
     where = f"where {' and '.join(clauses)}" if clauses else ""
     return [
         {
@@ -76,9 +115,14 @@ def _risk_top(conn: sqlite3.Connection, window: str) -> list[dict]:
 
 
 def _window_cutoff(window: str) -> str | None:
-    if window == "all":
-        return None
-    hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return None
-    return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
+    return window_cutoff_iso(window)
+
+
+def _local_today_start() -> datetime:
+    local_now = datetime.now().astimezone()
+    return local_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+
+
+def _local_week_start() -> datetime:
+    today = _local_today_start()
+    return today - timedelta(days=today.astimezone().weekday())

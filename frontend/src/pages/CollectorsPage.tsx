@@ -77,9 +77,14 @@ export function CollectorsPage({
                 <strong>{collector.display_name}</strong>
                 <small>{collector.collector_id}</small>
               </td>
-              <td data-label="客户端">{collector.agent_type} {collector.agent_version}</td>
+              <td data-label="客户端">
+                <strong>{collector.agent_version}</strong>
+                <small>{collector.protocol_version}</small>
+              </td>
               <td data-label="策略">v{formatNumber(collector.policy_version)}</td>
-              <td data-label="数据源状态">{statusLabels[collector.source_status]}</td>
+              <td data-label="数据源状态">
+                <SourceList collector={collector} />
+              </td>
               <td data-label="原因">{collector.reason_code}</td>
               <td data-label="待传">{formatNumber(collector.outbox_backlog)}</td>
               <td data-label="原文上报">
@@ -117,4 +122,22 @@ export function CollectorsPage({
     }
   }
 
+}
+
+function SourceList({ collector }: { collector: Collector }) {
+  if (!collector.sources?.length) {
+    return <span>{statusLabels[collector.source_status]}</span>;
+  }
+  return (
+    <div className="source-list">
+      {collector.sources.map((source) => (
+        <span className="source-pill" key={source.source_id}>
+          <strong>{source.display_name}</strong>
+          <small>
+            {source.agent_type} · {statusLabels[source.source_status]} · {source.reason_code}
+          </small>
+        </span>
+      ))}
+    </div>
+  );
 }

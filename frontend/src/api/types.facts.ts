@@ -1,5 +1,6 @@
 export type FactQuality = 'high' | 'low' | 'unknown';
-export type TimeWindow = '1h' | '24h' | '7d' | 'all';
+export type TimeWindow = '1h' | '3h' | '6h' | '12h' | 'today' | 'week' | 'all';
+export type TimeWindowParam = TimeWindow | 'custom';
 
 export interface ObservedFact {
   fact_id: string;

@@ -9,7 +9,10 @@ def window_cutoff(window: str) -> str | None:
     if window == "today":
         local_start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
         return local_start.astimezone(UTC).isoformat()
-    hours = {"1h": 1, "2h": 2, "3h": 3, "24h": 24, "7d": 24 * 7}.get(window)
+    if window == "week":
+        local_start = datetime.now().astimezone().replace(hour=0, minute=0, second=0, microsecond=0)
+        return (local_start - timedelta(days=local_start.weekday())).astimezone(UTC).isoformat()
+    hours = {"1h": 1, "2h": 2, "3h": 3, "6h": 6, "12h": 12, "24h": 24, "7d": 24 * 7}.get(window)
     if hours is None:
         return None
     return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()

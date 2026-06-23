@@ -1,0 +1,16 @@
+{
+  "schema_version": 1,
+  "telemetry_protocol": "agent-observer-telemetry/v3",
+  "collector_register": {
+    "required": ["collector_id", "protocol_version", "agent_version", "sources"],
+    "sources_item_required": ["source_id", "agent_type", "source_kind", "display_name", "capabilities"]
+  },
+  "heartbeat": {
+    "required": ["protocol_version", "agent_version", "source_status", "runtime_phase"],
+    "optional": ["sources"]
+  },
+  "telemetry_batch": {
+    "required": ["batch_id", "collector_id", "source_id", "source", "agent_type", "source_kind", "protocol_version", "agent_version", "cursor", "items"]
+  },
+  "filters": ["agent_type", "source_id", "workspace_query", "window"]
+}

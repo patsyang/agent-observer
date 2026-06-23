@@ -21,7 +21,11 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     _validate_batch_protocol(batch)
     batch_id = batch["batch_id"]
     collector_id = batch["collector_id"]
-    source = batch.get("source", "codex")
+    source_meta = _batch_source_meta(batch)
+    source_id = source_meta["source_id"]
+    source = source_meta["source"]
+    agent_type = source_meta["agent_type"]
+    source_kind = source_meta["source_kind"]
     cursor = batch.get("cursor", "")
     accepted = 0
     duplicates = 0
@@ -32,34 +36,40 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
         _validate_required_raw_content(item)
         source_event_id = item["source_event_id"]
         existing = conn.execute(
-            "select fact_id from observed_facts where collector_id = ? and source_event_id = ?",
-            (collector_id, source_event_id),
+            "select fact_id from observed_facts where collector_id = ? and source_id = ? and source_event_id = ?",
+            (collector_id, source_id, source_event_id),
         ).fetchone()
         if existing:
             _enrich_existing_raw_projection(conn, existing["fact_id"], item)
             duplicates += 1
             continue
-        fact_id = _fact_id(conn, collector_id, source_event_id)
+        fact_id = _fact_id(conn, collector_id, source_id, source_event_id)
         preview = _list_projection_preview(item)
         refs = item.get("source_refs") or {}
         specific = item.get("source_specific") or {}
+        normalized_event_type = _normalized_event_type(item)
         conn.execute(
             """
             insert into observed_facts (
-              fact_id, source_event_id, batch_id, collector_id, source, fact_type, category, quality,
+              fact_id, source_event_id, batch_id, collector_id, source_id, source, agent_type, source_kind,
+              fact_type, category, normalized_event_type, quality,
               severity, summary, occurred_at, promoted_to_signal, source_refs_json,
               source_specific_json, content_preview, raw_available, raw_status, conversation_ref,
               session_ref, source_event_type, source_path_hash, created_at
-            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 fact_id,
                 source_event_id,
                 batch_id,
                 collector_id,
+                source_id,
                 source,
+                agent_type,
+                source_kind,
                 item.get("fact_type", "unknown"),
                 item.get("category", "uncategorized"),
+                normalized_event_type,
                 item.get("quality", "low"),
                 item.get("severity", "low"),
                 item["summary"],
@@ -71,7 +81,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
                 preview["raw_status"],
                 str(refs.get("conversation_ref") or ""),
                 str(refs.get("session_ref") or ""),
-                str(specific.get("codex_event_type") or ""),
+                normalized_event_type,
                 str(refs.get("source_path_hash") or ""),
                 now,
             ),
@@ -84,14 +94,17 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     conn.execute(
         """
         insert or replace into telemetry_batches (
-          batch_id, collector_id, source, protocol_version, agent_version,
+          batch_id, collector_id, source_id, source, agent_type, source_kind, protocol_version, agent_version,
           cursor, accepted_count, duplicate_count, created_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             batch_id,
             collector_id,
+            source_id,
             source,
+            agent_type,
+            source_kind,
             batch["protocol_version"],
             batch["agent_version"],
             cursor,
@@ -115,8 +128,26 @@ def _validate_batch_protocol(batch: dict) -> None:
         raise ValueError("unsupported_collector_version")
 
 
+def _batch_source_meta(batch: dict) -> dict[str, str]:
+    source_id = str(batch.get("source_id") or "").strip()
+    agent_type = str(batch.get("agent_type") or "").strip()
+    source_kind = str(batch.get("source_kind") or "").strip()
+    if not source_id or not agent_type or not source_kind:
+        raise ValueError("source_metadata_required")
+    return {
+        "source_id": source_id,
+        "source": str(batch.get("source") or agent_type),
+        "agent_type": agent_type,
+        "source_kind": source_kind,
+    }
+
+
 def _validate_required_raw_content(item: dict) -> None:
-    if item.get("fact_type") == "content" or item.get("category") in {"codex_prompt", "codex_message", "codex_reasoning"}:
+    if item.get("fact_type") == "content" or item.get("category") in {
+        "agent_prompt",
+        "agent_response",
+        "agent_reasoning",
+    }:
         if not _has_raw_content(item):
             raise ValueError("raw_content_required")
 
@@ -144,7 +175,7 @@ def _enrich_existing_raw_projection(conn: sqlite3.Connection, fact_id: str, item
             preview["raw_status"],
             str((item.get("source_refs") or {}).get("conversation_ref") or ""),
             str((item.get("source_refs") or {}).get("session_ref") or ""),
-            str((item.get("source_specific") or {}).get("codex_event_type") or ""),
+            _normalized_event_type(item),
             str((item.get("source_refs") or {}).get("source_path_hash") or ""),
             fact_id,
         ),
@@ -207,11 +238,22 @@ def _has_raw_content(item: dict) -> bool:
     return any(_raw_content(projection, item) is not None for projection in _normalized_projections(item))
 
 
-def _fact_id(conn: sqlite3.Connection, collector_id: str, source_event_id: str) -> str:
+def _fact_id(conn: sqlite3.Connection, collector_id: str, source_id: str, source_event_id: str) -> str:
     if conn.execute("select 1 from observed_facts where fact_id = ?", (source_event_id,)).fetchone() is None:
         return source_event_id
-    suffix = hashlib.sha256(f"{collector_id}:{source_event_id}".encode("utf-8")).hexdigest()[:20]
+    suffix = hashlib.sha256(f"{collector_id}:{source_id}:{source_event_id}".encode("utf-8")).hexdigest()[:20]
     return f"{collector_id}-{suffix}"
+
+
+def _normalized_event_type(item: dict) -> str:
+    specific = item.get("source_specific") or {}
+    return str(
+        item.get("normalized_event_type")
+        or specific.get("event_type")
+        or specific.get("codex_event_type")
+        or specific.get("workbuddy_event_type")
+        or ""
+    )
 
 
 def _insert_evidence_projections(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:
@@ -317,9 +359,12 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
             """
             insert into usage_signals (
               signal_id, fact_id, scope, units, activity_tag,
-              session_id, conversation_id, project_ref, account_ref
+              session_id, conversation_id, project_ref, account_ref,
+              input_tokens, output_tokens, total_tokens, cached_input_tokens,
+              cache_write_input_tokens, reasoning_output_tokens, model, provider,
+              credit, unit_basis, observability_level, cache_observed
             )
-            values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 f"usage-{fact_id}",
@@ -331,6 +376,18 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
                 usage.get("conversation_id", "unknown"),
                 usage.get("project_ref", "unknown"),
                 usage.get("account_ref", "unknown"),
+                int(usage.get("input_tokens", 0)),
+                int(usage.get("output_tokens", 0)),
+                int(usage.get("total_tokens", 0)),
+                int(usage.get("cached_input_tokens", 0)),
+                int(usage.get("cache_write_input_tokens", 0)),
+                int(usage.get("reasoning_output_tokens", 0)),
+                str(usage.get("model") or ""),
+                str(usage.get("provider") or ""),
+                float(usage.get("credit", 0) or 0),
+                str(usage.get("unit_basis") or "non_cached_input_plus_output"),
+                str(usage.get("observability_level") or "total_only"),
+                1 if bool(usage.get("cache_observed")) else 0,
             ),
         )
     if risk := item.get("risk"):

@@ -1,11 +1,5 @@
 import type { TimeWindow } from '../api/types';
-
-const options: Array<{ value: TimeWindow; label: string }> = [
-  { value: '1h', label: '1小时' },
-  { value: '24h', label: '24小时' },
-  { value: '7d', label: '7天' },
-  { value: 'all', label: '全部' },
-];
+import { quickTimeOptions } from './timeRangeOptions';
 
 export function TimeWindowTabs({
   value,
@@ -15,8 +9,8 @@ export function TimeWindowTabs({
   onChange: (value: TimeWindow) => void;
 }) {
   return (
-    <div className="segmented-control" aria-label="时间范围">
-      {options.map((option) => (
+    <div className="segmented-control" aria-label="时间范围" role="group">
+      {quickTimeOptions.map((option) => (
         <button
           className={value === option.value ? 'active' : ''}
           key={option.value}

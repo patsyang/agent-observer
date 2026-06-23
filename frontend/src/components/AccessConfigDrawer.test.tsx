@@ -9,14 +9,17 @@ const packageConfig = {
   path: 'data/packages/agent-observer-windows.zip',
   sha256: 'abcdef1234567890',
   server_url: 'http://127.0.0.1:8765',
-  agent_version: '0.2.0',
-  protocol_version: 'agent-observer-telemetry/v2'
+  agent_version: '0.3.0',
+  protocol_version: 'agent-observer-telemetry/v3'
 };
 
 const policy = {
   policy_version: 1,
   raw_upload_mode: 'always_on' as const,
-  enrichment_mode: 'enabled' as const
+  enrichment_mode: 'enabled' as const,
+  collection_interval_seconds: 5,
+  max_events_per_cycle: 500,
+  upload_batch_size: 100
 };
 
 const audit = {
@@ -48,6 +51,7 @@ describe('AccessConfigDrawer', () => {
     );
 
     expect(await screen.findByText('Windows collector 客户端')).toBeInTheDocument();
+    expect(screen.getByText('采集性能')).toBeInTheDocument();
     expect(screen.getByText('采集内容')).toBeInTheDocument();
     expect(screen.getByText('v1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '下载 Windows 客户端' })).toHaveAttribute(
@@ -56,19 +60,55 @@ describe('AccessConfigDrawer', () => {
     );
 
     expect(screen.getByText(/仅下载客户端时不需要保存接入策略/)).toBeInTheDocument();
-    expect(screen.getByText('0.2.0')).toBeInTheDocument();
-    expect(screen.getByText('agent-observer-telemetry/v2')).toBeInTheDocument();
+    expect(screen.getByText('0.3.0')).toBeInTheDocument();
+    expect(screen.getByText('agent-observer-telemetry/v3')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '默认上传原始输入输出' })).not.toBeInTheDocument();
     expect(screen.getByText(/当前版本固定上传完整 Prompt 和响应内容/)).toBeInTheDocument();
+    await user.clear(screen.getByLabelText('采集间隔'));
+    await user.type(screen.getByLabelText('采集间隔'), '8');
+    await user.clear(screen.getByLabelText('单轮采集上限'));
+    await user.type(screen.getByLabelText('单轮采集上限'), '900');
+    await user.clear(screen.getByLabelText('上传批量'));
+    await user.type(screen.getByLabelText('上传批量'), '120');
     await user.click(screen.getByLabelText('允许本机补证任务'));
-    await user.click(screen.getByRole('button', { name: '保存接入策略' }));
+    await user.click(screen.getByRole('button', { name: '保存并下发配置' }));
 
     await waitFor(() => expect(savePolicy).toHaveBeenCalled());
     expect(savePolicy).toHaveBeenCalledWith({
       expected_version: 1,
-      enrichment_mode: 'disabled'
+      enrichment_mode: 'disabled',
+      collection_interval_seconds: 8,
+      max_events_per_cycle: 900,
+      upload_batch_size: 120
     });
     expect(await screen.findByText('接入策略已保存为 v2')).toBeInTheDocument();
     expect(screen.getByText(/接入策略已保存，时间/)).toBeInTheDocument();
+  });
+
+  it('restores performance defaults without changing enrichment mode', async () => {
+    const user = userEvent.setup();
+    render(
+      <AccessConfigDrawer
+        onClose={vi.fn()}
+        loadConfig={vi.fn(async () => packageConfig)}
+        loadPolicy={vi.fn(async () => ({
+          ...policy,
+          collection_interval_seconds: 30,
+          max_events_per_cycle: 1000,
+          upload_batch_size: 200
+        }))}
+        savePolicy={vi.fn(async () => policy)}
+        loadAudit={vi.fn(async () => audit)}
+        downloadUrl="/api/client-package/windows"
+      />
+    );
+
+    expect(await screen.findByLabelText('采集间隔')).toHaveValue(30);
+    await user.click(screen.getByRole('button', { name: '恢复默认值' }));
+
+    expect(screen.getByLabelText('采集间隔')).toHaveValue(5);
+    expect(screen.getByLabelText('单轮采集上限')).toHaveValue(500);
+    expect(screen.getByLabelText('上传批量')).toHaveValue(100);
+    expect(screen.getByLabelText('允许本机补证任务')).toBeChecked();
   });
 });

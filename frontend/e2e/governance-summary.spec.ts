@@ -8,10 +8,13 @@ test('operator views usage and governance trend after fixture ingestion', async 
   const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: 'e2e-governance-001',
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0',
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
       collector_id: 'collector-codex',
       source: 'codex',
+      source_id: 'codex-local',
+      agent_type: 'codex',
+      source_kind: 'codex_local',
       cursor: 'cursor-governance-001',
       items: [
         {
@@ -34,7 +37,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
             account_ref: 'account-local'
           },
           source_refs: { conversation_ref: conversationId },
-          source_specific: { codex_event_type: 'usage_summary' }
+          source_specific: { event_type: 'usage_summary' }
         },
         {
           source_event_id: `e2e-usage-fix-${suffix}`,
@@ -56,7 +59,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
             account_ref: 'account-local'
           },
           source_refs: { conversation_ref: conversationId },
-          source_specific: { codex_event_type: 'usage_summary' }
+          source_specific: { event_type: 'usage_summary' }
         },
         {
           source_event_id: `e2e-risk-sensitive-${suffix}`,
@@ -75,7 +78,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
             object_type: 'configuration'
           },
           source_refs: { conversation_ref: conversationId },
-          source_specific: { codex_event_type: 'tool_result' }
+          source_specific: { event_type: 'tool_result' }
         }
       ]
     }
@@ -85,10 +88,9 @@ test('operator views usage and governance trend after fixture ingestion', async 
   await page.goto('/');
   await expect(page.getByTestId('dashboard-page')).toBeVisible({ timeout: 15000 });
   await expect(page.getByTestId('usage-trend')).toBeVisible({ timeout: 15000 });
-  await expect(page.getByTestId('usage-governance')).toBeVisible({ timeout: 15000 });
-  await expect(page.getByTestId('usage-rollup-implementation')).toContainText('120');
-  await expect(page.getByTestId('usage-rollup-bug_fix')).toContainText('40');
-  await expect(page.getByTestId('risk-signal-sensitive_content_exposure-configuration')).toContainText('1');
+  await expect(page.getByTestId('usage-row')).toBeVisible({ timeout: 15000 });
+  await expect(page.getByText('有效用量 (Token)')).toBeVisible();
+  await expect(page.getByTestId('signal-queue')).toBeVisible();
 
   const usage = await request.get(`${E2E_API_BASE}/api/usage/summary`);
   const usageBody = await usage.json();

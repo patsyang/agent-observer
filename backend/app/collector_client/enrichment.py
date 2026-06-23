@@ -26,7 +26,7 @@ def run_enrichment(config: CollectorConfig, job: dict[str, Any]) -> dict[str, An
             "redaction": _redaction(),
         }
 
-    sessions_dir = Path(config.codex_home) / "sessions"
+    sessions_dir = Path(config.source_root("codex_local")) / "sessions"
     if not sessions_dir.exists():
         return {
             "status": "unavailable",

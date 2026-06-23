@@ -7,6 +7,9 @@ from datetime import UTC, datetime
 
 
 MANAGEMENT_ACTOR = "fixed-management-account"
+DEFAULT_COLLECTION_INTERVAL_SECONDS = 5
+DEFAULT_MAX_EVENTS_PER_CYCLE = 500
+DEFAULT_UPLOAD_BATCH_SIZE = 100
 
 
 def _now() -> str:
@@ -19,6 +22,9 @@ def get_effective_policy(conn: sqlite3.Connection) -> dict:
         "policy_version": row["policy_version"],
         "raw_upload_mode": "always_on",
         "enrichment_mode": row["enrichment_mode"],
+        "collection_interval_seconds": row["collection_interval_seconds"],
+        "max_events_per_cycle": row["max_events_per_cycle"],
+        "upload_batch_size": row["upload_batch_size"],
     }
 
 
@@ -29,24 +35,54 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         raise ValueError("expected_version_required")
     if int(expected_version) != current["policy_version"]:
         raise ValueError("policy_version_conflict")
-    if extra_fields := set(payload) - {"expected_version", "enrichment_mode"}:
+    if extra_fields := set(payload) - {
+        "expected_version",
+        "enrichment_mode",
+        "collection_interval_seconds",
+        "max_events_per_cycle",
+        "upload_batch_size",
+    }:
         raise ValueError(f"unsupported_policy_field:{sorted(extra_fields)[0]}")
 
     next_policy = {
         "policy_version": current["policy_version"] + 1,
         "raw_upload_mode": "always_on",
         "enrichment_mode": _enrichment_mode(payload.get("enrichment_mode", current["enrichment_mode"])),
+        "collection_interval_seconds": _bounded_int(
+            payload.get("collection_interval_seconds", current["collection_interval_seconds"]),
+            "collection_interval_seconds",
+            1,
+            300,
+        ),
+        "max_events_per_cycle": _bounded_int(
+            payload.get("max_events_per_cycle", current["max_events_per_cycle"]),
+            "max_events_per_cycle",
+            100,
+            5000,
+        ),
+        "upload_batch_size": _bounded_int(
+            payload.get("upload_batch_size", current["upload_batch_size"]),
+            "upload_batch_size",
+            20,
+            500,
+        ),
     }
     conn.execute(
         """
         update effective_policies
         set policy_version = ?,
-            enrichment_mode = ?
+            enrichment_mode = ?,
+            collection_interval_seconds = ?,
+            max_events_per_cycle = ?,
+            upload_batch_size = ?
         where id = 1
         """,
         (
             next_policy["policy_version"],
             next_policy["enrichment_mode"],
+            next_policy["collection_interval_seconds"],
+            next_policy["max_events_per_cycle"],
+            next_policy["upload_batch_size"],
         ),
     )
     _write_audit(
@@ -59,6 +95,9 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             "after_version": next_policy["policy_version"],
             "raw_upload_mode": next_policy["raw_upload_mode"],
             "enrichment_mode": next_policy["enrichment_mode"],
+            "collection_interval_seconds": next_policy["collection_interval_seconds"],
+            "max_events_per_cycle": next_policy["max_events_per_cycle"],
+            "upload_batch_size": next_policy["upload_batch_size"],
             "reason_code": "operator_policy_update",
         },
     )
@@ -108,6 +147,16 @@ def _enrichment_mode(value: object) -> str:
     if mode not in {"disabled", "enabled"}:
         raise ValueError("unsupported_enrichment_mode")
     return mode
+
+
+def _bounded_int(value: object, field: str, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"unsupported_{field}") from exc
+    if parsed < minimum or parsed > maximum:
+        raise ValueError(f"{field}_out_of_range")
+    return parsed
 
 
 def _write_audit(conn: sqlite3.Connection, object_type: str, object_id: str, action: str, metadata: dict) -> None:

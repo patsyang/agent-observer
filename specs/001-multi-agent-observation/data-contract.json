@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "tables": {
+    "agent_sources": {
+      "key": "source_id",
+      "fields": ["collector_id", "agent_type", "source_kind", "display_name", "capabilities_json", "source_status", "reason_code", "last_seen_at"]
+    },
+    "observed_facts": {
+      "new_fields": ["source_id", "agent_type", "source_kind", "normalized_event_type"]
+    }
+  },
+  "categories": [
+    "agent_prompt",
+    "agent_response",
+    "agent_reasoning",
+    "tool_call",
+    "tool_result",
+    "model_usage",
+    "file_change",
+    "destructive_operation",
+    "sensitive_content_exposure",
+    "uncategorized"
+  ]
+}

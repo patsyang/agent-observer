@@ -1,4 +1,4 @@
-import type { CollectorsResponse, FactsResponse, TimeWindow, UsageSummary } from '../api/types';
+import type { CollectorsResponse, FactsResponse, TimeWindowParam, UsageSummary } from '../api/types';
 import { formatCount, formatNumber } from '../utils/numberFormat';
 
 export function sourceStatusLabel(status: string): string {
@@ -51,10 +51,10 @@ export function factTypeLabel(type: string): string {
   const labels: Record<string, string> = {
     collector_health: '采集器自检',
     collector_fixture: '采集器自检',
-    content: 'Codex 内容',
-    codex_prompt: '用户 Prompt',
-    codex_message: 'Codex 消息',
-    codex_reasoning: '推理片段',
+    content: 'Agent 内容',
+    agent_prompt: '用户 Prompt',
+    agent_response: 'Agent 消息',
+    agent_reasoning: '推理片段',
     tool_execution_failure: '工具执行失败',
     tool_execution_timeout: '工具执行超时',
     workflow_step_failure: 'Workflow 失败',
@@ -104,6 +104,8 @@ export function severityLabel(severity: string): string {
 export function activityTagLabel(value: string): string {
   const labels: Record<string, string> = {
     codex_turn: 'Codex 对话',
+    agent_turn: 'Agent 对话',
+    workbuddy_turn: 'WorkBuddy 对话',
     bug_fix: '缺陷修复',
     implementation: '实现开发',
     test_run: '测试运行',
@@ -164,14 +166,21 @@ export function queueSummary(activeCount: number): string {
   return activeCount > 0 ? `${formatCount(activeCount, '个信号待处理')}` : '暂无待处理信号';
 }
 
-export function emptyUsage(window: TimeWindow): UsageSummary {
+export function emptyUsage(window: TimeWindowParam): UsageSummary {
   return {
     window,
+    bucket_size_minutes: 1,
     totals: {
       effective_units: 0,
       unknown_units: 0,
       cached_input_units: 0,
       input_token_units: 0,
+      output_token_units: 0,
+      total_token_units: 0,
+      cache_write_input_units: 0,
+      reasoning_output_units: 0,
+      credit_total: 0,
+      cache_observed_input_units: 0,
       cache_hit_rate: 0
     },
     trend: [],

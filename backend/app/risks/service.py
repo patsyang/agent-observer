@@ -2,27 +2,47 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from app.sensitivity import sensitive_matches_from_text
+from app.time_ranges import parse_iso, range_bounds, window_cutoff
 
 
-def get_risk_summary(conn: sqlite3.Connection, *, mode: str = "summary", window: str = "24h") -> dict:
-    cutoff = _window_cutoff(window)
+def get_risk_summary(
+    conn: sqlite3.Connection,
+    *,
+    mode: str = "summary",
+    window: str = "24h",
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> dict:
+    range_start, range_end = range_bounds(window, start_at, end_at)
+    clauses = []
+    params: list[str] = []
+    if agent_type:
+        clauses.append("of.agent_type = ?")
+        params.append(agent_type)
+    where = f"where {' and '.join(clauses)}" if clauses else ""
     rows = conn.execute(
-        """
+        f"""
         select rs.signal_id, rs.fact_id, rs.risk_type, rs.severity, rs.object_type,
                of.summary,
                ep.projection_id, ep.projection_json, ep.raw_content, of.occurred_at
         from risk_signals rs
         join observed_facts of on of.fact_id = rs.fact_id
         left join evidence_projections ep on ep.fact_id = rs.fact_id
+        {where}
         order by of.occurred_at desc
-        """
+        """,
+        params,
     ).fetchall()
     signals: dict[str, dict] = {}
     for row in rows:
-        if cutoff and _parse_time(row["occurred_at"]) < cutoff:
+        occurred = _parse_time(row["occurred_at"])
+        if range_start and occurred < range_start:
+            continue
+        if range_end and occurred > range_end:
             continue
         signal = signals.setdefault(
             row["signal_id"],
@@ -93,24 +113,11 @@ def get_risk_summary(conn: sqlite3.Connection, *, mode: str = "summary", window:
 
 
 def _window_cutoff(window: str) -> datetime | None:
-    now = datetime.now(UTC)
-    if window == "1h":
-        return now - timedelta(hours=1)
-    if window == "24h":
-        return now - timedelta(hours=24)
-    if window == "7d":
-        return now - timedelta(days=7)
-    return None
+    return window_cutoff(window)
 
 
 def _parse_time(value: str) -> datetime:
-    try:
-        parsed = datetime.fromisoformat((value or "").replace("Z", "+00:00"))
-    except ValueError:
-        return datetime.min.replace(tzinfo=UTC)
-    if parsed.tzinfo is None:
-        return parsed.replace(tzinfo=UTC)
-    return parsed.astimezone(UTC)
+    return parse_iso(value) or datetime.min.replace(tzinfo=UTC)
 
 
 def _normalized_object_type(risk_type: str, object_type: str, categories: set[str]) -> str:

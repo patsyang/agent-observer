@@ -1,2 +1,2 @@
-COLLECTOR_CLIENT_VERSION = "0.2.0"
-COLLECTOR_PROTOCOL_VERSION = "agent-observer-telemetry/v2"
+COLLECTOR_CLIENT_VERSION = "0.3.0"
+COLLECTOR_PROTOCOL_VERSION = "agent-observer-telemetry/v3"

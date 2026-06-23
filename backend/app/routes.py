@@ -109,6 +109,8 @@ def register_conversation_routes(app, http_exception) -> None:
         prompt_query: str | None = None,
         response_query: str | None = None,
         workspace_query: str | None = None,
+        agent_type: str | None = None,
+        source_id: str | None = None,
         page: int = 1,
         page_size: int = 50,
     ):
@@ -121,6 +123,8 @@ def register_conversation_routes(app, http_exception) -> None:
                 prompt_query=prompt_query,
                 response_query=response_query,
                 workspace_query=workspace_query,
+                agent_type=agent_type,
+                source_id=source_id,
                 page=page,
                 page_size=page_size,
             )
@@ -164,9 +168,26 @@ def register_policy_routes(app, http_exception) -> None:
 
 def register_signal_routes(app, http_exception) -> None:
     @app.get("/api/signals")
-    def api_signals(window: str = "1h", workspace_query: str | None = None, page: int = 1, page_size: int = 20):
+    def api_signals(
+        window: str = "1h",
+        workspace_query: str | None = None,
+        agent_type: str | None = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+        page: int = 1,
+        page_size: int = 20,
+    ):
         with connect() as conn:
-            return list_signals(conn, window=window, workspace_query=workspace_query, page=page, page_size=page_size)
+            return list_signals(
+                conn,
+                window=window,
+                workspace_query=workspace_query,
+                agent_type=agent_type,
+                start_at=start_at,
+                end_at=end_at,
+                page=page,
+                page_size=page_size,
+            )
 
     @app.get("/api/signals/{signal_id}")
     def api_signal_detail(signal_id: str):
@@ -267,19 +288,25 @@ def register_enrichment_routes(app, http_exception) -> None:
 
 def register_summary_routes(app) -> None:
     @app.get("/api/dashboard/summary")
-    def api_dashboard_summary(window: str = "1h"):
+    def api_dashboard_summary(window: str = "1h", agent_type: str | None = None, start_at: str | None = None, end_at: str | None = None):
         with connect() as conn:
-            return get_dashboard_summary(conn, window=window)
+            return get_dashboard_summary(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at)
 
     @app.get("/api/usage/summary")
-    def api_usage_summary(window: str = "24h"):
+    def api_usage_summary(window: str = "24h", agent_type: str | None = None, start_at: str | None = None, end_at: str | None = None):
         with connect() as conn:
-            return get_usage_summary(conn, window=window)
+            return get_usage_summary(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at)
 
     @app.get("/api/risks/summary")
-    def api_risk_summary(mode: str = "summary", window: str = "24h"):
+    def api_risk_summary(
+        mode: str = "summary",
+        window: str = "24h",
+        agent_type: str | None = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+    ):
         with connect() as conn:
-            return get_risk_summary(conn, mode=mode, window=window)
+            return get_risk_summary(conn, mode=mode, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at)
 
     @app.post("/api/validation/minimum-experiment")
     def api_minimum_validation():

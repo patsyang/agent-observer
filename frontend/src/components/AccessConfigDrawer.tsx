@@ -3,6 +3,12 @@ import { useEffect, useState } from 'react';
 import type { ClientPackageConfig, EffectivePolicy, RecentAuditSummary } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 
+const DEFAULT_PERFORMANCE = {
+  collection_interval_seconds: 5,
+  max_events_per_cycle: 500,
+  upload_batch_size: 100
+};
+
 type LoadState =
   | { status: 'loading' }
   | { status: 'error' }
@@ -15,6 +21,9 @@ interface Props {
   savePolicy: (policy: {
     expected_version: number;
     enrichment_mode: 'disabled' | 'enabled';
+    collection_interval_seconds: number;
+    max_events_per_cycle: number;
+    upload_batch_size: number;
   }) => Promise<EffectivePolicy>;
   loadAudit: () => Promise<RecentAuditSummary>;
   downloadUrl: string;
@@ -23,6 +32,7 @@ interface Props {
 export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy, loadAudit, downloadUrl }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [enrichmentMode, setEnrichmentMode] = useState<'disabled' | 'enabled'>('enabled');
+  const [performance, setPerformance] = useState(DEFAULT_PERFORMANCE);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
   useEffect(() => {
@@ -31,6 +41,11 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
       .then(([packageConfig, policy, audit]) => {
         if (cancelled) return;
         setEnrichmentMode(policy.enrichment_mode);
+        setPerformance({
+          collection_interval_seconds: policy.collection_interval_seconds,
+          max_events_per_cycle: policy.max_events_per_cycle,
+          upload_batch_size: policy.upload_batch_size
+        });
         setState({ status: 'ready', packageConfig, policy, audit });
       })
       .catch(() => {
@@ -75,7 +90,8 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             try {
               const policy = await savePolicy({
                 expected_version: state.policy.policy_version,
-                enrichment_mode: enrichmentMode
+                enrichment_mode: enrichmentMode,
+                ...performance
               });
               const audit = await loadAudit();
               setState({ status: 'ready', packageConfig: state.packageConfig, policy, audit });
@@ -113,6 +129,54 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             </dl>
           </section>
 
+          <section className="drawer-section" aria-label="采集性能">
+            <div className="section-title-row">
+              <h3>采集性能</h3>
+              <button className="ghost-button" type="button" onClick={() => setPerformance(DEFAULT_PERFORMANCE)}>
+                恢复默认值
+              </button>
+            </div>
+            <div className="performance-grid">
+              <label>
+                <span>采集间隔</span>
+                <input
+                  aria-label="采集间隔"
+                  max={300}
+                  min={1}
+                  type="number"
+                  value={performance.collection_interval_seconds}
+                  onChange={(event) => setPerformance({ ...performance, collection_interval_seconds: Number(event.target.value) })}
+                />
+                <small>秒</small>
+              </label>
+              <label>
+                <span>单轮采集上限</span>
+                <input
+                  aria-label="单轮采集上限"
+                  max={5000}
+                  min={100}
+                  type="number"
+                  value={performance.max_events_per_cycle}
+                  onChange={(event) => setPerformance({ ...performance, max_events_per_cycle: Number(event.target.value) })}
+                />
+                <small>条/Agent</small>
+              </label>
+              <label>
+                <span>上传批量</span>
+                <input
+                  aria-label="上传批量"
+                  max={500}
+                  min={20}
+                  type="number"
+                  value={performance.upload_batch_size}
+                  onChange={(event) => setPerformance({ ...performance, upload_batch_size: Number(event.target.value) })}
+                />
+                <small>条/请求</small>
+              </label>
+            </div>
+            <p>保存后对新版在线客户端生效；客户端会在下一次心跳或下一轮采集前应用。</p>
+          </section>
+
           <section className="drawer-section" aria-label="采集内容">
             <div className="section-title-row">
               <h3>采集内容</h3>
@@ -137,9 +201,9 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             </label>
             <div className="drawer-actions">
               <button className="primary" data-testid="save-policy" disabled={saveState === 'saving'} type="submit">
-                {saveState === 'saving' ? '正在保存接入策略' : '保存接入策略'}
+                {saveState === 'saving' ? '正在保存接入策略' : '保存并下发配置'}
               </button>
-              <span>保存后影响新下载客户端；在线客户端会在下一次心跳后拉取最新策略。</span>
+              <span>新版在线客户端将在下一次心跳或下一轮采集前生效。</span>
             </div>
             {saveState === 'saved' && <p role="status">接入策略已保存为 v{formatNumber(state.policy.policy_version)}</p>}
             {saveState === 'error' && <p role="alert">策略更新失败。请重新打开配置后再试。</p>}

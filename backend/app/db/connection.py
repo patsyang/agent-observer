@@ -21,7 +21,10 @@ SCHEMA_SQL = """
         create table if not exists effective_policies (
           id integer primary key check (id = 1),
           policy_version integer not null,
-          enrichment_mode text not null
+          enrichment_mode text not null,
+          collection_interval_seconds integer not null default 5,
+          max_events_per_cycle integer not null default 500,
+          upload_batch_size integer not null default 100
         );
 
         create table if not exists collectors (
@@ -29,7 +32,6 @@ SCHEMA_SQL = """
           display_name text not null,
           hostname_hash text not null,
           windows_username_hash text not null,
-          agent_type text not null,
           protocol_version text not null default '',
           agent_version text not null,
           source_status text not null,
@@ -45,10 +47,28 @@ SCHEMA_SQL = """
           updated_at text not null
         );
 
+        create table if not exists agent_sources (
+          source_id text not null,
+          collector_id text not null,
+          agent_type text not null,
+          source_kind text not null,
+          display_name text not null,
+          capabilities_json text not null,
+          source_status text not null,
+          reason_code text not null,
+          last_seen_at text,
+          created_at text not null,
+          updated_at text not null,
+          primary key (collector_id, source_id)
+        );
+
         create table if not exists telemetry_batches (
           batch_id text primary key,
           collector_id text not null,
+          source_id text not null,
           source text not null,
+          agent_type text not null,
+          source_kind text not null,
           protocol_version text not null default '',
           agent_version text not null default '',
           cursor text not null,
@@ -62,9 +82,13 @@ SCHEMA_SQL = """
           source_event_id text not null default '',
           batch_id text not null,
           collector_id text not null,
+          source_id text not null,
           source text not null,
+          agent_type text not null,
+          source_kind text not null,
           fact_type text not null,
           category text not null,
+          normalized_event_type text not null default '',
           quality text not null,
           severity text not null,
           summary text not null,
@@ -119,7 +143,19 @@ SCHEMA_SQL = """
           session_id text not null default 'unknown',
           conversation_id text not null default 'unknown',
           project_ref text not null default 'unknown',
-          account_ref text not null default 'unknown'
+          account_ref text not null default 'unknown',
+          input_tokens integer not null default 0,
+          output_tokens integer not null default 0,
+          total_tokens integer not null default 0,
+          cached_input_tokens integer not null default 0,
+          cache_write_input_tokens integer not null default 0,
+          reasoning_output_tokens integer not null default 0,
+          model text not null default '',
+          provider text not null default '',
+          credit real not null default 0,
+          unit_basis text not null default 'non_cached_input_plus_output',
+          observability_level text not null default 'total_only',
+          cache_observed integer not null default 0
         );
 
         create table if not exists usage_rollups (
@@ -239,6 +275,8 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
 
 def initialize(conn: sqlite3.Connection) -> None:
     _create_tables(conn)
+    _ensure_effective_policy_columns(conn)
+    _ensure_usage_signal_columns(conn)
     _seed_effective_policy(conn)
     _ensure_indexes(conn)
     conn.commit()
@@ -252,17 +290,50 @@ def _seed_effective_policy(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         insert or ignore into effective_policies
-          (id, policy_version, enrichment_mode)
-        values (1, 1, 'enabled')
+          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size)
+        values (1, 1, 'enabled', 5, 500, 100)
         """
     )
+
+
+def _ensure_effective_policy_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("pragma table_info(effective_policies)").fetchall()}
+    if "collection_interval_seconds" not in columns:
+        conn.execute("alter table effective_policies add column collection_interval_seconds integer not null default 5")
+    if "max_events_per_cycle" not in columns:
+        conn.execute("alter table effective_policies add column max_events_per_cycle integer not null default 500")
+    if "upload_batch_size" not in columns:
+        conn.execute("alter table effective_policies add column upload_batch_size integer not null default 100")
+
+
+def _ensure_usage_signal_columns(conn: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in conn.execute("pragma table_info(usage_signals)").fetchall()}
+    definitions = {
+        "input_tokens": "integer not null default 0",
+        "output_tokens": "integer not null default 0",
+        "total_tokens": "integer not null default 0",
+        "cached_input_tokens": "integer not null default 0",
+        "cache_write_input_tokens": "integer not null default 0",
+        "reasoning_output_tokens": "integer not null default 0",
+        "model": "text not null default ''",
+        "provider": "text not null default ''",
+        "credit": "real not null default 0",
+        "unit_basis": "text not null default 'non_cached_input_plus_output'",
+        "observability_level": "text not null default 'total_only'",
+        "cache_observed": "integer not null default 0",
+    }
+    for column, definition in definitions.items():
+        if column not in columns:
+            conn.execute(f"alter table usage_signals add column {column} {definition}")
 
 
 def _ensure_indexes(conn: sqlite3.Connection) -> None:
     conn.executescript(
         """
         create unique index if not exists idx_observed_facts_collector_source_event
-          on observed_facts(collector_id, source_event_id);
+          on observed_facts(collector_id, source_id, source_event_id);
+        create index if not exists idx_agent_sources_collector
+          on agent_sources(collector_id, source_status);
         create index if not exists idx_observed_facts_occurred_at
           on observed_facts(occurred_at desc);
         create index if not exists idx_observed_facts_created_at
@@ -281,6 +352,10 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on observed_facts(source, occurred_at desc);
         create index if not exists idx_observed_facts_source_created_at
           on observed_facts(source, created_at desc);
+        create index if not exists idx_observed_facts_agent_occurred_at
+          on observed_facts(agent_type, occurred_at desc);
+        create index if not exists idx_observed_facts_source_id_occurred_at
+          on observed_facts(source_id, occurred_at desc);
         create index if not exists idx_observed_facts_category_occurred_at
           on observed_facts(category, occurred_at desc);
         create index if not exists idx_error_signatures_category_key

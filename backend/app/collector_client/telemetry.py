@@ -4,10 +4,10 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from app.collector_client.content_dedup import add_or_merge_content_fact
-from app.collector_client.fact_mapper import _health_fact, _record_fact, _source_gap_fact
+from app.collector_client.fact_mapper import _record_fact
 from app.collector_client.session_index import load_session_titles
 from app.collector_client.source_reader import _incremental_records, _recent_tail_records
-from app.collector_client.telemetry_utils import codex_home as _codex_home, now as _now
+from app.collector_client.telemetry_utils import codex_home as _codex_home
 from app.collector_client.workspace_scope import load_workspace_resolver
 
 
@@ -21,11 +21,11 @@ def collect_facts(
     max_events: int = 500,
     cursor: dict | None = None,
 ) -> list[dict]:
-    observed_at = _now()
     root = _codex_home(codex_home)
     sessions_dir = root / "sessions"
-    facts = [_health_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists())]
-    source_facts = _codex_facts(
+    if not sessions_dir.exists():
+        return []
+    return _codex_facts(
         collector_id=collector_id,
         sequence=sequence,
         codex_home=root,
@@ -33,9 +33,6 @@ def collect_facts(
         max_events=max_events,
         cursor=cursor or {},
     )
-    if source_facts:
-        return facts + source_facts
-    return facts + [_source_gap_fact(collector_id, sequence, observed_at, telemetry_mode, sessions_dir.exists())]
 
 def _codex_facts(
     *,

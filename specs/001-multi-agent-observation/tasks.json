@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "tasks": [
+    {
+      "id": "T1",
+      "title": "数据模型与 telemetry v3",
+      "scope": ["backend/app/db", "backend/app/ingest", "backend/app/collectors"],
+      "tests": ["backend pytest ingest and collector tests"]
+    },
+    {
+      "id": "T2",
+      "title": "客户端 source SPI 与 Codex 迁移",
+      "scope": ["backend/app/collector_client"],
+      "tests": ["collector client pytest"]
+    },
+    {
+      "id": "T3",
+      "title": "WorkBuddy source module",
+      "scope": ["backend/app/collector_client/sources"],
+      "tests": ["WorkBuddy fixture pytest"]
+    },
+    {
+      "id": "T4",
+      "title": "通用会话、用量和风险查询",
+      "scope": ["backend/app/conversations", "backend/app/usage", "backend/app/behavior_signals"],
+      "tests": ["conversation and signal pytest"]
+    },
+    {
+      "id": "T5",
+      "title": "前端多 source 观察与操作",
+      "scope": ["frontend/src"],
+      "tests": ["Vitest and Playwright"]
+    },
+    {
+      "id": "T6",
+      "title": "packaged collector 与 release e2e",
+      "scope": ["backend/app/package", "frontend/e2e"],
+      "tests": ["packaged collector pytest", "Playwright release flow"]
+    }
+  ]
+}

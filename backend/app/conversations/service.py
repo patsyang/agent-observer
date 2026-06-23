@@ -9,6 +9,9 @@ from app.conversations.time_window import normalize_iso_param, window_cutoff
 from app.conversations.workspace import workspace_from_rows
 from app.evidence.presentation import projection_preview
 
+PROMPT_CATEGORIES = {"agent_prompt"}
+RESPONSE_CATEGORIES = {"agent_response"}
+
 def query_conversations(
     conn: sqlite3.Connection,
     *,
@@ -18,10 +21,19 @@ def query_conversations(
     prompt_query: str | None = None,
     response_query: str | None = None,
     workspace_query: str | None = None,
+    agent_type: str | None = None,
+    source_id: str | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> dict:
-    rows = _conversation_rows(conn, window=window, start_at=start_at, end_at=end_at)
+    rows = _conversation_rows(
+        conn,
+        window=window,
+        start_at=start_at,
+        end_at=end_at,
+        agent_type=agent_type,
+        source_id=source_id,
+    )
     conversations = [_summary(conn, ref, facts) for ref, facts in _group_by_conversation(rows).items()]
     conversations = [item for item in conversations if _has_input_or_output(item)]
     conversations = filter_conversations(
@@ -44,6 +56,8 @@ def query_conversations(
         "window": window,
         "start_at": start_at,
         "end_at": end_at,
+        "agent_type": agent_type,
+        "source_id": source_id,
     }
 
 def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> dict:
@@ -127,6 +141,8 @@ def _conversation_rows(
     window: str,
     start_at: str | None,
     end_at: str | None,
+    agent_type: str | None,
+    source_id: str | None,
 ) -> list[sqlite3.Row]:
     clauses = ["f.fact_type != 'collector_health'"]
     params: list[str] = []
@@ -138,6 +154,12 @@ def _conversation_rows(
     if normalized_end:
         clauses.append("datetime(f.occurred_at) <= datetime(?)")
         params.append(normalized_end)
+    if agent_type:
+        clauses.append("f.agent_type = ?")
+        params.append(agent_type)
+    if source_id:
+        clauses.append("f.source_id = ?")
+        params.append(source_id)
     if not normalized_start and not normalized_end:
         cutoff = window_cutoff(window)
         if cutoff:
@@ -169,13 +191,13 @@ def _group_by_conversation(rows: list[sqlite3.Row]) -> dict[str, list[sqlite3.Ro
         path_hash = row["source_path_hash"] or ""
         buckets.setdefault((base_ref, path_hash), []).append(row)
     for (base_ref, path_hash), bucket in buckets.items():
-        if not path_hash or not any(row["category"] == "codex_prompt" and _source_line(row) is not None for row in bucket):
+        if not path_hash or not any(row["category"] in PROMPT_CATEGORIES and _source_line(row) is not None for row in bucket):
             grouped.setdefault(base_ref, []).extend(bucket)
             continue
         current_ref: str | None = None
         for row in sorted(bucket, key=_source_order):
             line = _source_line(row)
-            if row["category"] == "codex_prompt" and line is not None:
+            if row["category"] in PROMPT_CATEGORIES and line is not None:
                 current_ref = _turn_ref(base_ref, path_hash, line)
             ref = current_ref or base_ref
             grouped.setdefault(ref, []).append(row)
@@ -183,14 +205,17 @@ def _group_by_conversation(rows: list[sqlite3.Row]) -> dict[str, list[sqlite3.Ro
 
 def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.Row]) -> dict:
     ordered = sorted(rows, key=lambda row: (row["occurred_at"], row["fact_id"]))
-    prompt = _first_text(ordered, {"codex_prompt"}, {"user"})
-    response = _first_text(ordered, {"codex_message"}, {"assistant"})
-    prompt_search = _all_text(ordered, {"codex_prompt"}, {"user"})
-    response_search = _all_text(ordered, {"codex_message"}, {"assistant"})
+    prompt = _first_text(ordered, PROMPT_CATEGORIES, {"user"})
+    response = _first_text(ordered, RESPONSE_CATEGORIES, {"assistant"})
+    prompt_search = _all_text(ordered, PROMPT_CATEGORIES, {"user"})
+    response_search = _all_text(ordered, RESPONSE_CATEGORIES, {"assistant"})
     return {
         "conversation_ref": conversation_ref,
         "session_ref": _first_value(ordered, "session_ref"),
         "session_title": _session_title(ordered),
+        "agent_type": _first_value(ordered, "agent_type"),
+        "source_id": _first_value(ordered, "source_id"),
+        "source_kind": _first_value(ordered, "source_kind"),
         "workspace": workspace_from_rows(ordered),
         "started_at": ordered[0]["occurred_at"],
         "last_event_at": ordered[-1]["occurred_at"],
@@ -235,9 +260,9 @@ def _all_text(rows: list[sqlite3.Row], categories: set[str], roles: set[str]) ->
 def _message(row: sqlite3.Row) -> dict:
     projection = _projection(row)
     role = str(projection.get("role") or "")
-    if row["category"] == "codex_prompt":
+    if row["category"] in PROMPT_CATEGORIES:
         role = "user"
-    elif row["category"] == "codex_message":
+    elif row["category"] in RESPONSE_CATEGORIES:
         role = "assistant"
     elif role not in {"user", "assistant"}:
         return {}
@@ -292,9 +317,8 @@ def _usage(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.R
             placeholders = ",".join("?" for _ in fact_ids)
             usage_samples = conn.execute(
                 f"""
-                select us.units, p.projection_json
+                select us.*
                 from usage_signals us
-                left join evidence_projections p on p.fact_id = us.fact_id
                 where us.fact_id in ({placeholders})
                 """,
                 fact_ids,
@@ -302,10 +326,9 @@ def _usage(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.R
             return _usage_payload(usage_samples)
     rows = conn.execute(
         """
-        select us.units, p.projection_json
+        select us.*
         from usage_signals us
         join observed_facts f on f.fact_id = us.fact_id
-        left join evidence_projections p on p.fact_id = us.fact_id
         where us.conversation_id = ? or f.conversation_ref = ?
         """,
         (conversation_ref, conversation_ref),
@@ -317,10 +340,23 @@ def _usage_payload(rows: list[sqlite3.Row]) -> dict:
     sample_units = [int(row["units"] or 0) for row in rows]
     cached_input_units = 0
     input_token_units = 0
+    output_token_units = 0
+    total_token_units = 0
+    cache_write_input_units = 0
+    reasoning_output_units = 0
+    credit_total = 0.0
+    cache_observed_input_units = 0
     for row in rows:
-        cache = _cache_metrics(row)
-        cached_input_units += cache["cached_input_units"]
-        input_token_units += cache["input_token_units"]
+        input_tokens = _int(row["input_tokens"])
+        cached_input_units += _int(row["cached_input_tokens"])
+        input_token_units += input_tokens
+        output_token_units += _int(row["output_tokens"])
+        total_token_units += _int(row["total_tokens"])
+        cache_write_input_units += _int(row["cache_write_input_tokens"])
+        reasoning_output_units += _int(row["reasoning_output_tokens"])
+        credit_total += _float(row["credit"])
+        if bool(row["cache_observed"]) and input_tokens > 0:
+            cache_observed_input_units += input_tokens
     effective = sum(sample_units)
     return {
         "effective_units": effective,
@@ -328,18 +364,13 @@ def _usage_payload(rows: list[sqlite3.Row]) -> dict:
         "max_single_call_units": max(sample_units, default=0),
         "cached_input_units": cached_input_units,
         "input_token_units": input_token_units,
-        "cache_hit_rate": _ratio(cached_input_units, input_token_units),
-    }
-
-
-def _cache_metrics(row: sqlite3.Row) -> dict[str, int]:
-    try:
-        projection = json.loads(row["projection_json"] or "{}")
-    except (TypeError, ValueError, KeyError):
-        projection = {}
-    return {
-        "cached_input_units": _int(projection.get("cached_input_tokens")),
-        "input_token_units": _int(projection.get("input_tokens")),
+        "output_token_units": output_token_units,
+        "total_token_units": total_token_units,
+        "cache_write_input_units": cache_write_input_units,
+        "reasoning_output_units": reasoning_output_units,
+        "credit_total": round(credit_total, 4),
+        "cache_observed_input_units": cache_observed_input_units,
+        "cache_hit_rate": _ratio(cached_input_units, cache_observed_input_units),
     }
 
 
@@ -354,6 +385,13 @@ def _int(value: object) -> int:
         return int(value or 0)
     except (TypeError, ValueError):
         return 0
+
+
+def _float(value: object) -> float:
+    try:
+        return float(value or 0)
+    except (TypeError, ValueError):
+        return 0.0
 
 
 def _turn_ref_for_fact(conn: sqlite3.Connection, fact: sqlite3.Row) -> str:
@@ -376,7 +414,7 @@ def _turn_ref_for_fact(conn: sqlite3.Connection, fact: sqlite3.Row) -> str:
     prompt_lines = sorted(
         candidate
         for row in rows
-        if row["category"] == "codex_prompt" and (candidate := _source_line(row)) is not None and candidate <= line
+        if row["category"] in PROMPT_CATEGORIES and (candidate := _source_line(row)) is not None and candidate <= line
     )
     return _turn_ref(base_ref, path_hash, prompt_lines[-1]) if prompt_lines else base_ref
 
@@ -385,7 +423,7 @@ def _next_prompt_line(rows: list[sqlite3.Row], start_line: int) -> int | None:
     prompt_lines = sorted(
         line
         for row in rows
-        if row["category"] == "codex_prompt" and (line := _source_line(row)) is not None and line > start_line
+        if row["category"] in PROMPT_CATEGORIES and (line := _source_line(row)) is not None and line > start_line
     )
     return prompt_lines[0] if prompt_lines else None
 
@@ -439,9 +477,9 @@ def _projection_text(row: sqlite3.Row, projection: dict[str, Any]) -> str:
         return raw_text.strip()
     role = str(projection.get("role") or "")
     label = ""
-    if row["category"] == "codex_prompt" or role == "user":
+    if row["category"] in PROMPT_CATEGORIES or role == "user":
         label = "提交 Prompt"
-    elif row["category"] == "codex_message" or role == "assistant":
+    elif row["category"] in RESPONSE_CATEGORIES or role == "assistant":
         label = "响应内容"
     if not label:
         return ""

@@ -1,7 +1,10 @@
 create table if not exists effective_policies (
   id integer primary key check (id = 1),
   policy_version integer not null,
-  enrichment_mode text not null
+  enrichment_mode text not null,
+  collection_interval_seconds integer not null default 5,
+  max_events_per_cycle integer not null default 500,
+  upload_batch_size integer not null default 100
 );
 
 create table if not exists collectors (
@@ -9,7 +12,6 @@ create table if not exists collectors (
   display_name text not null,
   hostname_hash text not null,
   windows_username_hash text not null,
-  agent_type text not null,
   protocol_version text not null default '',
   agent_version text not null,
   source_status text not null,
@@ -25,10 +27,28 @@ create table if not exists collectors (
   updated_at text not null
 );
 
+create table if not exists agent_sources (
+  source_id text not null,
+  collector_id text not null,
+  agent_type text not null,
+  source_kind text not null,
+  display_name text not null,
+  capabilities_json text not null,
+  source_status text not null,
+  reason_code text not null,
+  last_seen_at text,
+  created_at text not null,
+  updated_at text not null,
+  primary key (collector_id, source_id)
+);
+
 create table if not exists telemetry_batches (
   batch_id text primary key,
   collector_id text not null,
+  source_id text not null,
   source text not null,
+  agent_type text not null,
+  source_kind text not null,
   protocol_version text not null default '',
   agent_version text not null default '',
   cursor text not null,
@@ -42,9 +62,13 @@ create table if not exists observed_facts (
   source_event_id text not null default '',
   batch_id text not null,
   collector_id text not null,
+  source_id text not null,
   source text not null,
+  agent_type text not null,
+  source_kind text not null,
   fact_type text not null,
   category text not null,
+  normalized_event_type text not null default '',
   quality text not null,
   severity text not null,
   summary text not null,
@@ -99,7 +123,19 @@ create table if not exists usage_signals (
   session_id text not null default 'unknown',
   conversation_id text not null default 'unknown',
   project_ref text not null default 'unknown',
-  account_ref text not null default 'unknown'
+  account_ref text not null default 'unknown',
+  input_tokens integer not null default 0,
+  output_tokens integer not null default 0,
+  total_tokens integer not null default 0,
+  cached_input_tokens integer not null default 0,
+  cache_write_input_tokens integer not null default 0,
+  reasoning_output_tokens integer not null default 0,
+  model text not null default '',
+  provider text not null default '',
+  credit real not null default 0,
+  unit_basis text not null default 'non_cached_input_plus_output',
+  observability_level text not null default 'total_only',
+  cache_observed integer not null default 0
 );
 
 create table if not exists usage_rollups (

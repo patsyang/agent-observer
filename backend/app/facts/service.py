@@ -5,6 +5,7 @@ import sqlite3
 from datetime import UTC, datetime, timedelta
 
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label, source_event_type, source_label
+from app.time_ranges import range_bounds_iso, window_cutoff_iso
 
 
 def _loads(value: str) -> dict:
@@ -22,7 +23,11 @@ def _fact(row: sqlite3.Row, conn: sqlite3.Connection | None = None) -> dict:
         "summary": row["summary"],
         "occurred_at": row["occurred_at"],
         "ingested_at": row["created_at"],
+        "source_id": row["source_id"],
         "source": row["source"],
+        "agent_type": row["agent_type"],
+        "source_kind": row["source_kind"],
+        "normalized_event_type": row["normalized_event_type"],
         "promoted_to_signal": bool(row["promoted_to_signal"]),
     }
     source_refs = _loads(row["source_refs_json"])
@@ -58,6 +63,8 @@ def query_facts(
     quality: str | None = None,
     fact_type: str | None = None,
     source: str | None = None,
+    agent_type: str | None = None,
+    source_id: str | None = None,
     window: str = "all",
     include_health: bool = True,
     limit: int = 50,
@@ -65,6 +72,8 @@ def query_facts(
     page: int | None = None,
     page_size: int | None = None,
     time_basis: str = "occurred",
+    start_at: str | None = None,
+    end_at: str | None = None,
 ) -> dict:
     page_limit = max(1, min(int(page_size or limit or 50), 200))
     if page is not None:
@@ -86,14 +95,23 @@ def query_facts(
     if source:
         clauses.append("source = ?")
         params.append(source)
+    if agent_type:
+        clauses.append("agent_type = ?")
+        params.append(agent_type)
+    if source_id:
+        clauses.append("source_id = ?")
+        params.append(source_id)
     if not include_health:
         clauses.append("fact_type != ?")
         params.append("collector_health")
-    cutoff = _window_cutoff(window)
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
     time_column = "created_at" if time_basis == "ingested" else "occurred_at"
     if cutoff:
         clauses.append(f"{time_column} >= ?")
         params.append(cutoff)
+    if range_end:
+        clauses.append(f"{time_column} <= ?")
+        params.append(range_end)
     where = f"where {' and '.join(clauses)}" if clauses else ""
     total = conn.execute(f"select count(*) as total from observed_facts {where}", params).fetchone()["total"]
     rows = conn.execute(
@@ -169,6 +187,17 @@ def _first_projection(conn: sqlite3.Connection, fact_id: str) -> sqlite3.Row | N
 def _within_window(value: str, window: str) -> bool:
     if window == "all":
         return True
+    if window in {"today", "week"}:
+        cutoff = _parse_window_cutoff(window)
+        if cutoff is None:
+            return True
+        try:
+            occurred = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return True
+        if occurred.tzinfo is None:
+            occurred = occurred.replace(tzinfo=UTC)
+        return occurred.astimezone(UTC) >= cutoff
     hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
     if hours is None:
         return True
@@ -183,9 +212,15 @@ def _within_window(value: str, window: str) -> bool:
 
 
 def _window_cutoff(window: str) -> str | None:
-    if window == "all":
-        return None
-    hours = {"1h": 1, "24h": 24, "7d": 24 * 7}.get(window)
-    if hours is None:
-        return None
-    return (datetime.now(UTC) - timedelta(hours=hours)).replace(microsecond=0).isoformat()
+    return window_cutoff_iso(window)
+
+
+def _parse_window_cutoff(window: str) -> datetime | None:
+    if window == "today":
+        local_now = datetime.now().astimezone()
+        return local_now.replace(hour=0, minute=0, second=0, microsecond=0).astimezone(UTC)
+    if window == "week":
+        local_now = datetime.now().astimezone()
+        local_today = local_now.replace(hour=0, minute=0, second=0, microsecond=0)
+        return (local_today - timedelta(days=local_today.weekday())).astimezone(UTC)
+    return None

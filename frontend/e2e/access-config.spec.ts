@@ -16,6 +16,9 @@ test('public access config downloads client and updates policy with audit feedba
   await expect(page.getByTestId('download-client')).toHaveAttribute('href', /\/api\/client-package\/windows$/);
   await expect(page.getByText(`v${policy.policy_version}`)).toBeVisible();
   await expect(page.getByLabel('默认上传原始输入输出')).toHaveCount(0);
+  await page.getByLabel('采集间隔').fill('8');
+  await page.getByLabel('单轮采集上限').fill('900');
+  await page.getByLabel('上传批量').fill('120');
   await page.getByLabel('允许本机补证任务').click();
   await page.getByTestId('save-policy').click();
 
@@ -33,4 +36,13 @@ test('public access config downloads client and updates policy with audit feedba
   expect(updated.policy_version).toBe(policy.policy_version + 1);
   expect(updated.raw_upload_mode).toBe('always_on');
   expect(updated.enrichment_mode).toBe(policy.enrichment_mode === 'enabled' ? 'disabled' : 'enabled');
+  expect(updated.collection_interval_seconds).toBe(8);
+  expect(updated.max_events_per_cycle).toBe(900);
+  expect(updated.upload_batch_size).toBe(120);
+
+  await page.reload();
+  await page.getByTestId('open-access-config').click();
+  await expect(page.getByLabel('采集间隔')).toHaveValue('8');
+  await expect(page.getByLabel('单轮采集上限')).toHaveValue('900');
+  await expect(page.getByLabel('上传批量')).toHaveValue('120');
 });

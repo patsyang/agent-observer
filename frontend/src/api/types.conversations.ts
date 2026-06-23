@@ -1,7 +1,7 @@
-import type { TimeWindow } from './types.facts';
+import type { TimeWindowParam } from './types.facts';
 import type { ToolContext } from './types.signals';
 
-export type ConversationTimeWindow = TimeWindow | '2h' | '3h' | 'today';
+export type ConversationTimeWindow = TimeWindowParam;
 
 export interface ConversationUsage {
   effective_units: number;
@@ -9,6 +9,12 @@ export interface ConversationUsage {
   max_single_call_units?: number;
   cached_input_units?: number;
   input_token_units?: number;
+  output_token_units?: number;
+  total_token_units?: number;
+  cache_write_input_units?: number;
+  reasoning_output_units?: number;
+  credit_total?: number;
+  cache_observed_input_units?: number;
   cache_hit_rate?: number;
 }
 
@@ -25,6 +31,9 @@ export interface ConversationSummary {
   conversation_ref: string;
   session_ref: string;
   session_title: string;
+  agent_type: string;
+  source_id: string;
+  source_kind: string;
   workspace: WorkspaceScope;
   started_at: string;
   last_event_at: string;
@@ -69,4 +78,6 @@ export interface ConversationsResponse {
   window: ConversationTimeWindow;
   start_at?: string | null;
   end_at?: string | null;
+  agent_type?: string | null;
+  source_id?: string | null;
 }

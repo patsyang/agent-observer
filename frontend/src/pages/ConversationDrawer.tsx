@@ -46,15 +46,23 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
             <dd>{workspaceLabel(detail)}</dd>
           </div>
           <div>
-            <dt>模型调用累计有效 token</dt>
+            <dt>累计有效Token</dt>
             <dd>{formatNumber(detail.token_usage.effective_units)}</dd>
           </div>
           <div>
-            <dt>模型调用</dt>
+            <dt>输入 token</dt>
+            <dd>{formatNumber(detail.token_usage.input_token_units ?? 0)}</dd>
+          </div>
+          <div>
+            <dt>输出 token</dt>
+            <dd>{formatNumber(detail.token_usage.output_token_units ?? 0)}</dd>
+          </div>
+          <div>
+            <dt>调用次数</dt>
             <dd>{formatNumber(detail.token_usage.model_call_count ?? 0)} 次</dd>
           </div>
           <div>
-            <dt>单次模型调用峰值</dt>
+            <dt>单次有效Token峰值</dt>
             <dd>{formatNumber(detail.token_usage.max_single_call_units ?? 0)}</dd>
           </div>
           <div>
@@ -64,6 +72,10 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
           <div>
             <dt>缓存命中率</dt>
             <dd>{formatPercent(detail.token_usage.cache_hit_rate)}</dd>
+          </div>
+          <div>
+            <dt>Credits</dt>
+            <dd>{formatNumber(detail.token_usage.credit_total ?? 0)}</dd>
           </div>
         </dl>
 

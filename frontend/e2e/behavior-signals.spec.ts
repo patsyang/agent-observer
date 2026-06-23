@@ -31,7 +31,7 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
     },
     error_signature: { signature_key: `tool-exec-failure-${suffix}-${index}`, category: 'tool_execution_failure' },
     source_refs: sourceRefs,
-    source_specific: { codex_event_type: 'tool_result' }
+    source_specific: { event_type: 'tool_result' }
   }));
   const items = [
     ...toolFailures,
@@ -48,7 +48,7 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
       projection: { object_type: 'configuration', changed_paths: ['.gitignore'], file_count: 1, additions: 1, deletions: 0 },
       risk: { risk_type: 'file_change', severity: 'medium', object_type: 'configuration' },
       source_refs: sourceRefs,
-      source_specific: { codex_event_type: 'tool_result' }
+      source_specific: { event_type: 'tool_result' }
     },
     ...Array.from({ length: 20 }, (_, index) => ({
       source_event_id: `signal-workspace-${suffix}-${index}`,
@@ -63,17 +63,20 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
       projection: { object_type: 'workspace_file', changed_paths: [`src/file_${index}.py`], file_count: 1, additions: 30, deletions: 0 },
       risk: { risk_type: 'file_change', severity: 'medium', object_type: 'workspace_file' },
       source_refs: sourceRefs,
-      source_specific: { codex_event_type: 'tool_result' }
+      source_specific: { event_type: 'tool_result' }
     }))
   ];
 
   await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: `signal-e2e-${suffix}`,
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0',
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
       collector_id: 'signal-e2e',
       source: 'codex',
+      source_id: 'codex-local',
+      agent_type: 'codex',
+      source_kind: 'codex_local',
       cursor: `cursor-${suffix}`,
       items
     }

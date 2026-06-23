@@ -70,12 +70,21 @@ def usage_summary(conn: sqlite3.Connection, fact_ids: list[str]) -> dict:
     if not fact_ids:
         return {"effective_units": 0, "cached_units": 0, "cache_hit_rate": None, "no_usage_reason": "没有用量证据"}
     placeholders = ",".join("?" for _ in fact_ids)
-    rows = conn.execute(f"select units, activity_tag from usage_signals where fact_id in ({placeholders})", fact_ids).fetchall()
+    rows = conn.execute(
+        f"""
+        select units, activity_tag, cached_input_tokens, input_tokens, cache_observed
+        from usage_signals
+        where fact_id in ({placeholders})
+        """,
+        fact_ids,
+    ).fetchall()
     effective = sum(int(row["units"] or 0) for row in rows)
+    cached = sum(int(row["cached_input_tokens"] or 0) for row in rows)
+    observed_input = sum(int(row["input_tokens"] or 0) for row in rows if bool(row["cache_observed"]))
     return {
         "effective_units": effective,
-        "cached_units": 0,
-        "cache_hit_rate": None,
+        "cached_units": cached,
+        "cache_hit_rate": round(cached / observed_input, 4) if observed_input > 0 else None,
         "no_usage_reason": None if rows else "没有用量证据",
     }
 
@@ -105,4 +114,3 @@ def _enrichment_preview(summary: str, projection: dict) -> str:
         count = len(conversations) if isinstance(conversations, list) else 0
         return f"{summary} 命中 {len(failures)} 条失败工具调用，关联 {count} 个会话。"
     return summary
-

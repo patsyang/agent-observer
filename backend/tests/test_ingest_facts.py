@@ -12,10 +12,13 @@ from app.ingest.service import ingest_telemetry
 def _batch(batch_id: str = "batch-001") -> dict:
     return {
         "batch_id": batch_id,
-        "protocol_version": "agent-observer-telemetry/v2",
-        "agent_version": "0.2.0",
+        "protocol_version": "agent-observer-telemetry/v3",
+        "agent_version": "0.3.0",
         "collector_id": "collector-codex",
         "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
         "cursor": "cursor-001",
         "items": [
             {
@@ -52,7 +55,7 @@ def _batch(batch_id: str = "batch-001") -> dict:
                 "usage": {"scope": "session", "units": 42, "activity_tag": "implementation"},
                 "risk": {"risk_type": "destructive_operation", "severity": "medium"},
                 "source_refs": {"conversation_ref": "conv-hash-001"},
-                "source_specific": {"codex_event_type": "tool_result"},
+                "source_specific": {"event_type": "tool_result"},
             },
             {
                 "source_event_id": "event-low-001",
@@ -66,7 +69,7 @@ def _batch(batch_id: str = "batch-001") -> dict:
                 "raw_hash": "hash-low-001",
                 "projection": {"classification": "unknown"},
                 "source_refs": {"conversation_ref": "conv-hash-001"},
-                "source_specific": {"codex_event_type": "message_summary"},
+                "source_specific": {"event_type": "message_summary"},
             },
         ],
     }
@@ -92,17 +95,17 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
     assert facts["facts"][1]["content_preview"] == "工具 apply_patch，退出码 1"
     assert facts["facts"][1]["raw_status"] == "仅结构化字段"
     assert facts["facts"][1]["source_event_type"] == "tool_result"
-    assert facts["facts"][1]["source_label"] == "Codex 会话 conv-hash-001"
+    assert facts["facts"][1]["source_label"] == "Agent 会话 conv-hash-001"
     assert detail["fact"]["quality"] == "high"
     assert detail["evidence_projection"]["raw_hash"] == "hash-error-001-result"
     assert detail["evidence_projection"]["upload_raw"] is False
     assert [item["category"] for item in detail["evidence_projections"]] == ["tool_result", "stderr"]
-    assert detail["source_specific_json"]["codex_event_type"] == "tool_result"
+    assert detail["source_specific_json"]["event_type"] == "tool_result"
     assert error_count == 1
     assert usage_count == 1
     assert risk_count == 1
-    assert stored_batch["protocol_version"] == "agent-observer-telemetry/v2"
-    assert stored_batch["agent_version"] == "0.2.0"
+    assert stored_batch["protocol_version"] == "agent-observer-telemetry/v3"
+    assert stored_batch["agent_version"] == "0.3.0"
 
 
 def test_ingest_rejects_batch_without_protocol(tmp_path):
@@ -130,16 +133,19 @@ def test_duplicate_batch_is_idempotent(tmp_path):
 def test_content_fact_requires_raw_content(tmp_path):
     missing_raw = {
         "batch_id": "raw-off-batch",
-        "protocol_version": "agent-observer-telemetry/v2",
-        "agent_version": "0.2.0",
+        "protocol_version": "agent-observer-telemetry/v3",
+        "agent_version": "0.3.0",
         "collector_id": "collector-codex",
         "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
         "cursor": "raw-off",
         "items": [
             {
                 "source_event_id": "prompt-event-001",
                 "fact_type": "content",
-                "category": "codex_prompt",
+                "category": "agent_prompt",
                 "quality": "high",
                 "severity": "low",
                 "summary": "记录到 Codex 用户 Prompt，原始内容未上传。",
@@ -148,7 +154,7 @@ def test_content_fact_requires_raw_content(tmp_path):
                 "raw_hash": "hash-prompt-001",
                 "projection": {"role": "user", "content_length": 12, "raw_content_uploaded": False},
                 "source_refs": {"conversation_ref": "conv-prompt"},
-                "source_specific": {"codex_event_type": "message"},
+                "source_specific": {"event_type": "message"},
             }
         ],
     }

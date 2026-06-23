@@ -1,10 +1,10 @@
 import type { Collector } from './types.collectors';
-import type { ObservedFact, TimeWindow } from './types.facts';
+import type { ObservedFact, TimeWindowParam } from './types.facts';
 import type { BehaviorSignal } from './types.signals';
 import type { RiskSummarySignal } from './types.usage';
 
 export interface DashboardSummary {
-  window: TimeWindow;
+  window: TimeWindowParam;
   collectors: {
     total: number;
     online: number;

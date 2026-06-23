@@ -94,9 +94,9 @@ function evidenceTypeLabel(entry: SignalEvidenceItem): string {
   if (normalized === 'file_change') return '文件变更';
   if (normalized === 'destructive_operation') return '破坏性操作';
   if (normalized === 'sensitive_content_exposure') return '敏感内容暴露';
-  if (normalized === 'codex_prompt') return '用户 Prompt';
-  if (normalized === 'codex_message') return 'Codex 消息';
-  if (normalized === 'codex_reasoning') return '推理片段';
+  if (normalized === 'agent_prompt') return '用户 Prompt';
+  if (normalized === 'agent_response') return 'Agent 消息';
+  if (normalized === 'agent_reasoning') return '推理片段';
   if (normalized === 'enrichment_result') return '补证结果';
   if (normalized === 'collector_status') return '采集器状态';
   if (entry.summary.includes('collector')) return '采集器状态';

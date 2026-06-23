@@ -76,6 +76,8 @@ def _event_types(fact: dict) -> set[str]:
     if not isinstance(source_specific, dict):
         return set()
     values = set()
+    if source_specific.get("event_type"):
+        values.add(str(source_specific["event_type"]))
     if source_specific.get("codex_event_type"):
         values.add(str(source_specific["codex_event_type"]))
     collapsed = source_specific.get("collapsed_event_types")

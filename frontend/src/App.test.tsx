@@ -37,6 +37,12 @@ describe('App shell', () => {
               unknown_units: 0,
               cached_input_units: 0,
               input_token_units: 0,
+              output_token_units: 0,
+              total_token_units: 0,
+              cache_write_input_units: 0,
+              reasoning_output_units: 0,
+              credit_total: 0,
+              cache_observed_input_units: 0,
               cache_hit_rate: 0
             }
           });
@@ -48,7 +54,10 @@ describe('App shell', () => {
           return Response.json({
             policy_version: 1,
             raw_upload_mode: 'always_on',
-            enrichment_mode: 'enabled'
+            enrichment_mode: 'enabled',
+            collection_interval_seconds: 5,
+            max_events_per_cycle: 500,
+            upload_batch_size: 100
           });
         }
         if (url.endsWith('/api/audit/recent')) {
@@ -59,8 +68,8 @@ describe('App shell', () => {
           path: 'data/packages/agent-observer-windows.zip',
           sha256: '1234567890abcdef',
           server_url: 'http://127.0.0.1:8765',
-          agent_version: '0.2.0',
-          protocol_version: 'agent-observer-telemetry/v2'
+          agent_version: '0.3.0',
+          protocol_version: 'agent-observer-telemetry/v3'
         });
       })
     );

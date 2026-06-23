@@ -7,6 +7,7 @@ import threading
 import time
 import urllib.error
 from dataclasses import dataclass
+from dataclasses import replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -21,7 +22,8 @@ from app.collector_client.status import (
     _state_payload,
     _utc_now,
 )
-from app.collector_client.telemetry import collect_facts
+from app.collector_client.sources import collect_sources, source_statuses
+from app.collector_client.sources.base import SourceResult
 from app.collector_client.transport import _get_json, _hash, _post_json
 from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 
@@ -57,6 +59,7 @@ def _set_running(config: CollectorConfig, running: bool) -> CommandResult:
                     "reason_code": "collector_stopped",
                     "outbox_backlog": len(state["outbox"]),
                     "last_error": state.get("last_error"),
+                    "sources": source_statuses(config),
                 },
             )
         except (OSError, ValueError, urllib.error.URLError) as exc:
@@ -83,10 +86,18 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
     except (OSError, ValueError, urllib.error.URLError) as exc:
         state["last_error"] = str(exc)
         save_state(config.state_path, state)
-    _emit(emit, {"status": "ok", "mode": "started", "collector_id": config.collector_id, **_state_payload(state, compact=True)})
+    _emit(
+        emit,
+        {
+            "status": "ok",
+            "mode": "started",
+            "collector_id": config.collector_id,
+            "sources_summary": _configured_source_summaries(config),
+            **_state_payload(state, compact=True),
+        },
+    )
 
     cycles = 0
-    max_cycles = _max_start_cycles()
     stop_heartbeat = threading.Event()
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(config, stop_heartbeat), daemon=True)
     heartbeat_thread.start()
@@ -94,14 +105,25 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
         cycle_no = cycles + 1
         cycle_started_at = time.monotonic()
         state = load_state(config.state_path)
+        effective_config = _refresh_policy_config(config, state, "collecting", "collecting")
+        state = load_state(config.state_path)
         state["last_cycle_started_at"] = _utc_now()
         state["process_heartbeat_at"] = state["last_cycle_started_at"]
         state["runtime_phase"] = "collecting"
         state["source_status"] = "online"
         state["reason_code"] = "collecting"
         save_state(config.state_path, state)
-        _emit(emit, {"status": "ok", "mode": "cycle_started", "collector_id": config.collector_id, "cycle": cycle_no})
-        result = _run_once(config, heartbeat_reason="start_running", register=False)
+        _emit(
+            emit,
+            {
+                "status": "ok",
+                "mode": "cycle_started",
+                "collector_id": config.collector_id,
+                "cycle": cycle_no,
+                "sources_summary": _configured_source_summaries(config),
+            },
+        )
+        result = _run_once(effective_config, heartbeat_reason="start_running", register=False, emit=emit, cycle=cycle_no)
         payload = json.loads(result.output)
         payload["mode"] = "cycle" if result.code == 0 else "cycle_error"
         payload["cycle"] = cycle_no
@@ -116,12 +138,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
             payload["cursor"] = _cursor_payload(payload.get("cursor", {}))
         _emit(emit, payload)
         cycles += 1
-        if max_cycles is not None and cycles >= max_cycles:
-            state = load_state(config.state_path)
-            state["running"] = False
-            save_state(config.state_path, state)
-            break
-        if not _sleep_while_running(config, emit):
+        if not _sleep_while_running(_config_with_policy(config, load_state(config.state_path)), emit):
             break
     stop_heartbeat.set()
     heartbeat_thread.join(timeout=2)
@@ -130,31 +147,38 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
         {"status": "ok", "mode": "stopped", "collector_id": config.collector_id, **_state_payload(load_state(config.state_path))},
     )
 
-def _run_once(config: CollectorConfig, heartbeat_reason: str = "run_once_completed", register: bool = True) -> CommandResult:
+def _run_once(
+    config: CollectorConfig,
+    heartbeat_reason: str = "run_once_completed",
+    register: bool = True,
+    emit: Emit | None = None,
+    cycle: int | None = None,
+) -> CommandResult:
     state = _load_configured_state(config)
     if register:
-        _register_collector(config, state, "starting", "started")
+        try:
+            _register_collector(config, state, "starting", "started")
+        except (OSError, ValueError, urllib.error.URLError) as exc:
+            state["last_error"] = str(exc)
+            state["reason_code"] = "policy_not_fetched"
+            save_state(config.state_path, state)
+        state = _load_configured_state(config)
+    config = _refresh_policy_config(config, state, "collecting", "collecting")
+    state = _load_configured_state(config)
     next_sequence = int(state["cursor"]["last_sequence"]) + 1
     state["runtime_phase"] = "collecting"
     state["source_status"] = "online"
     state["reason_code"] = "collecting"
     save_state(config.state_path, state)
-    facts = collect_facts(
-        config.collector_id,
-        next_sequence,
-        config.telemetry_mode,
-        codex_home=config.codex_home,
-        history_window_days=config.history_window_days,
-        max_events=config.max_events_per_cycle,
-        cursor=state["cursor"],
-    )
+    source_results = collect_sources(config, state, next_sequence, emit=lambda payload: _emit(emit, payload), cycle=cycle)
+    facts = [fact for result in source_results for fact in result.facts]
     state["outbox"].extend(facts)
     state["runtime_phase"] = "uploading" if state["outbox"] else "idle"
     state["reason_code"] = "uploading" if state["outbox"] else heartbeat_reason
     state["last_error"] = None
     save_state(config.state_path, state)
     try:
-        uploaded = _upload_pending(config, state, heartbeat_reason)
+        uploaded = _upload_pending(config, state, heartbeat_reason, emit=emit, cycle=cycle)
         enrichments = _run_pending_enrichment(config)
     except (OSError, ValueError, urllib.error.URLError) as exc:
         state["last_error"] = str(exc)
@@ -175,25 +199,37 @@ def _run_once(config: CollectorConfig, heartbeat_reason: str = "run_once_complet
             "enrichments": enrichments,
             "collector_id": config.collector_id,
             "facts_summary": _facts_summary(facts),
+            "sources_summary": _source_run_summaries(source_results),
             **_state_payload(state),
         },
     )
 
-def _upload_pending(config: CollectorConfig, state: dict[str, object], heartbeat_reason: str) -> int:
+def _upload_pending(
+    config: CollectorConfig,
+    state: dict[str, object],
+    heartbeat_reason: str,
+    emit: Emit | None = None,
+    cycle: int | None = None,
+) -> int:
     outbox = state["outbox"]
     if not outbox:
         return 0
     upload_count = len(outbox)
     batch_index = 0
+    started_at = time.monotonic()
     while outbox:
         batch_index += 1
-        chunk = list(outbox[: max(1, int(config.upload_batch_size))])
+        chunk = _next_upload_chunk(outbox, max(1, int(config.upload_batch_size)))
+        source_meta = _fact_source_meta(chunk[0])
         batch = {
-            "batch_id": f"{config.collector_id}-{int(chunk[0]['source_refs']['sequence'])}-{batch_index}",
+            "batch_id": f"{config.collector_id}-{source_meta['source_id']}-{int(chunk[0]['source_refs']['sequence'])}-{batch_index}",
             "protocol_version": COLLECTOR_PROTOCOL_VERSION,
             "agent_version": COLLECTOR_CLIENT_VERSION,
             "collector_id": config.collector_id,
-            "source": "codex",
+            "source_id": source_meta["source_id"],
+            "source": source_meta["agent_type"],
+            "agent_type": source_meta["agent_type"],
+            "source_kind": source_meta["source_kind"],
             "cursor": str(chunk[0]["source_refs"]["sequence"]),
             "items": chunk,
         }
@@ -203,18 +239,19 @@ def _upload_pending(config: CollectorConfig, state: dict[str, object], heartbeat
         save_state(config.state_path, state)
         _send_heartbeat(config, state, "uploading", "uploading")
         save_state(config.state_path, state)
-    _post_json(
-        config.server_url,
-        f"/api/collectors/{config.collector_id}/heartbeat",
+    result = _post_heartbeat(config, state, "idle" if heartbeat_reason == "run_once_completed" else "waiting", heartbeat_reason)
+    _remember_effective_policy(state, result)
+    save_state(config.state_path, state)
+    _emit(
+        emit,
         {
-            "protocol_version": COLLECTOR_PROTOCOL_VERSION,
-            "agent_version": COLLECTOR_CLIENT_VERSION,
-            "source_status": "online",
-            "runtime_phase": "idle" if heartbeat_reason == "run_once_completed" else "waiting",
-            "reason_code": heartbeat_reason,
-            "outbox_backlog": 0,
-            "last_cycle_duration_ms": state.get("last_cycle_duration_ms"),
-            "last_error": state.get("last_error"),
+            "status": "ok",
+            "mode": "upload_completed",
+            "cycle": cycle,
+            "uploaded": upload_count,
+            "batches": batch_index,
+            "outbox_backlog": len(outbox),
+            "duration_ms": int((time.monotonic() - started_at) * 1000),
         },
     )
     return upload_count
@@ -239,7 +276,6 @@ def _register_collector(config: CollectorConfig, state: dict[str, object], phase
             "display_name": config.collector_id,
             "hostname_hash": _hash(socket.gethostname()),
             "windows_username_hash": _hash(os.environ.get("USERNAME", "local-user")),
-            "agent_type": "codex",
             "protocol_version": COLLECTOR_PROTOCOL_VERSION,
             "agent_version": COLLECTOR_CLIENT_VERSION,
             "source_status": "online",
@@ -248,8 +284,10 @@ def _register_collector(config: CollectorConfig, state: dict[str, object], phase
             "outbox_backlog": len(state.get("outbox", [])),
             "last_cycle_duration_ms": state.get("last_cycle_duration_ms"),
             "last_error": state.get("last_error"),
+            "sources": source_statuses(config),
         },
     )
+    _remember_effective_policy(state, result)
     save_state(config.state_path, state)
     return result
 
@@ -268,12 +306,14 @@ def _heartbeat_loop(config: CollectorConfig, stop_event: threading.Event) -> Non
                     "reason_code": str(state.get("reason_code") or "waiting"),
                 },
             )
-            _post_heartbeat(
+            result = _post_heartbeat(
                 config,
                 state,
                 str(state.get("runtime_phase") or "idle"),
                 str(state.get("reason_code") or "waiting"),
             )
+            _remember_effective_policy(state, result)
+            save_state(config.state_path, state)
         except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
             continue
 
@@ -284,6 +324,7 @@ def _send_heartbeat(config: CollectorConfig, state: dict[str, object], phase: st
     state["reason_code"] = reason_code
     save_state(config.state_path, state)
     result = _post_heartbeat(config, state, phase, reason_code)
+    _remember_effective_policy(state, result)
     save_state(config.state_path, state)
     return result
 
@@ -300,8 +341,115 @@ def _post_heartbeat(config: CollectorConfig, state: dict[str, object], phase: st
             "outbox_backlog": len(state.get("outbox", [])),
             "last_cycle_duration_ms": state.get("last_cycle_duration_ms"),
             "last_error": state.get("last_error"),
+            "sources": source_statuses(config),
         },
     )
+
+
+def _refresh_policy_config(config: CollectorConfig, state: dict[str, object], phase: str, reason_code: str) -> CollectorConfig:
+    try:
+        result = _post_heartbeat(config, state, phase, reason_code)
+        _remember_effective_policy(state, result)
+        save_state(config.state_path, state)
+    except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
+        pass
+    return _config_with_policy(config, state)
+
+
+def _remember_effective_policy(state: dict[str, object], response: dict[str, Any] | None) -> None:
+    if not isinstance(response, dict):
+        return
+    policy = response.get("effective_policy")
+    if not isinstance(policy, dict):
+        return
+    state["effective_policy"] = {
+        "policy_version": policy.get("policy_version"),
+        "collection_interval_seconds": _policy_int(policy, "collection_interval_seconds"),
+        "max_events_per_cycle": _policy_int(policy, "max_events_per_cycle"),
+        "upload_batch_size": _policy_int(policy, "upload_batch_size"),
+    }
+
+
+def _config_with_policy(config: CollectorConfig, state: dict[str, object]) -> CollectorConfig:
+    policy = state.get("effective_policy")
+    if not isinstance(policy, dict):
+        return config
+    values = {
+        "collection_interval_seconds": _bounded_policy_value(
+            policy.get("collection_interval_seconds"),
+            config.collection_interval_seconds,
+            1,
+            300,
+        ),
+        "max_events_per_cycle": _bounded_policy_value(policy.get("max_events_per_cycle"), config.max_events_per_cycle, 100, 5000),
+        "upload_batch_size": _bounded_policy_value(policy.get("upload_batch_size"), config.upload_batch_size, 20, 500),
+    }
+    return replace(config, **values)
+
+
+def _policy_int(policy: dict[str, object], key: str) -> int | None:
+    try:
+        return int(policy[key])
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _bounded_policy_value(value: object, fallback: int | float, minimum: int, maximum: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return int(fallback)
+    if parsed < minimum or parsed > maximum:
+        return int(fallback)
+    return parsed
+
+
+def _next_upload_chunk(outbox: list, limit: int) -> list[dict]:
+    first_meta = _fact_source_meta(outbox[0])
+    chunk: list[dict] = []
+    for item in outbox[:limit]:
+        if _fact_source_meta(item) != first_meta:
+            break
+        chunk.append(item)
+    return chunk
+
+
+def _fact_source_meta(fact: dict) -> dict[str, str]:
+    refs = fact.get("source_refs") if isinstance(fact.get("source_refs"), dict) else {}
+    return {
+        "source_id": str(refs.get("source_id") or "unknown-source"),
+        "agent_type": str(refs.get("agent_type") or "unknown"),
+        "source_kind": str(refs.get("source_kind") or "unknown"),
+    }
+
+
+def _configured_source_summaries(config: CollectorConfig) -> list[dict[str, object]]:
+    return [
+        {
+            "source_id": source.source_id,
+            "agent_type": source.agent_type,
+            "display_name": source.display_name,
+            "status": "enabled" if source.enabled else "disabled",
+            "reason_code": "configured" if source.enabled else "disabled",
+            "generated": 0,
+            "types": {},
+        }
+        for source in config.sources
+    ]
+
+
+def _source_run_summaries(results: list[SourceResult]) -> list[dict[str, object]]:
+    return [
+        {
+            "source_id": result.config.source_id,
+            "agent_type": result.config.agent_type,
+            "display_name": result.config.display_name,
+            "status": result.status,
+            "reason_code": result.reason_code,
+            **_facts_summary(result.facts),
+        }
+        for result in results
+    ]
 
 def _sleep_while_running(config: CollectorConfig, emit: Emit | None = None) -> bool:
     remaining = max(0, int(config.collection_interval_seconds))
@@ -329,21 +477,13 @@ def _sleep_while_running(config: CollectorConfig, emit: Emit | None = None) -> b
                     "mode": "waiting",
                     "collector_id": config.collector_id,
                     "seconds_until_next_cycle": max(0, int(deadline - now)),
+                    "sources_summary": _configured_source_summaries(config),
                     **_state_payload(state, compact=True),
                     "next_cycle_at": next_cycle_at,
                 },
             )
         time.sleep(min(0.5, deadline - time.monotonic()))
     return bool(load_state(config.state_path)["running"])
-
-def _max_start_cycles() -> int | None:
-    raw = os.environ.get("AGENT_OBSERVER_START_MAX_CYCLES")
-    if not raw:
-        return None
-    try:
-        return max(1, int(raw))
-    except ValueError:
-        return None
 
 def _emit(emit: Emit | None, payload: dict[str, object]) -> None:
     if emit:

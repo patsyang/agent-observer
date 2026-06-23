@@ -1,6 +1,25 @@
 import { expect, test } from '@playwright/test';
 import { E2E_API_BASE } from './support/urls';
 
+const sources = [
+  {
+    source_id: 'codex-local',
+    agent_type: 'codex',
+    source_kind: 'codex_local',
+    display_name: 'Codex Local',
+    source_status: 'online',
+    reason_code: 'online'
+  },
+  {
+    source_id: 'workbuddy-local',
+    agent_type: 'workbuddy',
+    source_kind: 'workbuddy_local',
+    display_name: 'WorkBuddy Local',
+    source_status: 'online',
+    reason_code: 'online'
+  }
+];
+
 test('public onboarding shows registered online collector and package download', async ({ page, request }) => {
   const suffix = Date.now().toString();
   const workstationName = `e2e-workstation-${suffix}`;
@@ -11,8 +30,9 @@ test('public onboarding shows registered online collector and package download',
       hostname: workstationName,
       windows_username: 'synthetic-user',
       agent_type: 'codex',
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0'
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
+      sources
     }
   });
   expect(registered.ok()).toBeTruthy();
@@ -21,11 +41,12 @@ test('public onboarding shows registered online collector and package download',
     `${E2E_API_BASE}/api/collectors/${collector.collector_id}/heartbeat`,
     {
       data: {
-        protocol_version: 'agent-observer-telemetry/v2',
-        agent_version: '0.2.0',
+        protocol_version: 'agent-observer-telemetry/v3',
+        agent_version: '0.3.0',
         source_status: 'online',
         reason_code: 'online',
-        outbox_backlog: 0
+        outbox_backlog: 0,
+        sources
       }
     }
   );
@@ -39,10 +60,11 @@ test('public onboarding shows registered online collector and package download',
       hostname: 'stale-e2e-workstation',
       windows_username: 'synthetic-user',
       agent_type: 'codex',
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0',
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
       source_status: 'offline',
-      reason_code: 'heartbeat_stale'
+      reason_code: 'heartbeat_stale',
+      sources
     }
   });
   expect(stale.ok()).toBeTruthy();

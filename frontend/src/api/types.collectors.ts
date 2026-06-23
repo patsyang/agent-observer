@@ -8,12 +8,23 @@ export const sourceStatuses = [
 
 export type SourceStatus = (typeof sourceStatuses)[number];
 
+export interface AgentSource {
+  source_id: string;
+  collector_id: string;
+  agent_type: string;
+  source_kind: string;
+  display_name: string;
+  capabilities: Record<string, unknown>;
+  source_status: SourceStatus;
+  reason_code: string;
+  last_seen_at: string | null;
+}
+
 export interface Collector {
   collector_id: string;
   display_name: string;
   hostname_hash: string;
   windows_username_hash: string;
-  agent_type: string;
   protocol_version: string;
   agent_version: string;
   source_status: SourceStatus;
@@ -25,6 +36,7 @@ export interface Collector {
   last_cycle_duration_ms?: number | null;
   last_error?: string | null;
   outbox_backlog: number;
+  sources: AgentSource[];
 }
 
 export interface CollectorsResponse {
@@ -44,11 +56,17 @@ export interface EffectivePolicy {
   policy_version: number;
   raw_upload_mode: 'always_on';
   enrichment_mode: 'disabled' | 'enabled';
+  collection_interval_seconds: number;
+  max_events_per_cycle: number;
+  upload_batch_size: number;
 }
 
 export interface PolicyUpdatePayload {
   expected_version: number;
   enrichment_mode: 'disabled' | 'enabled';
+  collection_interval_seconds: number;
+  max_events_per_cycle: number;
+  upload_batch_size: number;
 }
 
 export interface AuditEvent {

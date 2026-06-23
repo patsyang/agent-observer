@@ -18,7 +18,7 @@ def content_fact(common: dict, record: dict) -> dict:
         "raw_content_uploaded": True,
     }
     if content_text:
-        projection["prompt_text" if category == "codex_prompt" else "content_text"] = content_text
+        projection["prompt_text" if category == "agent_prompt" else "content_text"] = content_text
     return {
         **common,
         "fact_type": "content",
@@ -69,19 +69,19 @@ def _content_role(payload_type: str) -> str:
 
 def _content_category(payload_type: str, role: str) -> str:
     if payload_type == "reasoning" or role == "reasoning":
-        return "codex_reasoning"
+        return "agent_reasoning"
     if role == "user" or payload_type == "user_message":
-        return "codex_prompt"
-    return "codex_message"
+        return "agent_prompt"
+    return "agent_response"
 
 
 def _content_label(category: str) -> str:
     labels = {
-        "codex_prompt": "Codex 用户 Prompt",
-        "codex_message": "Codex 消息正文",
-        "codex_reasoning": "Codex 推理片段",
+        "agent_prompt": "用户 Prompt",
+        "agent_response": "Agent 消息正文",
+        "agent_reasoning": "Agent 推理片段",
     }
-    return labels.get(category, "Codex 内容事件")
+    return labels.get(category, "Agent 内容事件")
 
 
 def _extract_content_text(record: dict) -> str:

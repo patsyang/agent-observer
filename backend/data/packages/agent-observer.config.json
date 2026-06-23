@@ -3,14 +3,30 @@
   "collector_id": "windows-collector",
   "state_path": "agent-observer.state.json",
   "telemetry_mode": "safe_probe",
-  "collection_interval_seconds": 15,
+  "collection_interval_seconds": 5,
   "heartbeat_interval_seconds": 10,
-  "codex_home": "%USERPROFILE%\\.codex",
+  "sources": [
+    {
+      "source_id": "codex-local",
+      "agent_type": "codex",
+      "source_kind": "codex_local",
+      "display_name": "Codex Local",
+      "root": "%USERPROFILE%\\.codex",
+      "enabled": true
+    },
+    {
+      "source_id": "workbuddy-local",
+      "agent_type": "workbuddy",
+      "source_kind": "workbuddy_local",
+      "display_name": "WorkBuddy Local",
+      "root": "%USERPROFILE%\\.workbuddy",
+      "enabled": true
+    }
+  ],
   "history_window_days": 7,
-  "max_events_per_cycle": 100,
-  "upload_batch_size": 50,
+  "max_events_per_cycle": 500,
+  "upload_batch_size": 100,
   "evidence_mode": "structured_projection",
-  "agent_type": "codex",
-  "agent_version": "0.2.0",
-  "protocol_version": "agent-observer-telemetry/v2"
+  "agent_version": "0.3.0",
+  "protocol_version": "agent-observer-telemetry/v3"
 }

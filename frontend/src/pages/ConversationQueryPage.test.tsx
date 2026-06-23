@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -9,6 +9,9 @@ const detail: ConversationDetail = {
   conversation_ref: 'conv-alpha',
   session_ref: 'session-alpha',
   session_title: '分析信号定义与类型-Grill',
+  agent_type: 'codex',
+  source_id: 'codex-local',
+  source_kind: 'codex_local',
   workspace: {
     agent_type: 'codex',
     workspace_id: 'codex:agent-observer',
@@ -33,7 +36,7 @@ const detail: ConversationDetail = {
     {
       fact_id: 'prompt-alpha',
       role: 'user',
-      category: 'codex_prompt',
+      category: 'agent_prompt',
       occurred_at: '2026-06-21T01:00:00+00:00',
       content: '请检查观测总览',
       raw_available: true,
@@ -41,7 +44,7 @@ const detail: ConversationDetail = {
     {
       fact_id: 'response-alpha',
       role: 'assistant',
-      category: 'codex_message',
+      category: 'agent_response',
       occurred_at: '2026-06-21T01:04:00+00:00',
       content: '已经定位信号聚合过宽',
       raw_available: true,
@@ -97,7 +100,20 @@ describe('ConversationQueryPage', () => {
     expect(screen.getByText('时间戳')).toBeInTheDocument();
     expect(screen.getAllByText('提交 Prompt').length).toBeGreaterThan(0);
     expect(screen.getAllByText('响应内容').length).toBeGreaterThan(0);
-    expect(screen.getByRole('button', { name: '时间范围：1小时' })).toBeInTheDocument();
+    expect(screen.getByLabelText('时间范围：1小时')).toBeInTheDocument();
+    await user.click(screen.getByLabelText('时间范围：1小时'));
+    expect(screen.getByRole('button', { name: '1小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '6小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '12小时' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '今天' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '本周' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '全部' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '2小时' })).not.toBeInTheDocument();
+    expect(screen.getByLabelText('开始')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: '1小时' }));
+    expect(screen.getByLabelText('Agent类型')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
     expect(loadConversations).toHaveBeenCalledWith({
       window: '1h',
       start_at: '',
@@ -105,39 +121,63 @@ describe('ConversationQueryPage', () => {
       prompt_query: '',
       response_query: '',
       workspace_query: '',
+      agent_type: '',
+      source_id: '',
       page: 1,
       page_size: 50,
     });
 
     expect(screen.getAllByText('工作区').length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText('Agent Observer')).toBeInTheDocument();
+    await user.selectOptions(screen.getByLabelText('Agent类型'), 'workbuddy');
+    expect(loadConversations).toHaveBeenCalledTimes(1);
     await user.type(screen.getByLabelText('工作区'), 'Observer');
     expect(loadConversations).toHaveBeenCalledTimes(1);
     await user.type(screen.getByLabelText('提交 Prompt'), '观测');
     expect(loadConversations).toHaveBeenCalledTimes(1);
     await user.click(screen.getByRole('button', { name: '搜索会话' }));
-    await waitFor(() => expect(loadConversations).toHaveBeenLastCalledWith(expect.objectContaining({ prompt_query: '观测' })));
+    await waitFor(() => expect(loadConversations).toHaveBeenLastCalledWith(expect.objectContaining({ prompt_query: '观测', agent_type: 'workbuddy' })));
     await user.type(screen.getByLabelText('响应内容'), '信号');
     expect(loadConversations).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole('button', { name: '时间范围：1小时' }));
-    await user.click(screen.getByRole('button', { name: '2小时' }));
+    await user.click(screen.getByLabelText('时间范围：1小时'));
+    await user.click(screen.getByRole('button', { name: '本周' }));
     expect(loadConversations).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole('button', { name: '时间范围：2小时' }));
-    await user.type(screen.getByLabelText('开始'), '2026-06-21T09:30:15');
-    await user.type(screen.getByLabelText('结束'), '2026-06-21T10:30:45');
-    expect(loadConversations).toHaveBeenCalledTimes(2);
-    await user.click(screen.getByRole('button', { name: '确认' }));
-    expect(screen.getByText(/06\/21 09:30:15 - 10:30:45/)).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '搜索会话' }));
-    const expectedStart = new Date('2026-06-21T09:30:15').toISOString();
-    const expectedEnd = new Date('2026-06-21T10:30:45').toISOString();
     await waitFor(() => expect(loadConversations).toHaveBeenLastCalledWith(expect.objectContaining({
       prompt_query: '观测',
       response_query: '信号',
       workspace_query: 'Observer',
+      start_at: '',
+      end_at: '',
+      window: 'week',
+    })));
+  });
+
+  it('submits custom time range when searching', async () => {
+    const user = userEvent.setup();
+    const loadConversations = vi.fn(async () => response);
+    render(
+      <ConversationQueryPage
+        loadConversationDetail={async () => detail}
+        loadConversationForFact={async () => detail}
+        loadConversations={loadConversations}
+      />
+    );
+
+    await screen.findByText('序号');
+    await user.click(screen.getByLabelText('时间范围：1小时'));
+    fireEvent.change(screen.getByLabelText('开始'), { target: { value: '2026-06-21T01:00:00' } });
+    fireEvent.change(screen.getByLabelText('结束'), { target: { value: '2026-06-21T03:00:00' } });
+    await user.click(screen.getByRole('button', { name: '确认' }));
+    expect(loadConversations).toHaveBeenCalledTimes(1);
+
+    await user.click(screen.getByRole('button', { name: '搜索会话' }));
+    const expectedStart = new Date('2026-06-21T01:00:00').toISOString();
+    const expectedEnd = new Date('2026-06-21T03:00:00').toISOString();
+    await waitFor(() => expect(loadConversations).toHaveBeenLastCalledWith(expect.objectContaining({
+      window: 'custom',
       start_at: expectedStart,
       end_at: expectedEnd,
-      window: '',
     })));
   });
 
@@ -159,7 +199,8 @@ describe('ConversationQueryPage', () => {
     expect(within(drawer).getByRole('heading', { name: '分析信号定义与类型-Grill' })).toBeInTheDocument();
     expect(within(drawer).getByText('conv-alpha')).toBeInTheDocument();
     expect(within(drawer).getAllByText('Agent Observer').length).toBeGreaterThan(0);
-    expect(screen.getByText('模型调用累计有效 token')).toBeInTheDocument();
+    expect(screen.getByText('累计有效Token')).toBeInTheDocument();
+    expect(screen.getByText('单次有效Token峰值')).toBeInTheDocument();
     expect(screen.getByText('缓存命中 token')).toBeInTheDocument();
     expect(screen.getByText('60.0%')).toBeInTheDocument();
     expect(screen.getByText('检测到破坏性操作：工作区文件')).toBeInTheDocument();

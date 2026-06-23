@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.collectors.service import register_collector
 from app.db.connection import connect
 from app.package.builder import build_windows_package
+from source_payloads import default_sources
 
 
 def test_stack_ref_and_public_surface_without_forbidden_routes(tmp_path):
@@ -14,8 +15,9 @@ def test_stack_ref_and_public_surface_without_forbidden_routes(tmp_path):
                 "hostname": "host",
                 "windows_username": "user",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v2",
-                "agent_version": "0.2.0",
+                "protocol_version": "agent-observer-telemetry/v3",
+                "agent_version": "0.3.0",
+                "sources": default_sources(),
             },
         )
 

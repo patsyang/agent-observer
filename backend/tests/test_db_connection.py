@@ -44,6 +44,7 @@ def test_initialize_creates_current_collector_and_signal_schema(tmp_path):
         "latest_fact_id",
         "latest_summary",
     } <= signal_columns
+    assert {"collection_interval_seconds", "max_events_per_cycle", "upload_batch_size"} <= policy_columns
     assert "raw_upload_default" not in policy_columns
     assert old_tables == set()
 

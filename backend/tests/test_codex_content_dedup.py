@@ -5,7 +5,7 @@ import json
 from app.collector_client.telemetry import collect_facts
 
 
-def test_collector_collapses_duplicate_codex_message_projections(tmp_path):
+def test_collector_collapses_duplicate_agent_response_projections(tmp_path):
     codex_home = tmp_path / ".codex"
     sessions = codex_home / "sessions"
     sessions.mkdir(parents=True)
@@ -43,7 +43,7 @@ def test_collector_collapses_duplicate_codex_message_projections(tmp_path):
         cursor={"last_sequence": 0, "sources": {}},
     )
 
-    content_facts = [fact for fact in facts if fact["category"] == "codex_message"]
+    content_facts = [fact for fact in facts if fact["category"] == "agent_response"]
 
     assert len(content_facts) == 1
     fact = content_facts[0]

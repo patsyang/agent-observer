@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import sqlite3
 from datetime import UTC, datetime
 
@@ -31,7 +32,6 @@ def _row_to_collector(row: sqlite3.Row, now: datetime | None = None, global_poli
         "display_name": row["display_name"],
         "hostname_hash": row["hostname_hash"],
         "windows_username_hash": row["windows_username_hash"],
-        "agent_type": row["agent_type"],
         "protocol_version": row["protocol_version"],
         "agent_version": row["agent_version"],
         "source_status": source_status,
@@ -43,19 +43,19 @@ def _row_to_collector(row: sqlite3.Row, now: datetime | None = None, global_poli
         "last_cycle_duration_ms": row["last_cycle_duration_ms"],
         "last_error": row["last_error"],
         "outbox_backlog": row["outbox_backlog"],
+        "sources": [],
     }
 
 
 def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
     protocol_version, agent_version = _collector_protocol(payload)
+    sources = _validated_sources(payload.get("sources"))
     global_policy = get_effective_policy(conn)
     hostname_hash = payload.get("hostname_hash")
     username_hash = payload.get("windows_username_hash")
     hostname = payload.get("hostname") or payload.get("display_name") or payload.get("collector_id")
     windows_username = payload.get("windows_username") or "local-user"
-    collector_id = payload.get("collector_id") or _hash_identity(
-        f"{hostname_hash or hostname}:{username_hash or windows_username}:{payload.get('agent_type', 'codex')}"
-    )
+    collector_id = payload.get("collector_id") or _hash_identity(f"{hostname_hash or hostname}:{username_hash or windows_username}")
     now = _now()
     existing = conn.execute("select * from collectors where collector_id = ?", (collector_id,)).fetchone()
     source_status = _source_status_from_payload(payload, existing)
@@ -66,7 +66,6 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
         "display_name": payload.get("display_name") or str(hostname or collector_id),
         "hostname_hash": str(hostname_hash or _hash_identity(str(hostname))),
         "windows_username_hash": str(username_hash or _hash_identity(str(windows_username))),
-        "agent_type": payload.get("agent_type", "codex"),
         "protocol_version": protocol_version,
         "agent_version": agent_version,
         "source_status": source_status,
@@ -106,12 +105,12 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
         conn.execute(
             """
             insert into collectors (
-              collector_id, display_name, hostname_hash, windows_username_hash, agent_type,
+              collector_id, display_name, hostname_hash, windows_username_hash,
               protocol_version, agent_version, source_status, reason_code, policy_version, last_heartbeat_at,
               runtime_phase, last_seen_at, last_cycle_duration_ms, last_error,
               outbox_backlog, created_at, updated_at
             ) values (
-              :collector_id, :display_name, :hostname_hash, :windows_username_hash, :agent_type,
+              :collector_id, :display_name, :hostname_hash, :windows_username_hash,
               :protocol_version, :agent_version, :source_status, :reason_code, :policy_version, :last_heartbeat_at,
               :runtime_phase, :last_seen_at, :last_cycle_duration_ms, :last_error,
               :outbox_backlog, :created_at, :updated_at
@@ -119,6 +118,7 @@ def register_collector(conn: sqlite3.Connection, payload: dict) -> dict:
             """,
             values,
         )
+    _upsert_sources(conn, collector_id, sources, now)
     conn.commit()
     return {"collector_id": collector_id, "effective_policy": _collector_policy(conn, collector_id, global_policy)}
 
@@ -135,6 +135,7 @@ def _collector_protocol(payload: dict) -> tuple[str, str]:
 
 def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dict:
     protocol_version, agent_version = _collector_protocol(payload)
+    sources = _validated_sources(payload.get("sources"))
     source_status = payload.get("source_status", "online")
     source_status = _normalize_source_status(source_status)
     if source_status not in SOURCE_STATUSES:
@@ -177,6 +178,7 @@ def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dic
     )
     if cursor.rowcount == 0:
         raise LookupError(collector_id)
+    _upsert_sources(conn, collector_id, sources, now)
     conn.commit()
     return {"collector_id": collector_id, "effective_policy": _collector_policy(conn, collector_id, global_policy)}
 
@@ -187,7 +189,13 @@ def list_collectors(conn: sqlite3.Connection) -> list[dict]:
     ).fetchall()
     now = datetime.now(UTC)
     global_policy = get_effective_policy(conn)
-    return [_row_to_collector(row, now, global_policy) for row in rows]
+    sources_by_collector = _sources_by_collector(conn)
+    collectors = []
+    for row in rows:
+        item = _row_to_collector(row, now, global_policy)
+        item["sources"] = sources_by_collector.get(row["collector_id"], [])
+        collectors.append(item)
+    return collectors
 
 
 def update_collector_display_name(conn: sqlite3.Connection, collector_id: str, display_name: str) -> dict:
@@ -220,6 +228,7 @@ def delete_collector(conn: sqlite3.Connection, collector_id: str) -> dict:
     row = conn.execute("select * from collectors where collector_id = ?", (collector_id,)).fetchone()
     if row is None:
         raise LookupError(collector_id)
+    conn.execute("delete from agent_sources where collector_id = ?", (collector_id,))
     conn.execute("delete from collectors where collector_id = ?", (collector_id,))
     write_management_audit(
         conn,
@@ -298,3 +307,93 @@ def _nullable_int(value: object) -> int | None:
         return int(value)
     except (TypeError, ValueError):
         return None
+
+
+def _validated_sources(sources: object) -> list[dict]:
+    if not isinstance(sources, list) or not sources:
+        raise ValueError("sources_required")
+    for item in sources:
+        if (
+            not isinstance(item, dict)
+            or not str(item.get("source_id") or "").strip()
+            or not str(item.get("agent_type") or "").strip()
+            or not str(item.get("source_kind") or "").strip()
+        ):
+            raise ValueError("sources_required")
+    return sources
+
+
+def _upsert_sources(conn: sqlite3.Connection, collector_id: str, sources: object, now: str) -> None:
+    if not isinstance(sources, list):
+        return
+    for item in sources:
+        if not isinstance(item, dict):
+            continue
+        source_id = str(item.get("source_id") or "").strip()
+        agent_type = str(item.get("agent_type") or "").strip()
+        source_kind = str(item.get("source_kind") or "").strip()
+        if not source_id or not agent_type or not source_kind:
+            continue
+        status = _normalize_source_status(item.get("source_status") or "online")
+        if status not in SOURCE_STATUSES:
+            status = "degraded"
+        values = {
+            "source_id": source_id,
+            "collector_id": collector_id,
+            "agent_type": agent_type,
+            "source_kind": source_kind,
+            "display_name": str(item.get("display_name") or source_id),
+            "capabilities_json": json.dumps(item.get("capabilities") or {}, sort_keys=True),
+            "source_status": status,
+            "reason_code": str(item.get("reason_code") or status),
+            "last_seen_at": now,
+            "created_at": now,
+            "updated_at": now,
+        }
+        conn.execute(
+            """
+            insert into agent_sources (
+              source_id, collector_id, agent_type, source_kind, display_name, capabilities_json,
+              source_status, reason_code, last_seen_at, created_at, updated_at
+            ) values (
+              :source_id, :collector_id, :agent_type, :source_kind, :display_name, :capabilities_json,
+              :source_status, :reason_code, :last_seen_at, :created_at, :updated_at
+            )
+            on conflict(collector_id, source_id) do update set
+              agent_type = excluded.agent_type,
+              source_kind = excluded.source_kind,
+              display_name = excluded.display_name,
+              capabilities_json = excluded.capabilities_json,
+              source_status = excluded.source_status,
+              reason_code = excluded.reason_code,
+              last_seen_at = excluded.last_seen_at,
+              updated_at = excluded.updated_at
+            """,
+            values,
+        )
+
+
+def _sources_by_collector(conn: sqlite3.Connection) -> dict[str, list[dict]]:
+    result: dict[str, list[dict]] = {}
+    rows = conn.execute("select * from agent_sources order by collector_id, display_name").fetchall()
+    for row in rows:
+        result.setdefault(row["collector_id"], []).append(_source_payload(row))
+    return result
+
+
+def _source_payload(row: sqlite3.Row) -> dict:
+    try:
+        capabilities = json.loads(row["capabilities_json"] or "{}")
+    except json.JSONDecodeError:
+        capabilities = {}
+    return {
+        "source_id": row["source_id"],
+        "collector_id": row["collector_id"],
+        "agent_type": row["agent_type"],
+        "source_kind": row["source_kind"],
+        "display_name": row["display_name"],
+        "capabilities": capabilities,
+        "source_status": row["source_status"],
+        "reason_code": row["reason_code"],
+        "last_seen_at": row["last_seen_at"],
+    }

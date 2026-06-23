@@ -10,16 +10,19 @@ test('operator queries conversations by prompt and response keywords', async ({ 
   const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
     data: {
       batch_id: `e2e-conversation-query-${suffix}`,
-      protocol_version: 'agent-observer-telemetry/v2',
-      agent_version: '0.2.0',
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
       collector_id: 'collector-codex',
       source: 'codex',
+      source_id: 'codex-local',
+      agent_type: 'codex',
+      source_kind: 'codex_local',
       cursor: `cursor-e2e-${suffix}`,
       items: [
         {
           source_event_id: `e2e-prompt-${suffix}`,
           fact_type: 'content',
-          category: 'codex_prompt',
+          category: 'agent_prompt',
           quality: 'high',
           severity: 'low',
           summary: prompt,
@@ -30,12 +33,12 @@ test('operator queries conversations by prompt and response keywords', async ({ 
           upload_raw: true,
           raw_content: prompt,
           source_refs: { conversation_ref: conversation, session_ref: `session-${conversation}` },
-          source_specific: { codex_event_type: 'message' }
+          source_specific: { event_type: 'message' }
         },
         {
           source_event_id: `e2e-response-${suffix}`,
           fact_type: 'content',
-          category: 'codex_message',
+          category: 'agent_response',
           quality: 'high',
           severity: 'low',
           summary: response,
@@ -46,7 +49,7 @@ test('operator queries conversations by prompt and response keywords', async ({ 
           upload_raw: true,
           raw_content: response,
           source_refs: { conversation_ref: conversation, session_ref: `session-${conversation}` },
-          source_specific: { codex_event_type: 'message' }
+          source_specific: { event_type: 'message' }
         },
         {
           source_event_id: `e2e-usage-${suffix}`,
@@ -61,7 +64,7 @@ test('operator queries conversations by prompt and response keywords', async ({ 
           projection: { activity_tag: 'codex_turn', units: 88 },
           usage: { units: 88, activity_tag: 'codex_turn', conversation_id: conversation },
           source_refs: { conversation_ref: conversation },
-          source_specific: { codex_event_type: 'usage_summary' }
+          source_specific: { event_type: 'usage_summary' }
         }
       ]
     }
@@ -89,4 +92,69 @@ test('operator queries conversations by prompt and response keywords', async ({ 
   expect(body.conversations.some((item: { conversation_ref: string; prompt_preview: string }) => (
     item.conversation_ref === conversation && item.prompt_preview === prompt
   ))).toBeTruthy();
+});
+
+test('operator filters conversations by WorkBuddy agent and source', async ({ page, request }) => {
+  const suffix = Date.now().toString();
+  const conversation = `conv-e2e-workbuddy-${suffix}`;
+  const prompt = `WorkBuddy 精确筛选 ${suffix}`;
+  const now = new Date().toISOString();
+  const ingest = await request.post(`${E2E_API_BASE}/api/telemetry/ingest`, {
+    data: {
+      batch_id: `e2e-workbuddy-conversation-${suffix}`,
+      protocol_version: 'agent-observer-telemetry/v3',
+      agent_version: '0.3.0',
+      collector_id: 'collector-workbuddy',
+      source: 'workbuddy',
+      source_id: 'workbuddy-local',
+      agent_type: 'workbuddy',
+      source_kind: 'workbuddy_local',
+      cursor: `cursor-workbuddy-e2e-${suffix}`,
+      items: [
+        {
+          source_event_id: `e2e-workbuddy-prompt-${suffix}`,
+          fact_type: 'content',
+          category: 'agent_prompt',
+          quality: 'high',
+          severity: 'low',
+          summary: prompt,
+          occurred_at: now,
+          span: `session:${conversation}`,
+          raw_hash: `hash-workbuddy-prompt-${suffix}`,
+          projection: { role: 'user', prompt_text: prompt },
+          upload_raw: true,
+          raw_content: prompt,
+          source_refs: { conversation_ref: conversation, session_ref: `session-${conversation}` },
+          source_specific: { event_type: 'message' }
+        },
+        {
+          source_event_id: `e2e-workbuddy-response-${suffix}`,
+          fact_type: 'content',
+          category: 'agent_response',
+          quality: 'high',
+          severity: 'low',
+          summary: `WorkBuddy 响应 ${suffix}`,
+          occurred_at: now,
+          span: `session:${conversation}`,
+          raw_hash: `hash-workbuddy-response-${suffix}`,
+          projection: { role: 'assistant', content_text: `WorkBuddy 响应 ${suffix}` },
+          upload_raw: true,
+          raw_content: `WorkBuddy 响应 ${suffix}`,
+          source_refs: { conversation_ref: conversation, session_ref: `session-${conversation}` },
+          source_specific: { event_type: 'message' }
+        }
+      ]
+    }
+  });
+  expect(ingest.ok()).toBeTruthy();
+
+  await page.goto('/');
+  await page.getByTestId('nav-conversations').click();
+  await expect(page.getByTestId('conversation-page')).toBeVisible();
+  await page.getByTestId('agent-type-query').selectOption('workbuddy');
+  await page.getByTestId('conversation-search').click();
+
+  const row = page.locator(`[data-conversation-ref="${conversation}"]`);
+  await expect(row).toBeVisible({ timeout: 15000 });
+  await expect(row).toContainText('WorkBuddy');
 });

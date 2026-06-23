@@ -25,14 +25,30 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
         "collector_id": "windows-collector",
         "state_path": "agent-observer.state.json",
         "telemetry_mode": "safe_probe",
-        "collection_interval_seconds": 15,
+        "collection_interval_seconds": 5,
         "heartbeat_interval_seconds": 10,
-        "codex_home": "%USERPROFILE%\\.codex",
+        "sources": [
+            {
+                "source_id": "codex-local",
+                "agent_type": "codex",
+                "source_kind": "codex_local",
+                "display_name": "Codex Local",
+                "root": "%USERPROFILE%\\.codex",
+                "enabled": True,
+            },
+            {
+                "source_id": "workbuddy-local",
+                "agent_type": "workbuddy",
+                "source_kind": "workbuddy_local",
+                "display_name": "WorkBuddy Local",
+                "root": "%USERPROFILE%\\.workbuddy",
+                "enabled": True,
+            },
+        ],
         "history_window_days": 7,
-        "max_events_per_cycle": 100,
-        "upload_batch_size": 50,
+        "max_events_per_cycle": 500,
+        "upload_batch_size": 100,
         "evidence_mode": "structured_projection",
-        "agent_type": "codex",
         "agent_version": COLLECTOR_CLIENT_VERSION,
         "protocol_version": COLLECTOR_PROTOCOL_VERSION,
     }
@@ -55,6 +71,8 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
         archive.write(APP_ROOT / "sensitivity.py", "app/sensitivity.py")
         for path in sorted((APP_ROOT / "collector_client").glob("*.py")):
             archive.write(path, f"app/collector_client/{path.name}")
+        for path in sorted((APP_ROOT / "collector_client" / "sources").glob("*.py")):
+            archive.write(path, f"app/collector_client/sources/{path.name}")
     checksum = hashlib.sha256(package_path.read_bytes()).hexdigest()
     return {
         "filename": "agent-observer-windows.zip",

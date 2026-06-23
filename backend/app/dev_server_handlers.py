@@ -56,11 +56,15 @@ def _signals_query_options(raw_path: str) -> dict:
     query = parse_qs(urlparse(raw_path).query)
     options = {
         "window": _query_one(query, "window", "all"),
+        "start_at": _query_one(query, "start_at"),
+        "end_at": _query_one(query, "end_at"),
         "page": _query_int(query, "page", 1),
         "page_size": _query_int(query, "page_size", 20),
     }
     if _query_one(query, "workspace_query"):
         options["workspace_query"] = _query_one(query, "workspace_query")
+    if _query_one(query, "agent_type"):
+        options["agent_type"] = _query_one(query, "agent_type")
     return options
 
 
@@ -72,12 +76,24 @@ def _conversations_query_options(raw_path: str) -> dict:
         "end_at": _query_one(query, "end_at"),
         "prompt_query": _query_one(query, "prompt_query"),
         "response_query": _query_one(query, "response_query"),
+        "agent_type": _query_one(query, "agent_type"),
+        "source_id": _query_one(query, "source_id"),
         "page": _query_int(query, "page", 1),
         "page_size": _query_int(query, "page_size", 50),
     }
     if _query_one(query, "workspace_query"):
         options["workspace_query"] = _query_one(query, "workspace_query")
     return options
+
+
+def _summary_query_options(raw_path: str, default_window: str) -> dict:
+    query = parse_qs(urlparse(raw_path).query)
+    return {
+        "window": _query_one(query, "window", default_window) or default_window,
+        "agent_type": _query_one(query, "agent_type"),
+        "start_at": _query_one(query, "start_at"),
+        "end_at": _query_one(query, "end_at"),
+    }
 
 
 def _path_part(path: str, index: int) -> str:
@@ -91,8 +107,7 @@ def handle_get(handler) -> None:
             if path == "/api/collectors":
                 return handler._json(200, {"collectors": list_collectors(conn)})
             if path == "/api/dashboard/summary":
-                query = parse_qs(urlparse(handler.path).query)
-                return handler._json(200, get_dashboard_summary(conn, window=_query_one(query, "window", "1h") or "1h"))
+                return handler._json(200, get_dashboard_summary(conn, **_summary_query_options(handler.path, "1h")))
             if path.startswith("/api/collectors/") and path.endswith("/enrichments/next"):
                 try:
                     return handler._json(200, get_next_collector_enrichment(conn, path.split("/")[3]))
@@ -111,11 +126,10 @@ def handle_get(handler) -> None:
                 except LookupError:
                     return handler._json(404, {"error": "conversation not found"})
             if path == "/api/usage/summary":
-                query = parse_qs(urlparse(handler.path).query)
-                return handler._json(200, get_usage_summary(conn, window=(query.get("window") or ["24h"])[0]))
+                return handler._json(200, get_usage_summary(conn, **_summary_query_options(handler.path, "24h")))
             if path == "/api/risks/summary":
                 query = parse_qs(urlparse(handler.path).query)
-                return handler._json(200, get_risk_summary(conn, mode=_query_one(query, "mode", "summary") or "summary", window=_query_one(query, "window", "24h") or "24h"))
+                return handler._json(200, get_risk_summary(conn, mode=_query_one(query, "mode", "summary") or "summary", **_summary_query_options(handler.path, "24h")))
             if path == "/api/validation/minimum-experiment":
                 return handler._json(200, run_minimum_validation_experiment(conn))
             if path == "/api/policy":

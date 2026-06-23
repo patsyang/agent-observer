@@ -1,4 +1,0 @@
-{
-  "schema": "agentic-small-scope/v1",
-  "required": ["goal", "change_type", "observable_signal", "allowed_files", "forbidden_areas", "requires_repro", "verification_commands", "upgrade_triggers", "max_components", "data_model_change_allowed", "privacy_change_allowed"]
-}

@@ -89,14 +89,19 @@ def projection_preview(
 
 
 def source_event_type(source_specific: dict[str, Any]) -> str:
-    value = source_specific.get("codex_event_type") or source_specific.get("event_type") or "unknown"
+    value = (
+        source_specific.get("event_type")
+        or source_specific.get("codex_event_type")
+        or source_specific.get("workbuddy_event_type")
+        or "unknown"
+    )
     return str(value)
 
 
 def source_label(source_refs: dict[str, Any]) -> str:
     if collector_id := source_refs.get("collector_id"):
         return f"采集器 {short_ref(str(collector_id))}"
-    base = "Codex 会话"
+    base = "Agent 会话"
     if conversation_ref := source_refs.get("conversation_ref"):
         base = f"{base} {short_ref(str(conversation_ref))}"
     elif source_key := source_refs.get("source_key"):
@@ -190,6 +195,8 @@ def _role_label(role: str) -> str:
 def _activity_label(value: str) -> str:
     return {
         "codex_turn": "Codex 对话",
+        "agent_turn": "Agent 对话",
+        "workbuddy_turn": "WorkBuddy 对话",
         "bug_fix": "缺陷修复",
         "implementation": "实现开发",
         "test_run": "测试运行",
@@ -255,9 +262,9 @@ def _category_risk_label(category: str) -> str:
 
 def _content_name(category: str) -> str:
     return {
-        "codex_prompt": "用户 Prompt",
-        "codex_message": "Codex 消息",
-        "codex_reasoning": "推理片段",
+        "agent_prompt": "用户 Prompt",
+        "agent_response": "Agent 消息",
+        "agent_reasoning": "推理片段",
     }.get(category, "内容事件")
 
 
@@ -273,7 +280,7 @@ def _low_evidence_preview(projection: dict[str, Any]) -> str:
     keys = payload_keys or observed_keys
     if keys:
         pieces.append(f"可用字段 {', '.join(keys[:6])}")
-    return "未归类 Codex 事件：" + "，".join(pieces)
+    return "未归类 Agent 事件：" + "，".join(pieces)
 
 
 def _string_list(value: Any) -> list[str]:
