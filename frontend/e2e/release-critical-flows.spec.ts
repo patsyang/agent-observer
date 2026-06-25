@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import { expect, test, type APIRequestContext } from '@playwright/test';
-import { enableEnrichment } from './support/api';
+import { enableEnrichment, runProcessingJobs } from './support/api';
 import { E2E_API_BASE } from './support/urls';
 
 interface E2ESignal {
@@ -201,6 +201,7 @@ async function runStartUntilWaiting(outputDir: string): Promise<string> {
 
 test('release critical flows use packaged collector telemetry and DB-backed validation', async ({ page, request }, testInfo) => {
   const { collectorId, outputDir } = await downloadAndRunCollector(request, testInfo.outputPath('collector-package'));
+  await runProcessingJobs(request);
 
   const conversationsResponse = await request.get(`${E2E_API_BASE}/api/conversations?window=all`);
   const conversations = await conversationsResponse.json();
@@ -236,6 +237,7 @@ test('release critical flows use packaged collector telemetry and DB-backed vali
   });
   expect(enrichment.ok()).toBeTruthy();
   childProcess.execFileSync('cmd.exe', ['/d', '/s', '/c', 'agent-observer.cmd run-once'], { cwd: outputDir, encoding: 'utf-8' });
+  await runProcessingJobs(request);
 
   const currentPolicy = await (await request.get(`${E2E_API_BASE}/api/policy`)).json();
   const disabled = await request.patch(`${E2E_API_BASE}/api/policy`, {

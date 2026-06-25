@@ -7,6 +7,7 @@ import pytest
 from app.db.connection import connect
 from app.facts.service import get_fact_detail, query_facts
 from app.ingest.service import ingest_telemetry
+from app.telemetry_batches.service import get_batch_status
 
 
 def _batch(batch_id: str = "batch-001") -> dict:
@@ -87,7 +88,11 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
             "select protocol_version, agent_version from telemetry_batches where batch_id = 'batch-001'"
         ).fetchone()
 
-    assert result == {"batch_id": "batch-001", "accepted": 2, "duplicates": 0}
+    assert result["batch_id"] == "batch-001"
+    assert result["accepted"] == 2
+    assert result["duplicates"] == 0
+    assert result["processing_jobs_queued"] == 1
+    assert result["processing_job_ids"] == ["behavior_signal_update:risk:destructive_operation"]
     assert facts["total"] == 2
     assert facts["limit"] == 50
     assert facts["offset"] == 0
@@ -125,7 +130,13 @@ def test_duplicate_batch_is_idempotent(tmp_path):
         projection_count = conn.execute("select count(*) from evidence_projections").fetchone()[0]
 
     assert first["accepted"] == 2
-    assert second == {"batch_id": "batch-001", "accepted": 0, "duplicates": 2}
+    assert second == {
+        "batch_id": "batch-001",
+        "accepted": 0,
+        "duplicates": 2,
+        "processing_jobs_queued": 0,
+        "processing_job_ids": [],
+    }
     assert fact_count == 2
     assert projection_count == 3
 
@@ -191,7 +202,7 @@ def test_source_event_id_is_idempotent_per_collector(tmp_path):
     assert projection_count == 6
 
 
-def test_low_evidence_fact_stays_queryable_when_error_signal_is_built(tmp_path):
+def test_low_evidence_fact_stays_queryable_before_async_signal_worker_runs(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(conn, _batch())
         result = query_facts(conn, quality="low")
@@ -201,4 +212,16 @@ def test_low_evidence_fact_stays_queryable_when_error_signal_is_built(tmp_path):
     assert result["facts"][0]["fact_id"] == "event-low-001"
     assert result["facts"][0]["quality"] == "low"
     assert result["facts"][0]["promoted_to_signal"] is False
-    assert signal_count >= 1
+    assert signal_count == 0
+
+
+def test_batch_status_reports_accepted_or_missing(tmp_path):
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, _batch())
+        accepted = get_batch_status(conn, "batch-001")
+        missing = get_batch_status(conn, "missing-batch")
+
+    assert accepted["status"] == "accepted"
+    assert accepted["accepted_count"] == 2
+    assert accepted["duplicate_count"] == 0
+    assert missing == {"batch_id": "missing-batch", "status": "missing"}

@@ -199,7 +199,19 @@ a {
 }
 
 .topbar {
+  align-items: flex-start;
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
   margin-bottom: 12px;
+}
+
+.topbar-status-slot {
+  align-items: center;
+  display: flex;
+  justify-content: flex-end;
+  min-height: 28px;
+  padding-top: 2px;
 }
 
 .topbar h1 {
@@ -294,6 +306,42 @@ a {
   font-size: 12px;
   line-height: 1.35;
   margin-top: 5px;
+}
+
+.processing-status {
+  align-items: center;
+  align-self: center;
+  background: #f8faf8;
+  border: 1px solid #d7ddd2;
+  border-radius: 999px;
+  display: inline-flex;
+  gap: 6px;
+  justify-self: end;
+  padding: 4px 8px;
+  white-space: nowrap;
+}
+
+.context-bar .processing-status {
+  margin-top: 0;
+}
+
+.context-bar .processing-status span,
+.processing-status span {
+  color: #1d2939;
+  display: inline;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.2;
+  margin: 0;
+}
+
+.processing-status small {
+  color: #667085;
+  font-size: 11px;
+}
+
+.processing-status.failed {
+  border-color: #f04438;
 }
 
 .context-actions,
@@ -1960,6 +2008,11 @@ textarea {
 .usage-trend-grid {
   fill: none;
   stroke: #d7ddd2;
+  stroke-width: 1;
+}
+
+.usage-trend-axis-tick path {
+  stroke: #aab4a5;
   stroke-width: 1;
 }
 

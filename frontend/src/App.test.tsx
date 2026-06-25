@@ -22,7 +22,7 @@ describe('App shell', () => {
           });
         }
         if (url.includes('/api/conversations')) {
-          return Response.json({ conversations: [], total: 0, page: 1, page_size: 50, has_more: false, window: '1h' });
+          return Response.json({ conversations: [], total: 0, page: 1, page_size: 20, has_more: false, window: '1h' });
         }
         if (url.includes('/api/signals')) {
           return Response.json({ signals: [] });
@@ -50,6 +50,9 @@ describe('App shell', () => {
         if (url.includes('/api/risks/summary')) {
           return Response.json({ signals: [] });
         }
+        if (url.endsWith('/api/processing/status')) {
+          return Response.json({ state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null });
+        }
         if (url.endsWith('/api/policy')) {
           return Response.json({
             policy_version: 1,
@@ -57,7 +60,8 @@ describe('App shell', () => {
             enrichment_mode: 'enabled',
             collection_interval_seconds: 5,
             max_events_per_cycle: 500,
-            upload_batch_size: 100
+            upload_batch_size: 100,
+            worker_poll_interval_seconds: 10
           });
         }
         if (url.endsWith('/api/audit/recent')) {
@@ -79,7 +83,7 @@ describe('App shell', () => {
     const nav = screen.getByRole('navigation', { name: '主导航' });
     await user.click(within(nav).getByRole('button', { name: /采集器 状态与策略/ }));
     expect(await screen.findByText('还没有采集器注册。请从“下载与策略配置”下载 Windows 包并运行 start。')).toBeInTheDocument();
-    await user.click(screen.getByRole('button', { name: '接入配置' }));
+    await user.click(screen.getByRole('button', { name: '全局配置' }));
     expect(await screen.findByLabelText('下载与策略配置')).toBeInTheDocument();
     expect(screen.queryByText(/login/i)).not.toBeInTheDocument();
   });

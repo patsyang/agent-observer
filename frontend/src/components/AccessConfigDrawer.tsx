@@ -6,7 +6,8 @@ import { formatNumber } from '../utils/numberFormat';
 const DEFAULT_PERFORMANCE = {
   collection_interval_seconds: 5,
   max_events_per_cycle: 500,
-  upload_batch_size: 100
+  upload_batch_size: 100,
+  worker_poll_interval_seconds: 10
 };
 
 type LoadState =
@@ -24,6 +25,7 @@ interface Props {
     collection_interval_seconds: number;
     max_events_per_cycle: number;
     upload_batch_size: number;
+    worker_poll_interval_seconds: number;
   }) => Promise<EffectivePolicy>;
   loadAudit: () => Promise<RecentAuditSummary>;
   downloadUrl: string;
@@ -44,7 +46,8 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
         setPerformance({
           collection_interval_seconds: policy.collection_interval_seconds,
           max_events_per_cycle: policy.max_events_per_cycle,
-          upload_batch_size: policy.upload_batch_size
+          upload_batch_size: policy.upload_batch_size,
+          worker_poll_interval_seconds: policy.worker_poll_interval_seconds
         });
         setState({ status: 'ready', packageConfig, policy, audit });
       })
@@ -61,7 +64,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
       <aside className="drawer" aria-label="下载与策略配置" data-testid="access-config-drawer">
         <header className="drawer-header">
           <div>
-            <span>接入配置</span>
+            <span>全局配置</span>
             <h2>Windows collector 客户端</h2>
             <p>下载包可直接使用；只有改策略时才需要保存。</p>
           </div>
@@ -75,7 +78,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             <dd>{state.status === 'ready' ? state.packageConfig.server_url : 'http://127.0.0.1:8765'}</dd>
           </div>
           <div>
-            <dt>接入策略版本</dt>
+            <dt>策略版本</dt>
             <dd>{state.status === 'ready' ? `v${formatNumber(state.policy.policy_version)}` : '-'}</dd>
           </div>
         </dl>
@@ -104,7 +107,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
           <section className="drawer-section hero-section" aria-label="客户端下载">
             <div>
               <h3>下载客户端</h3>
-              <p>仅下载客户端时不需要保存接入策略。解压后运行同目录的配置和入口文件。</p>
+              <p>仅下载客户端时不需要保存全局配置。解压后运行同目录的配置和入口文件。</p>
             </div>
             <a className="primary download-button" data-testid="download-client" href={downloadUrl} download="agent-observer-windows.zip">
               下载 Windows 客户端
@@ -177,6 +180,27 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             <p>保存后对新版在线客户端生效；客户端会在下一次心跳或下一轮采集前应用。</p>
           </section>
 
+          <section className="drawer-section" aria-label="服务端处理">
+            <div className="section-title-row">
+              <h3>服务端处理</h3>
+            </div>
+            <div className="performance-grid">
+              <label>
+                <span>Worker 轮询间隔</span>
+                <input
+                  aria-label="Worker 轮询间隔"
+                  max={300}
+                  min={2}
+                  type="number"
+                  value={performance.worker_poll_interval_seconds}
+                  onChange={(event) => setPerformance({ ...performance, worker_poll_interval_seconds: Number(event.target.value) })}
+                />
+                <small>秒</small>
+              </label>
+            </div>
+            <p>保存后后端 worker 会在下一次空闲轮询前读取最新策略。</p>
+          </section>
+
           <section className="drawer-section" aria-label="采集内容">
             <div className="section-title-row">
               <h3>采集内容</h3>
@@ -201,11 +225,11 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
             </label>
             <div className="drawer-actions">
               <button className="primary" data-testid="save-policy" disabled={saveState === 'saving'} type="submit">
-                {saveState === 'saving' ? '正在保存接入策略' : '保存并下发配置'}
+                {saveState === 'saving' ? '正在保存全局配置' : '保存并下发配置'}
               </button>
               <span>新版在线客户端将在下一次心跳或下一轮采集前生效。</span>
             </div>
-            {saveState === 'saved' && <p role="status">接入策略已保存为 v{formatNumber(state.policy.policy_version)}</p>}
+            {saveState === 'saved' && <p role="status">全局配置已保存为 v{formatNumber(state.policy.policy_version)}</p>}
             {saveState === 'error' && <p role="alert">策略更新失败。请重新打开配置后再试。</p>}
           </section>
 

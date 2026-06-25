@@ -59,6 +59,7 @@ export interface EffectivePolicy {
   collection_interval_seconds: number;
   max_events_per_cycle: number;
   upload_batch_size: number;
+  worker_poll_interval_seconds: number;
 }
 
 export interface PolicyUpdatePayload {
@@ -67,6 +68,7 @@ export interface PolicyUpdatePayload {
   collection_interval_seconds: number;
   max_events_per_cycle: number;
   upload_batch_size: number;
+  worker_poll_interval_seconds: number;
 }
 
 export interface AuditEvent {
@@ -81,4 +83,10 @@ export interface AuditEvent {
 export interface RecentAuditSummary {
   latest: string;
   events: AuditEvent[];
+}
+
+export interface ProcessingStatus {
+  state: 'idle' | 'pending' | 'running' | 'failed';
+  counts: Record<'pending' | 'running' | 'succeeded' | 'failed', number>;
+  latest_failed: { job_id: string; last_error: string; updated_at: string } | null;
 }

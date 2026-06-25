@@ -21,8 +21,10 @@ from app.evidence_enrichment.service import (
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
+from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
 from app.risks.service import get_risk_summary
-from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, rebuild_signals
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read
+from app.telemetry_batches.service import get_batch_status
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
 
@@ -34,6 +36,7 @@ def register_routes(app, http_exception, file_response) -> None:
     register_conversation_routes(app, http_exception)
     register_policy_routes(app, http_exception)
     register_signal_routes(app, http_exception)
+    register_processing_routes(app)
     register_enrichment_routes(app, http_exception)
     register_summary_routes(app)
     register_package_routes(app, file_response)
@@ -99,6 +102,11 @@ def register_ingest_routes(app, http_exception) -> None:
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
 
+    @app.get("/api/telemetry/batches/{batch_id}")
+    def api_batch_status(batch_id: str):
+        with connect() as conn:
+            return get_batch_status(conn, batch_id)
+
 
 def register_conversation_routes(app, http_exception) -> None:
     @app.get("/api/conversations")
@@ -112,7 +120,7 @@ def register_conversation_routes(app, http_exception) -> None:
         agent_type: str | None = None,
         source_id: str | None = None,
         page: int = 1,
-        page_size: int = 50,
+        page_size: int = 20,
     ):
         with connect() as conn:
             return query_conversations(
@@ -200,7 +208,7 @@ def register_signal_routes(app, http_exception) -> None:
     @app.post("/api/signals/rebuild")
     def api_rebuild_signals(payload: dict):
         with connect() as conn:
-            return rebuild_signals(conn, reason=payload.get("reason", "api"))
+            return enqueue_global_signal_rebuild(conn, reason=payload.get("reason", "api"))
 
     @app.post("/api/signals/{signal_id}/read")
     def api_mark_signal_read(signal_id: str):
@@ -219,6 +227,18 @@ def register_signal_routes(app, http_exception) -> None:
                 raise http_exception(status_code=404, detail="signal not found") from exc
             except ValueError as exc:
                 raise http_exception(status_code=400, detail=str(exc)) from exc
+
+
+def register_processing_routes(app) -> None:
+    @app.get("/api/processing/status")
+    def api_processing_status():
+        with connect() as conn:
+            return processing_status(conn)
+
+    @app.post("/api/processing/jobs/run-once")
+    def api_processing_run_once():
+        with connect() as conn:
+            return run_next_job(conn, reason="api-run-once")
 
 
 def register_enrichment_routes(app, http_exception) -> None:

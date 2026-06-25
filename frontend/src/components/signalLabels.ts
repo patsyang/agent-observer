@@ -58,7 +58,7 @@ export function usageSummaryText(summary: {
   if (summary.no_usage_reason) return summary.no_usage_reason;
   const cached = summary.cached_units ? `，缓存命中 ${formatNumber(summary.cached_units)}` : '';
   const rate = typeof summary.cache_hit_rate === 'number' ? `，命中率 ${(summary.cache_hit_rate * 100).toFixed(1)}%` : '';
-  return `有效 token ${formatNumber(summary.effective_units)}${cached}${rate}`;
+  return `实际计算 token ${formatNumber(summary.effective_units)}${cached}${rate}`;
 }
 
 export function scopeText(scope: Record<string, unknown>): string {

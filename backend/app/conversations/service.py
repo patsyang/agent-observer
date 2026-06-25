@@ -24,7 +24,7 @@ def query_conversations(
     agent_type: str | None = None,
     source_id: str | None = None,
     page: int = 1,
-    page_size: int = 50,
+    page_size: int = 20,
 ) -> dict:
     activity_rows = _conversation_rows(
         conn,
@@ -34,8 +34,42 @@ def query_conversations(
         agent_type=agent_type,
         source_id=source_id,
     )
+    grouped = _group_by_conversation(activity_rows)
+    current_page = max(1, int(page or 1))
+    limit = max(1, min(int(page_size or 20), 200))
+    offset = (current_page - 1) * limit
+    has_text_filter = any((value or "").strip() for value in (prompt_query, response_query, workspace_query))
+    if not has_text_filter:
+        refs = _eligible_conversation_refs(grouped)
+        detail_cache: dict[tuple[str, str], list[sqlite3.Row]] = {}
+        page_items = [
+            _public_summary(item)
+            for ref in refs[offset : offset + limit]
+            if (
+                item := _summary_for_ref(
+                    conn,
+                    ref,
+                    agent_type=agent_type,
+                    source_id=source_id,
+                    detail_cache=detail_cache,
+                )
+            )
+        ]
+        return {
+            "conversations": page_items,
+            "total": len(refs),
+            "page": current_page,
+            "page_size": limit,
+            "has_more": offset + len(page_items) < len(refs),
+            "window": window,
+            "start_at": start_at,
+            "end_at": end_at,
+            "agent_type": agent_type,
+            "source_id": source_id,
+        }
+
     conversations = []
-    for ref in _group_by_conversation(activity_rows):
+    for ref in grouped:
         rows = _summary_rows(conn, ref, agent_type=agent_type, source_id=source_id)
         if rows:
             conversations.append(_summary(conn, ref, rows))
@@ -47,9 +81,6 @@ def query_conversations(
         workspace_query=workspace_query,
     )
     conversations.sort(key=lambda item: (item["last_event_at"] or "", item["conversation_ref"]), reverse=True)
-    current_page = max(1, int(page or 1))
-    limit = max(1, min(int(page_size or 50), 200))
-    offset = (current_page - 1) * limit
     page_items = [_public_summary(item) for item in conversations[offset : offset + limit]]
     return {
         "conversations": page_items,
@@ -64,11 +95,38 @@ def query_conversations(
         "source_id": source_id,
     }
 
+def _summary_for_ref(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    *,
+    agent_type: str | None,
+    source_id: str | None,
+    detail_cache: dict[tuple[str, str], list[sqlite3.Row]] | None = None,
+) -> dict | None:
+    rows = _summary_rows(conn, conversation_ref, agent_type=agent_type, source_id=source_id, detail_cache=detail_cache)
+    if not rows:
+        return None
+    item = _summary(conn, conversation_ref, rows)
+    return item if _has_input_or_output(item) else None
+
+def _eligible_conversation_refs(grouped: dict[str, list[sqlite3.Row]]) -> list[str]:
+    refs = [ref for ref, rows in grouped.items() if _candidate_has_input_or_output(rows)]
+    return sorted(refs, key=lambda ref: (_candidate_last_event(grouped[ref]), ref), reverse=True)
+
+def _candidate_has_input_or_output(rows: list[sqlite3.Row]) -> bool:
+    has_prompt = any(row["category"] in PROMPT_CATEGORIES for row in rows)
+    has_response = any(row["category"] in RESPONSE_CATEGORIES for row in rows)
+    has_usage = any(row["fact_type"] == "usage" for row in rows)
+    return (has_prompt and has_response) or has_usage
+
+def _candidate_last_event(rows: list[sqlite3.Row]) -> str:
+    return max((str(row["occurred_at"] or "") for row in rows), default="")
+
 def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> dict:
     rows = _detail_rows(conn, conversation_ref)
     if not rows:
         raise LookupError(conversation_ref)
-    summary = _public_summary(_summary(conn, conversation_ref, rows))
+    summary = _public_summary(_summary(conn, conversation_ref, rows, allow_usage_lookup=True))
     return {
         **summary,
         "messages": [message for row in rows if (message := _message(row)) and message["content"]],
@@ -101,7 +159,10 @@ def _turn_detail_rows(conn: sqlite3.Connection, turn: dict[str, object]) -> list
     base_ref = str(turn["base_ref"])
     path_hash = str(turn["source_path_hash"])
     start_line = int(turn["start_line"])
-    rows = conn.execute(
+    return _turn_rows(_base_path_detail_rows(conn, base_ref, path_hash), start_line)
+
+def _base_path_detail_rows(conn: sqlite3.Connection, base_ref: str, path_hash: str) -> list[sqlite3.Row]:
+    return conn.execute(
         """
         select f.*, p.projection_id, p.category as projection_category,
                p.projection_json, p.upload_raw, p.raw_content
@@ -119,6 +180,8 @@ def _turn_detail_rows(conn: sqlite3.Connection, turn: dict[str, object]) -> list
         """,
         (base_ref, path_hash),
     ).fetchall()
+
+def _turn_rows(rows: list[sqlite3.Row], start_line: int) -> list[sqlite3.Row]:
     end_line = _next_prompt_line(rows, start_line)
     return [
         row
@@ -172,25 +235,36 @@ def _conversation_rows(
     where = " and ".join(clauses)
     return conn.execute(
         f"""
-        select f.*, p.projection_id, p.category as projection_category,
-               p.projection_json, p.upload_raw, p.raw_content
+        select f.fact_id, f.fact_type, f.conversation_ref, f.session_ref, f.source_path_hash,
+               f.source_refs_json, f.category, f.occurred_at
         from observed_facts f
-        left join evidence_projections p on p.projection_id = (
-          select projection_id from evidence_projections
-          where fact_id = f.fact_id
-          order by projection_id
-          limit 1
-        )
         where {where}
         order by f.occurred_at desc, f.fact_id
         """,
         params,
     ).fetchall()
 
-def _summary_rows(conn: sqlite3.Connection, conversation_ref: str, *, agent_type: str | None, source_id: str | None) -> list[sqlite3.Row]:
+def _summary_rows(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    *,
+    agent_type: str | None,
+    source_id: str | None,
+    detail_cache: dict[tuple[str, str], list[sqlite3.Row]] | None = None,
+) -> list[sqlite3.Row]:
     turn = _parse_turn_ref(conversation_ref)
     if turn is not None:
-        return _filter_rows(_turn_detail_rows(conn, turn), agent_type=agent_type, source_id=source_id)
+        base_ref = str(turn["base_ref"])
+        path_hash = str(turn["source_path_hash"])
+        start_line = int(turn["start_line"])
+        if detail_cache is None:
+            rows = _base_path_detail_rows(conn, base_ref, path_hash)
+        else:
+            cache_key = (base_ref, path_hash)
+            if cache_key not in detail_cache:
+                detail_cache[cache_key] = _base_path_detail_rows(conn, base_ref, path_hash)
+            rows = detail_cache[cache_key]
+        return _filter_rows(_turn_rows(rows, start_line), agent_type=agent_type, source_id=source_id)
     clauses = [
         "coalesce(nullif(f.conversation_ref, ''), nullif(f.session_ref, ''), f.fact_id) = ?",
         "f.fact_type != 'collector_health'",
@@ -247,7 +321,13 @@ def _group_by_conversation(rows: list[sqlite3.Row]) -> dict[str, list[sqlite3.Ro
             grouped.setdefault(ref, []).append(row)
     return grouped
 
-def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.Row]) -> dict:
+def _summary(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    rows: list[sqlite3.Row],
+    *,
+    allow_usage_lookup: bool = False,
+) -> dict:
     ordered = sorted(rows, key=lambda row: (row["occurred_at"], row["fact_id"]))
     prompt = _first_text(ordered, PROMPT_CATEGORIES, {"user"})
     response = _first_text(ordered, RESPONSE_CATEGORIES, {"assistant"})
@@ -269,7 +349,7 @@ def _summary(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3
         "_response_search_text": response_search,
         "event_count": len(ordered),
         "hit_count": sum(1 for row in ordered if row["fact_type"] in {"error", "risk", "tool", "unknown"}),
-        "token_usage": _usage(conn, conversation_ref, ordered),
+        "token_usage": _usage(conn, conversation_ref, ordered, allow_lookup=allow_usage_lookup),
     }
 
 def _has_input_or_output(item: dict) -> bool:
@@ -355,7 +435,13 @@ def _tool_context(projection: dict) -> dict | None:
     }
 
 
-def _usage(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.Row] | None = None) -> dict:
+def _usage(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    rows: list[sqlite3.Row] | None = None,
+    *,
+    allow_lookup: bool = True,
+) -> dict:
     if rows is not None:
         fact_ids = [row["fact_id"] for row in rows if row["fact_type"] == "usage"]
         if fact_ids:
@@ -369,6 +455,8 @@ def _usage(conn: sqlite3.Connection, conversation_ref: str, rows: list[sqlite3.R
                 fact_ids,
             ).fetchall()
             return _usage_payload(usage_samples)
+        if not allow_lookup:
+            return _usage_payload([])
     rows = conn.execute(
         """
         select us.*

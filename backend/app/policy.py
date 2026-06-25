@@ -10,6 +10,7 @@ MANAGEMENT_ACTOR = "fixed-management-account"
 DEFAULT_COLLECTION_INTERVAL_SECONDS = 5
 DEFAULT_MAX_EVENTS_PER_CYCLE = 500
 DEFAULT_UPLOAD_BATCH_SIZE = 100
+DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 10
 
 
 def _now() -> str:
@@ -25,6 +26,7 @@ def get_effective_policy(conn: sqlite3.Connection) -> dict:
         "collection_interval_seconds": row["collection_interval_seconds"],
         "max_events_per_cycle": row["max_events_per_cycle"],
         "upload_batch_size": row["upload_batch_size"],
+        "worker_poll_interval_seconds": row["worker_poll_interval_seconds"],
     }
 
 
@@ -41,6 +43,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         "collection_interval_seconds",
         "max_events_per_cycle",
         "upload_batch_size",
+        "worker_poll_interval_seconds",
     }:
         raise ValueError(f"unsupported_policy_field:{sorted(extra_fields)[0]}")
 
@@ -66,6 +69,12 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             20,
             500,
         ),
+        "worker_poll_interval_seconds": _bounded_int(
+            payload.get("worker_poll_interval_seconds", current["worker_poll_interval_seconds"]),
+            "worker_poll_interval_seconds",
+            2,
+            300,
+        ),
     }
     conn.execute(
         """
@@ -74,7 +83,8 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             enrichment_mode = ?,
             collection_interval_seconds = ?,
             max_events_per_cycle = ?,
-            upload_batch_size = ?
+            upload_batch_size = ?,
+            worker_poll_interval_seconds = ?
         where id = 1
         """,
         (
@@ -83,6 +93,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             next_policy["collection_interval_seconds"],
             next_policy["max_events_per_cycle"],
             next_policy["upload_batch_size"],
+            next_policy["worker_poll_interval_seconds"],
         ),
     )
     _write_audit(
@@ -98,6 +109,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             "collection_interval_seconds": next_policy["collection_interval_seconds"],
             "max_events_per_cycle": next_policy["max_events_per_cycle"],
             "upload_batch_size": next_policy["upload_batch_size"],
+            "worker_poll_interval_seconds": next_policy["worker_poll_interval_seconds"],
             "reason_code": "operator_policy_update",
         },
     )
@@ -130,7 +142,7 @@ def recent_audit(conn: sqlite3.Connection, limit: int = 5) -> dict:
 
 def _audit_summary(event: dict) -> str:
     labels = {
-        "policy_changed": "接入策略已保存",
+        "policy_changed": "全局配置已保存",
         "display_label_changed": "采集器显示名已更新",
         "collector_removed": "采集器已移除",
     }

@@ -1,6 +1,7 @@
 import { expect, test } from '@playwright/test';
 
 import { E2E_API_BASE } from './support/urls';
+import { runProcessingJobs } from './support/api';
 
 test('operator reviews behavior risk signals with grouped evidence', async ({ page, request }) => {
   const suffix = Date.now();
@@ -81,8 +82,8 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
       items
     }
   });
-  const rebuilt = await request.post(`${E2E_API_BASE}/api/signals/rebuild`, { data: { reason: 'e2e-signal' } });
-  const body = await rebuilt.json();
+  await runProcessingJobs(request);
+  const body = await (await request.get(`${E2E_API_BASE}/api/signals?window=all&page_size=100`)).json();
   const toolSignals = body.signals.filter((item: { signal_kind: string }) => item.signal_kind === 'tool_execution_failure');
   expect(toolSignals).toHaveLength(1);
   expect(toolSignals[0].occurrence_count).toBe(3);

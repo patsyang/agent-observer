@@ -32,6 +32,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
                 "collection_interval_seconds": 8,
                 "max_events_per_cycle": 900,
                 "upload_batch_size": 120,
+                "worker_poll_interval_seconds": 12,
             },
         )
         audit = recent_audit(conn)
@@ -42,6 +43,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
     assert updated["collection_interval_seconds"] == 8
     assert updated["max_events_per_cycle"] == 900
     assert updated["upload_batch_size"] == 120
+    assert updated["worker_poll_interval_seconds"] == 12
     assert audit["events"][0]["action"] == "policy_changed"
     assert audit["events"][0]["actor"] == "fixed-management-account"
     assert audit["events"][0]["metadata"] == {
@@ -53,6 +55,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
         "reason_code": "operator_policy_update",
         "raw_upload_mode": "always_on",
         "upload_batch_size": 120,
+        "worker_poll_interval_seconds": 12,
     }
 
 
@@ -75,6 +78,9 @@ def test_policy_update_requires_current_version_and_rejects_unknown_fields(tmp_p
 
         with pytest.raises(ValueError, match="upload_batch_size_out_of_range"):
             update_effective_policy(conn, {"expected_version": 1, "upload_batch_size": 501})
+
+        with pytest.raises(ValueError, match="worker_poll_interval_seconds_out_of_range"):
+            update_effective_policy(conn, {"expected_version": 1, "worker_poll_interval_seconds": 1})
 
 
 
@@ -108,6 +114,7 @@ def test_collector_policy_no_longer_exposes_raw_upload_override_state(tmp_path):
     assert heartbeat_result["effective_policy"]["collection_interval_seconds"] == 5
     assert heartbeat_result["effective_policy"]["max_events_per_cycle"] == 500
     assert heartbeat_result["effective_policy"]["upload_batch_size"] == 100
+    assert heartbeat_result["effective_policy"]["worker_poll_interval_seconds"] == 10
     assert "raw_upload_enabled" not in heartbeat_result["effective_policy"]
     assert "raw_upload_source" not in heartbeat_result["effective_policy"]
     assert "raw_upload_enabled" not in collector

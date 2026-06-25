@@ -6,6 +6,7 @@ from app.behavior_signals.service import get_signal_detail, handle_signal, list_
 from app.db.connection import connect
 from app.evidence_enrichment.service import get_enrichment_availability, request_enrichment
 from app.ingest.service import ingest_telemetry
+from app.processing.jobs import run_next_job
 
 
 def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
@@ -56,6 +57,8 @@ def _ingest(conn, items: list[dict]) -> None:
             "items": items,
         },
     )
+    while run_next_job(conn, reason="test")["processed"]:
+        pass
 
 
 def test_tool_execution_failure_is_explainable_signal(tmp_path):

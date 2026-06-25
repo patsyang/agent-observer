@@ -10,6 +10,7 @@ from app.db.connection import SOURCE_STATUSES, connect
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import update_effective_policy
+from app.processing.jobs import run_next_job
 from app.behavior_signals.service import list_signals
 from source_payloads import default_sources
 
@@ -345,6 +346,7 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
         assert "app/collector_client/cli.py" in names
         assert "app/collector_client/content_dedup.py" in names
         assert "app/collector_client/runtime.py" in names
+        assert "app/collector_client/upload_ack.py" in names
         assert "app/collector_client/source_reader.py" in names
         assert "app/collector_client/fact_mapper.py" in names
         assert "app/collector_client/version.py" in names
@@ -445,6 +447,8 @@ def test_collector_ingest_creates_chinese_facts_and_signal(tmp_path):
         _write_codex_fixture(codex_home)
         facts.extend(collect_facts("package-test", 1, "safe_probe", codex_home=codex_home))
         result = ingest_telemetry(conn, batch)
+        while run_next_job(conn, reason="test")["processed"]:
+            pass
         signals = list_signals(conn, window="all")
         rows = conn.execute("select category, summary from observed_facts order by fact_id").fetchall()
         categories = {row["category"] for row in rows}

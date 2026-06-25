@@ -15,6 +15,7 @@ from app.dev_server_handlers import (
     handle_patch,
     handle_post,
 )
+from app.processing.worker import start_processing_worker
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -55,4 +56,5 @@ def get_server_port() -> int:
 if __name__ == "__main__":
     with connect() as conn:
         get_dashboard_summary(conn, window="1h")
+    start_processing_worker()
     ThreadingHTTPServer(("127.0.0.1", get_server_port()), Handler).serve_forever()

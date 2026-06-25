@@ -11,6 +11,7 @@ import type {
   HandleSignalPayload,
   BehaviorSignalDetail,
   PolicyUpdatePayload,
+  ProcessingStatus,
   RecentAuditSummary,
   RiskSummary,
   SignalsResponse,
@@ -109,6 +110,10 @@ export function fetchRecentAudit(): Promise<RecentAuditSummary> {
   return readJson<RecentAuditSummary>('/api/audit/recent');
 }
 
+export function fetchProcessingStatus(): Promise<ProcessingStatus> {
+  return readJson<ProcessingStatus>('/api/processing/status');
+}
+
 export function clientPackageUrl(): string {
   return `${apiBase}/api/client-package/windows`;
 }
@@ -141,7 +146,7 @@ export function fetchConversations(
   if (filters.agent_type) params.set('agent_type', filters.agent_type);
   if (filters.source_id) params.set('source_id', filters.source_id);
   params.set('page', String(filters.page ?? 1));
-  params.set('page_size', String(filters.page_size ?? 50));
+  params.set('page_size', String(filters.page_size ?? 20));
   return readJson<ConversationsResponse>(`/api/conversations?${params.toString()}`);
 }
 

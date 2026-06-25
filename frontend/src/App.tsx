@@ -13,6 +13,7 @@ import {
   fetchConversations,
   fetchEnrichmentAvailability,
   fetchPolicy,
+  fetchProcessingStatus,
   fetchRecentAudit,
   fetchRiskSummary,
   fetchSignals,
@@ -85,7 +86,7 @@ export function App() {
         </section>
         <button className="primary full-width" data-testid="open-access-config" onClick={() => setDrawerOpen(true)}>
           <ActivitySquare aria-hidden="true" size={16} />
-          接入配置
+          全局配置
         </button>
         <div className="sidebar-dashboard-slot" id="dashboard-sidebar-slot" />
       </aside>
@@ -96,6 +97,7 @@ export function App() {
             <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : '采集器'}</h1>
             <p>围绕信号、会话输入输出和 collector 接入状态进行日常排查。</p>
           </div>
+          {view === 'dashboard' && <div className="topbar-status-slot" id="dashboard-topbar-status-slot" />}
         </header>
         {view === 'dashboard' && selectedSignalId === null && (
           <DashboardPage
@@ -103,6 +105,7 @@ export function App() {
             loadSignals={fetchSignals}
             loadUsageSummary={fetchUsageSummary}
             loadRiskSummary={fetchRiskSummary}
+            loadProcessingStatus={fetchProcessingStatus}
             onOpenSignal={setSelectedSignalId}
           />
         )}

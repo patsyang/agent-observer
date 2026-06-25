@@ -4,7 +4,8 @@ create table if not exists effective_policies (
   enrichment_mode text not null,
   collection_interval_seconds integer not null default 5,
   max_events_per_cycle integer not null default 500,
-  upload_batch_size integer not null default 100
+  upload_batch_size integer not null default 100,
+  worker_poll_interval_seconds integer not null default 10
 );
 
 create table if not exists collectors (
@@ -183,6 +184,21 @@ create table if not exists behavior_signals (
   updated_at text not null
 );
 
+create table if not exists processing_jobs (
+  job_id text primary key,
+  job_type text not null,
+  scope_type text not null,
+  scope_id text not null,
+  status text not null,
+  priority integer not null default 50,
+  attempts integer not null default 0,
+  last_error text not null default '',
+  created_at text not null,
+  updated_at text not null,
+  started_at text,
+  finished_at text
+);
+
 create table if not exists signal_decisions (
   signal_id text primary key,
   decision_state text not null,
@@ -228,3 +244,13 @@ create table if not exists enrichment_results (
   redaction_json text not null,
   created_at text not null
 );
+
+create index if not exists idx_observed_facts_effective_conversation_path_occurred
+  on observed_facts(
+    coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id),
+    source_path_hash,
+    occurred_at
+  );
+
+create index if not exists idx_usage_signals_conversation_id
+  on usage_signals(conversation_id);

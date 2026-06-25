@@ -19,7 +19,8 @@ const policy = {
   enrichment_mode: 'enabled' as const,
   collection_interval_seconds: 5,
   max_events_per_cycle: 500,
-  upload_batch_size: 100
+  upload_batch_size: 100,
+  worker_poll_interval_seconds: 10
 };
 
 const audit = {
@@ -35,7 +36,7 @@ describe('AccessConfigDrawer', () => {
       .fn()
       .mockResolvedValueOnce(audit)
       .mockResolvedValueOnce({
-        latest: '接入策略已保存，时间 2026-06-19T00:00:00+00:00',
+        latest: '全局配置已保存，时间 2026-06-19T00:00:00+00:00',
         events: []
       });
 
@@ -52,6 +53,7 @@ describe('AccessConfigDrawer', () => {
 
     expect(await screen.findByText('Windows collector 客户端')).toBeInTheDocument();
     expect(screen.getByText('采集性能')).toBeInTheDocument();
+    expect(screen.getByText('服务端处理')).toBeInTheDocument();
     expect(screen.getByText('采集内容')).toBeInTheDocument();
     expect(screen.getByText('v1')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: '下载 Windows 客户端' })).toHaveAttribute(
@@ -59,7 +61,7 @@ describe('AccessConfigDrawer', () => {
       '/api/client-package/windows'
     );
 
-    expect(screen.getByText(/仅下载客户端时不需要保存接入策略/)).toBeInTheDocument();
+    expect(screen.getByText(/仅下载客户端时不需要保存全局配置/)).toBeInTheDocument();
     expect(screen.getByText('0.3.0')).toBeInTheDocument();
     expect(screen.getByText('agent-observer-telemetry/v3')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '默认上传原始输入输出' })).not.toBeInTheDocument();
@@ -70,6 +72,8 @@ describe('AccessConfigDrawer', () => {
     await user.type(screen.getByLabelText('单轮采集上限'), '900');
     await user.clear(screen.getByLabelText('上传批量'));
     await user.type(screen.getByLabelText('上传批量'), '120');
+    await user.clear(screen.getByLabelText('Worker 轮询间隔'));
+    await user.type(screen.getByLabelText('Worker 轮询间隔'), '12');
     await user.click(screen.getByLabelText('允许本机补证任务'));
     await user.click(screen.getByRole('button', { name: '保存并下发配置' }));
 
@@ -79,10 +83,11 @@ describe('AccessConfigDrawer', () => {
       enrichment_mode: 'disabled',
       collection_interval_seconds: 8,
       max_events_per_cycle: 900,
-      upload_batch_size: 120
+      upload_batch_size: 120,
+      worker_poll_interval_seconds: 12
     });
-    expect(await screen.findByText('接入策略已保存为 v2')).toBeInTheDocument();
-    expect(screen.getByText(/接入策略已保存，时间/)).toBeInTheDocument();
+    expect(await screen.findByText('全局配置已保存为 v2')).toBeInTheDocument();
+    expect(screen.getByText(/全局配置已保存，时间/)).toBeInTheDocument();
   });
 
   it('restores performance defaults without changing enrichment mode', async () => {
@@ -95,7 +100,8 @@ describe('AccessConfigDrawer', () => {
           ...policy,
           collection_interval_seconds: 30,
           max_events_per_cycle: 1000,
-          upload_batch_size: 200
+          upload_batch_size: 200,
+          worker_poll_interval_seconds: 60
         }))}
         savePolicy={vi.fn(async () => policy)}
         loadAudit={vi.fn(async () => audit)}
@@ -109,6 +115,7 @@ describe('AccessConfigDrawer', () => {
     expect(screen.getByLabelText('采集间隔')).toHaveValue(5);
     expect(screen.getByLabelText('单轮采集上限')).toHaveValue(500);
     expect(screen.getByLabelText('上传批量')).toHaveValue(100);
+    expect(screen.getByLabelText('Worker 轮询间隔')).toHaveValue(10);
     expect(screen.getByLabelText('允许本机补证任务')).toBeChecked();
   });
 });

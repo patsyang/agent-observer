@@ -33,14 +33,14 @@ describe('UsageTrendChart', () => {
       />
     );
 
-    expect(screen.getByText(/不是瞬时消耗/)).toBeInTheDocument();
+    expect(screen.getByText(/包含左侧刻度，不包含右侧刻度/)).toBeInTheDocument();
     expect(screen.getByText(/每根柱覆盖 1 分钟/)).toBeInTheDocument();
     const legend = screen.getByLabelText('用量趋势图例');
     expect(legend).toContainElement(screen.getByText('缓存命中 token'));
-    expect(legend).toContainElement(screen.getByText('有效 token'));
+    expect(legend).toContainElement(screen.getByText('实际计算 token'));
     expect(legend.closest('.panel-header')).not.toBeNull();
-    expect(screen.getByText(/总输入Token 1,250,000 \/ 输出Token 109,200 \/ 有效Token 1,109,200 \/ 缓存 950,000（76.0%） \/ Credits 12.5/)).toBeInTheDocument();
-    expect(screen.getByLabelText('选择时间范围内有效 token 与缓存命中 token 柱状图')).toBeInTheDocument();
+    expect(screen.getByText(/总输入Token 1,250,000 \/ 输出Token 109,200 \/ 实际计算Token 1,109,200 \/ 缓存 950,000（76.0%） \/ Credits 12.5/)).toBeInTheDocument();
+    expect(screen.getByLabelText('选择时间范围内实际计算 token 与缓存命中 token 柱状图')).toBeInTheDocument();
     expect(screen.getByText('120')).toBeInTheDocument();
     expect(screen.getByText('60')).toBeInTheDocument();
     expect(screen.getByText('1,109,150')).toBeInTheDocument();
@@ -53,16 +53,14 @@ describe('UsageTrendChart', () => {
     for (let index = 0; index < valueLabels.length; index += 2) {
       expect(valueLabels[index].getAttribute('x')).toBe(valueLabels[index + 1].getAttribute('x'));
     }
-    expect(container.querySelectorAll('.usage-trend-axis-label')).toHaveLength(3);
-    expect(screen.getByText('08:00')).toBeInTheDocument();
-    expect(screen.getByText('08:05')).toBeInTheDocument();
-    expect(screen.getByText('08:10')).toBeInTheDocument();
-    expect(screen.getByText(/有效Token 120，缓存命中 60/)).toBeInTheDocument();
-    expect(screen.getByText(/有效Token 530，缓存命中 49,940/)).toBeInTheDocument();
-    expect(screen.getByText(/有效Token最高 · 时间段：1,109,150/)).toBeInTheDocument();
-    expect(container.querySelector('.usage-trend-note-row')).toContainElement(screen.getByText(/有效Token最高 · 时间段：1,109,150/));
+    expect(container.querySelectorAll('.usage-trend-axis-label')).toHaveLength(4);
+    expect(axisLabels(container)).toEqual(['08:00', '08:05', '08:10', '08:11']);
+    expect(screen.getByText(/实际计算Token 120，缓存命中 60/)).toBeInTheDocument();
+    expect(screen.getByText(/实际计算Token 530，缓存命中 49,940/)).toBeInTheDocument();
+    expect(screen.getByText(/实际计算Token最高 · 时间段：1,109,150/)).toBeInTheDocument();
+    expect(container.querySelector('.usage-trend-note-row')).toContainElement(screen.getByText(/实际计算Token最高 · 时间段：1,109,150/));
     expect(container.querySelector('.usage-trend-footer')).not.toBeInTheDocument();
-    expect(screen.getAllByText(/08:05-08:05/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/\[06\/21 08:05, 08:06\)/).length).toBeGreaterThanOrEqual(1);
     expect(screen.queryByText(/当前范围缓存命中合计/)).not.toBeInTheDocument();
     expect(screen.queryByText(/有效峰值/)).not.toBeInTheDocument();
   });
@@ -71,7 +69,7 @@ describe('UsageTrendChart', () => {
     const originalClientWidth = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
     Object.defineProperty(HTMLElement.prototype, 'clientWidth', { configurable: true, value: 960 });
 
-    render(
+    const { container } = render(
       <UsageTrendChart
         usage={{
           window: '7d',
@@ -98,7 +96,7 @@ describe('UsageTrendChart', () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByLabelText('选择时间范围内有效 token 与缓存命中 token 柱状图')).toHaveAttribute('width', '960');
+      expect(screen.getByLabelText('选择时间范围内实际计算 token 与缓存命中 token 柱状图')).toHaveAttribute('width', '960');
     });
 
     if (originalClientWidth) {
@@ -109,7 +107,7 @@ describe('UsageTrendChart', () => {
   });
 
   it('uses server bucket size for today hourly trend labels', () => {
-    render(
+    const { container } = render(
       <UsageTrendChart
         usage={{
           window: 'today',
@@ -137,13 +135,12 @@ describe('UsageTrendChart', () => {
     );
 
     expect(screen.getByText(/每根柱覆盖 1 小时/)).toBeInTheDocument();
-    expect(screen.getByText('08:00')).toBeInTheDocument();
-    expect(screen.getByText('09:00')).toBeInTheDocument();
-    expect(screen.getAllByText(/08:00-08:59/).length).toBeGreaterThanOrEqual(1);
+    expect(axisLabels(container)).toEqual(['08:00', '09:00', '10:00']);
+    expect(screen.getAllByText(/\[06\/21 08:00, 09:00\)/).length).toBeGreaterThanOrEqual(1);
   });
 
   it('uses server bucket size for six-hour trend labels', () => {
-    render(
+    const { container } = render(
       <UsageTrendChart
         usage={{
           window: '6h',
@@ -171,9 +168,12 @@ describe('UsageTrendChart', () => {
     );
 
     expect(screen.getByText(/每根柱覆盖 30 分钟/)).toBeInTheDocument();
-    expect(screen.getByText('13:30')).toBeInTheDocument();
-    expect(screen.getByText('14:00')).toBeInTheDocument();
-    expect(screen.getAllByText(/13:30-13:59/).length).toBeGreaterThanOrEqual(1);
+    expect(axisLabels(container)).toEqual(['13:30', '14:00', '14:30']);
+    expect(screen.getAllByText(/\[06\/23 13:30, 14:00\)/).length).toBeGreaterThanOrEqual(1);
   });
 
 });
+
+function axisLabels(container: ParentNode): string[] {
+  return Array.from(container.querySelectorAll('.usage-trend-axis-label')).map((label) => label.textContent ?? '');
+}

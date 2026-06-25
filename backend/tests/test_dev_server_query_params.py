@@ -29,7 +29,7 @@ def test_dev_server_forwards_conversation_filters_and_decodes_path_refs():
         "agent_type": None,
         "source_id": None,
         "page": 1,
-        "page_size": 50,
+        "page_size": 20,
     }
     assert _path_part("/api/conversations/ref%3Aconversation-1", 3) == "ref:conversation-1"
 

@@ -161,24 +161,33 @@ const summary: DashboardSummary = {
 };
 
 const signalPage: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
+const processingStatus = {
+  state: 'pending' as const,
+  counts: { pending: 2, running: 0, succeeded: 1, failed: 0 },
+  latest_failed: null
+};
 
 describe('DashboardPage', () => {
   afterEach(() => {
+    vi.useRealTimers();
     document.getElementById('dashboard-sidebar-slot')?.remove();
+    document.getElementById('dashboard-topbar-status-slot')?.remove();
   });
 
   it('renders signals and usage trend instead of usage anomaly investigation', async () => {
-    document.body.appendChild(Object.assign(document.createElement('div'), { id: 'dashboard-sidebar-slot' }));
+    appendDashboardSlots();
     const loadDashboardSummary = vi.fn(async () => summary);
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
         loadDashboardSummary={loadDashboardSummary}
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
     );
@@ -188,9 +197,12 @@ describe('DashboardPage', () => {
     expect(screen.getByTestId('usage-row')).toContainElement(screen.getByLabelText('用量趋势'));
     expect(screen.queryByLabelText('使用与风险治理')).not.toBeInTheDocument();
     expect(await screen.findByTestId('dashboard-sidebar-context')).toHaveTextContent('接入与筛选');
-    expect(screen.getByLabelText('选择时间范围内有效 token 与缓存命中 token 柱状图')).toBeInTheDocument();
+    expect(screen.getByLabelText('选择时间范围内实际计算 token 与缓存命中 token 柱状图')).toBeInTheDocument();
     expect(screen.getAllByText('windows-collector').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('行为风险信号')).toBeInTheDocument();
+    expect(screen.getByLabelText('派生计算状态')).toHaveTextContent('派生计算：待处理');
+    expect(screen.getByLabelText('派生计算状态')).toHaveTextContent('信号更新中');
+    expect(screen.queryByText('原始会话和用量已入库，信号正在更新')).not.toBeInTheDocument();
     expect(screen.queryByText('行为风险信号台')).not.toBeInTheDocument();
     expect(screen.queryByText(/默认只看最近 1 小时/)).not.toBeInTheDocument();
     expect(screen.getByText('会话内容')).toBeInTheDocument();
@@ -198,15 +210,15 @@ describe('DashboardPage', () => {
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
     expect(screen.getByText('1 / 6')).toBeInTheDocument();
     expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('有效用量 (Token)')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('实际计算Token')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('待处理信号')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('3,175')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('900')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('0')).toBeInTheDocument();
-    expect(screen.getByText(/有效Token 3,175/)).toBeInTheDocument();
+    expect(screen.getByText(/实际计算Token 3,175/)).toBeInTheDocument();
     expect(screen.queryByText('未知活动')).not.toBeInTheDocument();
-    expect(screen.queryByText('模型调用有效 token')).not.toBeInTheDocument();
+    expect(screen.queryByText('模型调用实际计算 token')).not.toBeInTheDocument();
     expect(screen.queryByText('当前队列待看')).not.toBeInTheDocument();
     expect(screen.queryByText(/活动：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/风险：/)).not.toBeInTheDocument();
@@ -227,9 +239,11 @@ describe('DashboardPage', () => {
     expect(loadUsageSummary).toHaveBeenCalledWith('1h', '', '', '');
     expect(loadRiskSummary).toHaveBeenCalledWith('1h', '', '', '');
     expect(loadDashboardSummary).toHaveBeenCalledWith('1h', '', '', '');
+    expect(loadProcessingStatus).toHaveBeenCalled();
   });
 
   it('refreshes dashboard data without changing the selected time window', async () => {
+    appendDashboardSlots();
     const user = userEvent.setup();
     const loadDashboardSummary = vi.fn(async () => summary);
     const loadSignals = vi.fn(async () => signalPage);
@@ -237,12 +251,14 @@ describe('DashboardPage', () => {
       agentType === 'workbuddy' ? usageWithTotal(222) : usageWithTotal(111)
     ));
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
         loadDashboardSummary={loadDashboardSummary}
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
     );
@@ -256,7 +272,7 @@ describe('DashboardPage', () => {
     await user.click(screen.getByRole('button', { name: '刷新' }));
     await waitFor(() => expect(loadDashboardSummary).toHaveBeenLastCalledWith('today', 'workbuddy', '', ''));
     await waitFor(() => expect(within(screen.getByLabelText('核心指标')).getByText('222')).toBeInTheDocument());
-    expect(screen.getAllByText(/有效Token 222/).length).toBeGreaterThanOrEqual(1);
+    expect(screen.getAllByText(/实际计算Token 222/).length).toBeGreaterThanOrEqual(1);
     expect(loadRiskSummary).toHaveBeenLastCalledWith('today', 'workbuddy', '', '');
     expect(loadDashboardSummary).toHaveBeenCalledTimes(2);
     expect(loadRiskSummary).toHaveBeenCalledTimes(2);
@@ -264,17 +280,20 @@ describe('DashboardPage', () => {
   });
 
   it('submits custom time range only after refresh', async () => {
+    appendDashboardSlots();
     const user = userEvent.setup();
     const loadDashboardSummary = vi.fn(async () => summary);
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
         loadDashboardSummary={loadDashboardSummary}
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
     );
@@ -303,4 +322,34 @@ describe('DashboardPage', () => {
     expect(loadUsageSummary).toHaveBeenLastCalledWith('custom', '', expectedStart, expectedEnd);
     expect(loadRiskSummary).toHaveBeenLastCalledWith('custom', '', expectedStart, expectedEnd);
   });
+
+  it('polls processing status while signal jobs are pending', async () => {
+    appendDashboardSlots();
+    const loadDashboardSummary = vi.fn(async () => summary);
+    const loadSignals = vi.fn(async () => signalPage);
+    const loadUsageSummary = vi.fn(async () => usage);
+    const loadRiskSummary = vi.fn(async () => risks);
+    const loadProcessingStatus = vi
+      .fn()
+      .mockResolvedValueOnce(processingStatus)
+      .mockResolvedValueOnce({ state: 'idle', counts: { pending: 0, running: 0, succeeded: 2, failed: 0 }, latest_failed: null });
+    render(
+      <DashboardPage
+        loadDashboardSummary={loadDashboardSummary}
+        loadSignals={loadSignals}
+        loadUsageSummary={loadUsageSummary}
+        loadRiskSummary={loadRiskSummary}
+        loadProcessingStatus={loadProcessingStatus}
+        onOpenSignal={() => {}}
+      />
+    );
+
+    expect(await screen.findByLabelText('派生计算状态')).toHaveTextContent('派生计算：待处理');
+    await waitFor(() => expect(screen.getByLabelText('派生计算状态')).toHaveTextContent('派生计算：空闲'), { timeout: 3000 });
+  });
 });
+
+function appendDashboardSlots(): void {
+  document.body.appendChild(Object.assign(document.createElement('div'), { id: 'dashboard-sidebar-slot' }));
+  document.body.appendChild(Object.assign(document.createElement('div'), { id: 'dashboard-topbar-status-slot' }));
+}

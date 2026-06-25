@@ -1,30 +1,27 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCw } from 'lucide-react';
 
-import type { CollectorsResponse, DashboardSummary, FactsResponse, RiskSummary, SignalsResponse, TimeWindowParam, UsageSummary } from '../api/types';
+import type { CollectorsResponse, DashboardSummary, FactsResponse, ProcessingStatus, RiskSummary, SignalsResponse, TimeWindowParam, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
 import { SignalCard } from '../components/SignalCard';
 import { quickTimeOptions } from '../components/timeRangeOptions';
 import { formatNumber } from '../utils/numberFormat';
-import {
-  emptyUsage,
-  formatDateTime,
-} from './dashboardLabels';
+import { emptyUsage, formatDateTime } from './dashboardLabels';
 import { DashboardAccessPanel } from './DashboardAccessPanel';
 import { TimeRangePicker } from './TimeRangePicker';
 import { UsageTrendChart } from './UsageTrendChart';
-
+import { ProcessingStatusBanner } from './ProcessingStatusBanner';
+import { useProcessingStatusPolling } from './useProcessingStatusPolling';
 interface Props {
   loadDashboardSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<DashboardSummary>;
   loadSignals: (options: { window: TimeWindowParam; start_at?: string; end_at?: string; workspace_query?: string; agent_type?: AgentType; page?: number; page_size?: number }) => Promise<SignalsResponse>;
   loadUsageSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<RiskSummary>;
+  loadProcessingStatus: () => Promise<ProcessingStatus>;
   onOpenSignal: (signalId: string) => void;
 }
-
 type AgentType = '' | 'codex' | 'workbuddy';
-
 type LoadState =
   | { status: 'loading' }
   | { status: 'error' }
@@ -36,14 +33,15 @@ type LoadState =
       signals: SignalsResponse;
       usage: UsageSummary;
       risks: RiskSummary;
+      processing: ProcessingStatus;
     };
-
 function formatPercent(value?: number): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
 }
 
 export function DashboardPage({
   loadDashboardSummary,
+  loadProcessingStatus,
   loadRiskSummary,
   loadSignals,
   loadUsageSummary,
@@ -61,9 +59,14 @@ export function DashboardPage({
   const [refreshToken, setRefreshToken] = useState(0);
   const [lastRefresh, setLastRefresh] = useState<string | null>(null);
   const [sidebarSlot, setSidebarSlot] = useState<HTMLElement | null>(null);
-
+  const [topbarStatusSlot, setTopbarStatusSlot] = useState<HTMLElement | null>(null);
+  const updateProcessingStatus = useCallback((processing: ProcessingStatus) => {
+    setState((current) => (current.status === 'ready' ? { ...current, processing } : current));
+  }, []);
+  useProcessingStatusPolling(state.status === 'ready' ? state.processing.state : 'idle', loadProcessingStatus, updateProcessingStatus);
   useEffect(() => {
     setSidebarSlot(document.getElementById('dashboard-sidebar-slot'));
+    setTopbarStatusSlot(document.getElementById('dashboard-topbar-status-slot'));
   }, []);
 
   useEffect(() => {
@@ -87,26 +90,29 @@ export function DashboardPage({
               has_more: summary.signals.total > summary.signals.items.length
             },
             usage: emptyUsage(requestWindow),
-            risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top }
+            risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top },
+            processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null }
           });
           setLastRefresh(new Date().toISOString());
         }
         return Promise.allSettled([
           loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, page: 1, page_size: 20 }),
           loadUsageSummary(requestWindow, agentType, start_at, end_at),
-          loadRiskSummary(requestWindow, agentType, start_at, end_at)
+          loadRiskSummary(requestWindow, agentType, start_at, end_at),
+          loadProcessingStatus()
         ]);
       })
       .then((results) => {
         if (cancelled) return;
         setState((current) => {
           if (current.status !== 'ready') return current;
-          const [signals, usage, risks] = results;
+          const [signals, usage, risks, processing] = results;
           return {
             ...current,
             signals: signals.status === 'fulfilled' ? signals.value : current.signals,
             usage: usage.status === 'fulfilled' ? usage.value : current.usage,
-            risks: risks.status === 'fulfilled' ? risks.value : current.risks
+            risks: risks.status === 'fulfilled' ? risks.value : current.risks,
+            processing: processing.status === 'fulfilled' ? processing.value : current.processing
           };
         });
       })
@@ -116,8 +122,7 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDashboardSummary, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, submittedFilters]);
-
+  }, [loadDashboardSummary, loadProcessingStatus, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, submittedFilters]);
   if (state.status === 'loading') {
     return (
       <section className="panel">
@@ -156,6 +161,7 @@ export function DashboardPage({
         />,
         sidebarSlot
       )}
+      {topbarStatusSlot && createPortal(<ProcessingStatusBanner status={state.processing} />, topbarStatusSlot)}
       <section className="context-bar">
         <div className="context-actions">
           <div className="compact-filter dashboard-time-filter">
@@ -209,7 +215,7 @@ export function DashboardPage({
           note="在线 / 总数"
         />
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
-        <Metric label="有效用量 (Token)" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
+        <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
         <Metric label="待处理信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />

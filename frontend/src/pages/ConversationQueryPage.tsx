@@ -22,7 +22,7 @@ type Filters = {
 
 type AgentType = '' | 'codex' | 'workbuddy';
 
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 20;
 
 export function ConversationQueryPage({
   initialFactId,

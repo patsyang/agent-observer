@@ -25,8 +25,10 @@ from app.evidence_enrichment.service import (
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
+from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
 from app.risks.service import get_risk_summary
-from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, rebuild_signals
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read
+from app.telemetry_batches.service import get_batch_status
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
 
@@ -79,7 +81,7 @@ def _conversations_query_options(raw_path: str) -> dict:
         "agent_type": _query_one(query, "agent_type"),
         "source_id": _query_one(query, "source_id"),
         "page": _query_int(query, "page", 1),
-        "page_size": _query_int(query, "page_size", 50),
+        "page_size": _query_int(query, "page_size", 20),
     }
     if _query_one(query, "workspace_query"):
         options["workspace_query"] = _query_one(query, "workspace_query")
@@ -134,8 +136,12 @@ def handle_get(handler) -> None:
                 return handler._json(200, run_minimum_validation_experiment(conn))
             if path == "/api/policy":
                 return handler._json(200, get_effective_policy(conn))
+            if path == "/api/processing/status":
+                return handler._json(200, processing_status(conn))
             if path == "/api/audit/recent":
                 return handler._json(200, recent_audit(conn))
+            if path.startswith("/api/telemetry/batches/"):
+                return handler._json(200, get_batch_status(conn, _path_part(path, 4)))
             if path == "/api/signals":
                 return handler._json(200, list_signals(conn, **_signals_query_options(handler.path)))
             if path.startswith("/api/signals/") and path.endswith("/enrichments/availability"):
@@ -222,7 +228,9 @@ def _handle_post_locked(handler, conn, path: str, payload: dict) -> None:
             except ValueError as exc:
                 return handler._json(400, {"error": str(exc)})
         if path == "/api/signals/rebuild":
-            return handler._json(200, rebuild_signals(conn, reason=payload.get("reason", "api")))
+            return handler._json(200, enqueue_global_signal_rebuild(conn, reason=payload.get("reason", "api")))
+        if path == "/api/processing/jobs/run-once":
+            return handler._json(200, run_next_job(conn, reason="api-run-once"))
         if path == "/api/validation/minimum-experiment":
             return handler._json(200, run_minimum_validation_experiment(conn))
         if path.startswith("/api/signals/") and path.endswith("/read"):

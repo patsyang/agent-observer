@@ -76,7 +76,7 @@ const response: ConversationsResponse = {
   conversations: [detail],
   total: 1,
   page: 1,
-  page_size: 50,
+  page_size: 20,
   has_more: false,
   window: '1h',
 };
@@ -124,7 +124,7 @@ describe('ConversationQueryPage', () => {
       agent_type: '',
       source_id: '',
       page: 1,
-      page_size: 50,
+      page_size: 20,
     });
 
     expect(screen.getAllByText('工作区').length).toBeGreaterThanOrEqual(2);
@@ -199,8 +199,8 @@ describe('ConversationQueryPage', () => {
     expect(within(drawer).getByRole('heading', { name: '分析信号定义与类型-Grill' })).toBeInTheDocument();
     expect(within(drawer).getByText('conv-alpha')).toBeInTheDocument();
     expect(within(drawer).getAllByText('Agent Observer').length).toBeGreaterThan(0);
-    expect(screen.getByText('累计有效Token')).toBeInTheDocument();
-    expect(screen.getByText('单次有效Token峰值')).toBeInTheDocument();
+    expect(screen.getByText('累计实际计算Token')).toBeInTheDocument();
+    expect(screen.getByText('单次实际计算Token峰值')).toBeInTheDocument();
     expect(screen.getByText('缓存命中 token')).toBeInTheDocument();
     expect(screen.getByText('60.0%')).toBeInTheDocument();
     expect(screen.getByText('检测到破坏性操作：工作区文件')).toBeInTheDocument();

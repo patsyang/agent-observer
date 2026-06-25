@@ -19,10 +19,11 @@ test('public access config downloads client and updates policy with audit feedba
   await page.getByLabel('采集间隔').fill('8');
   await page.getByLabel('单轮采集上限').fill('900');
   await page.getByLabel('上传批量').fill('120');
+  await page.getByLabel('Worker 轮询间隔').fill('12');
   await page.getByLabel('允许本机补证任务').click();
   await page.getByTestId('save-policy').click();
 
-  await expect(page.getByRole('status')).toContainText(`接入策略已保存为 v${policy.policy_version + 1}`);
+  await expect(page.getByRole('status')).toContainText(`全局配置已保存为 v${policy.policy_version + 1}`);
 
   const audit = await request.get(`${E2E_API_BASE}/api/audit/recent`);
   expect(audit.ok()).toBeTruthy();
@@ -39,10 +40,12 @@ test('public access config downloads client and updates policy with audit feedba
   expect(updated.collection_interval_seconds).toBe(8);
   expect(updated.max_events_per_cycle).toBe(900);
   expect(updated.upload_batch_size).toBe(120);
+  expect(updated.worker_poll_interval_seconds).toBe(12);
 
   await page.reload();
   await page.getByTestId('open-access-config').click();
   await expect(page.getByLabel('采集间隔')).toHaveValue('8');
   await expect(page.getByLabel('单轮采集上限')).toHaveValue('900');
   await expect(page.getByLabel('上传批量')).toHaveValue('120');
+  await expect(page.getByLabel('Worker 轮询间隔')).toHaveValue('12');
 });

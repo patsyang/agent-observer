@@ -47,9 +47,34 @@ def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
     return {"reason": reason, "updated": len(signals), "signals": signals}
 
 
-def update_signals_for_facts(conn: sqlite3.Connection, fact_ids: list[str], reason: str = "telemetry_ingest") -> dict:
-    # Incremental correctness is less important than avoiding stale broad buckets; the rebuild is deterministic and bounded by local DB size.
-    return rebuild_signals(conn, reason=reason)
+def update_signal_scope(
+    conn: sqlite3.Connection,
+    *,
+    job_type: str,
+    scope_type: str,
+    scope_id: str,
+    reason: str = "worker",
+) -> dict:
+    if job_type == "behavior_signal_rebuild" and scope_type == "global" and scope_id == "all":
+        return rebuild_signals(conn, reason=reason)
+    if job_type != "behavior_signal_update":
+        raise ValueError("unsupported_processing_job")
+    builders = {
+        "execution": lambda: build_tool_execution_failures(conn, reason, _upsert_signal, canonical_scope=scope_id),
+        "timeout": lambda: build_execution_timeouts(conn, reason, _upsert_signal, scope_key=scope_id),
+        "file_change": lambda: [
+            *_build_change_volume_anomalies(conn, reason, conversation_ref=scope_id),
+            *_build_key_file_changes(conn, reason, conversation_ref=scope_id),
+        ],
+        "risk": lambda: _build_destructive_operations(conn, reason)
+        if scope_id == "destructive_operation"
+        else _build_sensitive_content_exposures(conn, reason, object_type=scope_id.removeprefix("sensitive_content_exposure:")),
+    }
+    if scope_type not in builders:
+        raise ValueError("unsupported_processing_scope")
+    signals = [item for item in builders[scope_type]() if item]
+    conn.commit()
+    return {"reason": reason, "updated": len(signals), "signals": signals}
 
 
 def list_signals(
@@ -221,14 +246,16 @@ def _build_destructive_operations(conn: sqlite3.Connection, reason: str) -> list
     ]
 
 
-def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str) -> list[dict]:
+def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str, conversation_ref: str | None = None) -> list[dict]:
     facts = _risk_facts(conn, "file_change", "workspace_file")
     by_conversation: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for fact in facts:
         if fact["conversation_ref"]:
             by_conversation[fact["conversation_ref"]].append(fact)
     signals = []
-    for conversation_ref, group in by_conversation.items():
+    for current_conversation_ref, group in by_conversation.items():
+        if conversation_ref is not None and current_conversation_ref != conversation_ref:
+            continue
         paths = []
         additions = 0
         deletions = 0
@@ -249,7 +276,7 @@ def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str) -> lis
         signals.append(
             _upsert_signal(
                 conn,
-                signal_key=f"change_volume_anomaly:{conversation_ref}",
+                signal_key=f"change_volume_anomaly:{current_conversation_ref}",
                 signal_kind="change_volume_anomaly",
                 title=title,
                 why_it_matters=why,
@@ -266,7 +293,8 @@ def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str) -> lis
     return signals
 
 
-def _build_key_file_changes(conn: sqlite3.Connection, reason: str) -> list[dict]:
+def _build_key_file_changes(conn: sqlite3.Connection, reason: str, conversation_ref: str | None = None) -> list[dict]:
+    target_labels = _key_file_labels_for_conversation(conn, conversation_ref) if conversation_ref else None
     matched: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for fact in _risk_facts(conn, "file_change", None):
         projection = _primary_projection(conn, fact["fact_id"])
@@ -274,6 +302,8 @@ def _build_key_file_changes(conn: sqlite3.Connection, reason: str) -> list[dict]
         candidates = paths if isinstance(paths, list) else [_path_hint(conn, fact)]
         for path in candidates:
             label = _key_path_label(str(path))
+            if target_labels is not None and label not in target_labels:
+                continue
             if label:
                 matched[label].append(fact)
                 break
@@ -306,7 +336,21 @@ def _build_key_file_changes(conn: sqlite3.Connection, reason: str) -> list[dict]
     return signals
 
 
-def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str) -> list[dict]:
+def _key_file_labels_for_conversation(conn: sqlite3.Connection, conversation_ref: str) -> set[str]:
+    labels: set[str] = set()
+    for fact in _risk_facts(conn, "file_change", None):
+        if fact["conversation_ref"] != conversation_ref:
+            continue
+        projection = _primary_projection(conn, fact["fact_id"])
+        paths = projection.get("changed_paths")
+        candidates = paths if isinstance(paths, list) else [_path_hint(conn, fact)]
+        for path in candidates:
+            if label := _key_path_label(str(path)):
+                labels.add(label)
+    return labels
+
+
+def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, object_type: str | None = None) -> list[dict]:
     rows = conn.execute(
         """
         select rs.object_type, of.*
@@ -318,6 +362,8 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str) ->
     ).fetchall()
     groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
+        if object_type and str(row["object_type"] or "sensitive_object") != object_type:
+            continue
         if _high_confidence_sensitive(conn, row["fact_id"]):
             groups[str(row["object_type"] or "sensitive_object")].append(row)
     signals = []

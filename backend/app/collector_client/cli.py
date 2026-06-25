@@ -93,6 +93,12 @@ def _human_log_line(payload: dict[str, object]) -> str:
         return _human_source_completed_line(now, payload)
     if mode == "upload_completed":
         return _human_upload_completed_line(now, payload)
+    if mode == "upload_timeout_check":
+        return f"[{now}] 上传超时，正在确认服务端接收状态"
+    if mode == "upload_timeout_confirmed":
+        return f"[{now}] 服务端已确认接收：{int(payload.get('accepted') or 0)} 条"
+    if mode == "upload_timeout_missing":
+        return f"[{now}] 服务端未确认接收：保留本地 outbox，下轮重试"
     if mode == "cycle":
         return _human_cycle_line(now, payload)
     if mode == "cycle_error":

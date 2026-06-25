@@ -13,16 +13,23 @@ from app.behavior_signals.helpers import (
     first_text,
     primary_projection,
     signature_facts,
+    canonical_signature,
 )
 
 UpsertSignal = Callable[..., dict]
 
 
-def build_tool_execution_failures(conn: sqlite3.Connection, reason: str, upsert_signal: UpsertSignal) -> list[dict]:
+def build_tool_execution_failures(
+    conn: sqlite3.Connection,
+    reason: str,
+    upsert_signal: UpsertSignal,
+    canonical_scope: str | None = None,
+) -> list[dict]:
     signatures = conn.execute(
         "select * from error_signatures where category in ('tool_execution_failure', 'workflow_step_failure') order by signature_key"
     ).fetchall()
     groups: dict[str, list[tuple[sqlite3.Row, dict]]] = defaultdict(list)
+    target_group_keys: set[str] = set()
     seen: set[str] = set()
     for signature in signatures:
         for fact in signature_facts(conn, [signature]):
@@ -30,9 +37,14 @@ def build_tool_execution_failures(conn: sqlite3.Connection, reason: str, upsert_
                 continue
             seen.add(fact["fact_id"])
             projection = primary_projection(conn, fact["fact_id"])
-            groups[_execution_group_key(fact, projection)].append((fact, projection))
+            group_key = _execution_group_key(fact, projection)
+            if canonical_scope is None or canonical_signature(signature["signature_key"]) == canonical_scope:
+                target_group_keys.add(group_key)
+            groups[group_key].append((fact, projection))
     results = []
     for key, entries in groups.items():
+        if canonical_scope is not None and key not in target_group_keys:
+            continue
         facts = [fact for fact, _ in entries]
         projections = [projection for _, projection in entries]
         tool = first_text(projections, "tool_name", "tool", "name") or "工具调用"
@@ -62,7 +74,12 @@ def build_tool_execution_failures(conn: sqlite3.Connection, reason: str, upsert_
     return results
 
 
-def build_execution_timeouts(conn: sqlite3.Connection, reason: str, upsert_signal: UpsertSignal) -> list[dict]:
+def build_execution_timeouts(
+    conn: sqlite3.Connection,
+    reason: str,
+    upsert_signal: UpsertSignal,
+    scope_key: str | None = None,
+) -> list[dict]:
     rows = conn.execute(
         "select * from observed_facts where category in ('tool_execution_timeout', 'workflow_step_timeout') order by occurred_at, fact_id"
     ).fetchall()
@@ -72,7 +89,8 @@ def build_execution_timeouts(conn: sqlite3.Connection, reason: str, upsert_signa
         projection = primary_projection(conn, row["fact_id"])
         projections[row["fact_id"]] = projection
         key = f"workflow:{projection.get('workflow')}:{projection.get('run_id')}:{projection.get('command_fingerprint')}" if row["category"] == "workflow_step_timeout" and projection.get("workflow") and projection.get("run_id") else _execution_group_key(row, projection)
-        groups[key].append(row)
+        if scope_key is None or key == scope_key:
+            groups[key].append(row)
     signals = []
     for key, facts in groups.items():
         latest = projections.get(facts[-1]["fact_id"], {})

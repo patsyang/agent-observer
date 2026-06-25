@@ -6,8 +6,7 @@ import socket
 import threading
 import time
 import urllib.error
-from dataclasses import dataclass
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from typing import Any, Callable
 
@@ -24,11 +23,11 @@ from app.collector_client.status import (
 )
 from app.collector_client.sources import collect_sources, source_statuses
 from app.collector_client.sources.base import SourceResult
-from app.collector_client.transport import _get_json, _hash, _post_json
+from app.collector_client.transport import _get_json, _hash, _post_json, is_timeout_error
+from app.collector_client.upload_ack import confirm_batch_after_timeout
 from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 
 Emit = Callable[[str], None]
-
 
 @dataclass(frozen=True)
 class CommandResult:
@@ -38,7 +37,6 @@ class CommandResult:
 
 def _json_result(code: int, payload: dict[str, object]) -> CommandResult:
     return CommandResult(code=code, output=json.dumps(payload, sort_keys=True))
-
 
 def _set_running(config: CollectorConfig, running: bool) -> CommandResult:
     state = _load_configured_state(config)
@@ -233,7 +231,19 @@ def _upload_pending(
             "cursor": str(chunk[0]["source_refs"]["sequence"]),
             "items": chunk,
         }
-        _post_json(config.server_url, "/api/telemetry/ingest", batch)
+        try:
+            _post_json(config.server_url, "/api/telemetry/ingest", batch)
+        except (OSError, TimeoutError, urllib.error.URLError, ValueError) as exc:
+            if not is_timeout_error(exc):
+                raise
+            confirmed = confirm_batch_after_timeout(
+                config,
+                str(batch["batch_id"]),
+                emit_payload=lambda payload: _emit(emit, payload),
+                cycle=cycle,
+            )
+            if not confirmed:
+                raise TimeoutError("batch_acceptance_unconfirmed") from exc
         del outbox[: len(chunk)]
         state["last_upload_at"] = datetime.now(timezone.utc).isoformat()
         save_state(config.state_path, state)

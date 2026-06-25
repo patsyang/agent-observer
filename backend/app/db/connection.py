@@ -24,7 +24,8 @@ SCHEMA_SQL = """
           enrichment_mode text not null,
           collection_interval_seconds integer not null default 5,
           max_events_per_cycle integer not null default 500,
-          upload_batch_size integer not null default 100
+          upload_batch_size integer not null default 100,
+          worker_poll_interval_seconds integer not null default 10
         );
 
         create table if not exists collectors (
@@ -203,6 +204,21 @@ SCHEMA_SQL = """
           updated_at text not null
         );
 
+        create table if not exists processing_jobs (
+          job_id text primary key,
+          job_type text not null,
+          scope_type text not null,
+          scope_id text not null,
+          status text not null,
+          priority integer not null default 50,
+          attempts integer not null default 0,
+          last_error text not null default '',
+          created_at text not null,
+          updated_at text not null,
+          started_at text,
+          finished_at text
+        );
+
         create table if not exists signal_decisions (
           signal_id text primary key,
           decision_state text not null,
@@ -290,8 +306,8 @@ def _seed_effective_policy(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         insert or ignore into effective_policies
-          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size)
-        values (1, 1, 'enabled', 5, 500, 100)
+          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size, worker_poll_interval_seconds)
+        values (1, 1, 'enabled', 5, 500, 100, 10)
         """
     )
 
@@ -304,6 +320,8 @@ def _ensure_effective_policy_columns(conn: sqlite3.Connection) -> None:
         conn.execute("alter table effective_policies add column max_events_per_cycle integer not null default 500")
     if "upload_batch_size" not in columns:
         conn.execute("alter table effective_policies add column upload_batch_size integer not null default 100")
+    if "worker_poll_interval_seconds" not in columns:
+        conn.execute("alter table effective_policies add column worker_poll_interval_seconds integer not null default 10")
 
 
 def _ensure_usage_signal_columns(conn: sqlite3.Connection) -> None:
@@ -340,6 +358,12 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on observed_facts(created_at desc);
         create index if not exists idx_observed_facts_conversation_occurred
           on observed_facts(conversation_ref, occurred_at desc);
+        create index if not exists idx_observed_facts_effective_conversation_path_occurred
+          on observed_facts(
+            coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id),
+            source_path_hash,
+            occurred_at
+          );
         create index if not exists idx_observed_facts_fact_type_occurred_at
           on observed_facts(fact_type, occurred_at desc);
         create index if not exists idx_observed_facts_fact_type_created_at
@@ -366,10 +390,16 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on error_signature_facts(category, signature_key);
         create index if not exists idx_evidence_projections_fact_id
           on evidence_projections(fact_id);
+        create index if not exists idx_usage_signals_conversation_id
+          on usage_signals(conversation_id);
         create index if not exists idx_behavior_signals_decision_last_event
           on behavior_signals(decision_state, last_event_at desc);
         create index if not exists idx_behavior_signals_kind_last_event
           on behavior_signals(signal_kind, last_event_at desc);
+        create index if not exists idx_processing_jobs_status_priority_updated
+          on processing_jobs(status, priority desc, updated_at);
+        create index if not exists idx_processing_jobs_type_scope
+          on processing_jobs(job_type, scope_type, scope_id);
         """
     )
 

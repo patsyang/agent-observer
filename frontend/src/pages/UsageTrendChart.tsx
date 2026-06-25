@@ -20,9 +20,10 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
   const effectivePeak = Math.max(...pointValues);
   const peakIndex = pointValues.indexOf(effectivePeak);
   const peakPoint = points[peakIndex];
+  const axisTicks = boundaryTicks(points.map((point) => point.bucket), bucketMinutes);
   const minWidth = Math.max(560, Math.max(1, points.length) * 96);
   const width = Math.max(minWidth, containerWidth);
-  const height = 148;
+  const height = 154;
   const valueLabelTop = 15;
   const valueLabelGap = 14;
   const plotTop = 50;
@@ -50,11 +51,11 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
         <h2>用量趋势</h2>
         <div className="usage-trend-header-meta">
           <div className="usage-trend-legend" aria-label="用量趋势图例">
-            <span><i className="usage-trend-swatch token" />有效 token</span>
+            <span><i className="usage-trend-swatch token" />实际计算 token</span>
             <span><i className="usage-trend-swatch cache" />缓存命中 token</span>
           </div>
           <span className="badge teal">
-            总输入Token {formatNumber(totalInput)} / 输出Token {formatNumber(totalOutput)} / 有效Token {formatNumber(effectiveTotal)} / 缓存 {formatNumber(cachedTotal)}（{formatPercent(usage.totals.cache_hit_rate)}） / Credits {formatNumber(creditTotal)}
+            总输入Token {formatNumber(totalInput)} / 输出Token {formatNumber(totalOutput)} / 实际计算Token {formatNumber(effectiveTotal)} / 缓存 {formatNumber(cachedTotal)}（{formatPercent(usage.totals.cache_hit_rate)}） / Credits {formatNumber(creditTotal)}
           </span>
         </div>
       </div>
@@ -65,11 +66,11 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
           <>
             <div className="usage-trend-note-row">
               <p className="usage-trend-note">
-                每根柱表示该时间段内 token 合计，不是瞬时消耗；{bucketLabel(bucketMinutes)}。
+                每根柱表示相邻两个刻度之间的 token 合计，包含左侧刻度，不包含右侧刻度；{bucketLabel(bucketMinutes)}。
                 {cacheObservedInput < totalInput ? ` 缓存率覆盖输入Token ${formatNumber(cacheObservedInput)}。` : ''}
               </p>
               <span className="usage-trend-peak">
-                有效Token最高 · 时间段：{formatNumber(effectivePeak)}{peakPoint ? ` · ${bucketRangeLabel(peakPoint.bucket, bucketMinutes)}` : ''}
+                实际计算Token最高 · 时间段：{formatNumber(effectivePeak)}{peakPoint ? ` · ${bucketRangeLabel(peakPoint.bucket, bucketMinutes)}` : ''}
               </span>
             </div>
             <div className="usage-trend-scroll" ref={chartHostRef}>
@@ -79,7 +80,7 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
                 viewBox={`0 0 ${width} ${height}`}
                 width={width}
                 role="img"
-                aria-label="选择时间范围内有效 token 与缓存命中 token 柱状图"
+                aria-label="选择时间范围内实际计算 token 与缓存命中 token 柱状图"
               >
                 <path className="usage-trend-grid" d={`M ${xStart} ${plotTop + plotHeight} H ${xEnd}`} />
                 {points.map((point, index) => {
@@ -92,7 +93,7 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
                   const valueLabelX = x + valueLabelRightOffset;
                   return (
                     <g key={point.bucket}>
-                      <title>{bucketRangeLabel(point.bucket, bucketMinutes)}：有效Token {formatNumber(value)}，缓存命中 {formatNumber(cached)}</title>
+                      <title>{bucketRangeLabel(point.bucket, bucketMinutes)}：实际计算Token {formatNumber(value)}，缓存命中 {formatNumber(cached)}</title>
                       <text className="usage-trend-value" x={valueLabelX} y={valueLabelTop} textAnchor="end">
                         {formatNumber(value)}
                       </text>
@@ -101,8 +102,16 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
                       </text>
                       <rect className="usage-trend-bar" x={x - barWidth - 2} y={y} width={barWidth} height={Math.max(2, baseline - y)} rx="2" />
                       <rect className="usage-trend-bar cache" x={x + 2} y={cachedY} width={barWidth} height={Math.max(2, baseline - cachedY)} rx="2" />
-                      <text className="usage-trend-axis-label" x={x} y={baseline + 22} textAnchor="middle">
-                        {axisTickLabel(point.bucket, bucketMinutes)}
+                    </g>
+                  );
+                })}
+                {axisTicks.map((tick, index) => {
+                  const x = xStart + groupWidth * index;
+                  return (
+                    <g className="usage-trend-axis-tick" key={`${tick}-${index}`}>
+                      <path d={`M ${x} ${plotTop + plotHeight} V ${plotTop + plotHeight + 5}`} />
+                      <text className="usage-trend-axis-label" x={x} y={plotTop + plotHeight + 19} textAnchor="middle">
+                        {tick}
                       </text>
                     </g>
                   );
@@ -126,17 +135,25 @@ function bucketLabel(minutes: number): string {
 function bucketRangeLabel(value: string, minutes: number): string {
   const start = new Date(value);
   if (Number.isNaN(start.getTime())) return value;
-  const end = new Date(start.getTime() + bucketDurationMs(minutes) - 1);
-  if (minutes < 24 * 60) return `${formatMonthDay(start)} ${formatHourMinute(start)}-${formatHourMinute(end)}`;
-  if (minutes === 24 * 60) return `${formatMonthDay(start)} 当日`;
-  return `${formatMonthDay(start)}-${formatMonthDay(end)}`;
+  const end = new Date(start.getTime() + bucketDurationMs(minutes));
+  if (minutes < 24 * 60) return `[${formatMonthDay(start)} ${formatHourMinute(start)}, ${formatHourMinute(end)})`;
+  return `[${formatMonthDay(start)}, ${formatMonthDay(end)})`;
 }
 
-function axisTickLabel(value: string, minutes: number): string {
-  const start = new Date(value);
-  if (Number.isNaN(start.getTime())) return value;
-  if (minutes < 24 * 60) return formatHourMinute(start);
-  return formatMonthDay(start);
+function boundaryTicks(values: string[], minutes: number): string[] {
+  if (values.length === 0) return [];
+  const ticks = values.map((value) => boundaryTickLabel(value, minutes));
+  const last = new Date(values[values.length - 1]);
+  if (Number.isNaN(last.getTime())) return ticks;
+  ticks.push(boundaryTickLabel(new Date(last.getTime() + bucketDurationMs(minutes)).toISOString(), minutes));
+  return ticks;
+}
+
+function boundaryTickLabel(value: string, minutes: number): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  if (minutes < 24 * 60) return formatHourMinute(date);
+  return formatMonthDay(date);
 }
 
 function bucketDurationMs(minutes: number): number {

@@ -5,8 +5,10 @@ import sqlite3
 import hashlib
 from datetime import UTC, datetime
 
+from app.behavior_signals.helpers import canonical_signature, exit_code_from_summary
 from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
+from app.processing.jobs import JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
 
 
 def _now() -> str:
@@ -29,7 +31,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     cursor = batch.get("cursor", "")
     accepted = 0
     duplicates = 0
-    affected_fact_ids: list[str] = []
+    pending_jobs: dict[str, dict] = {}
     now = _now()
 
     for item in batch.get("items", []):
@@ -89,7 +91,8 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
         _insert_evidence_projections(conn, fact_id, item)
         _insert_optional_signals(conn, fact_id, item)
         accepted += 1
-        affected_fact_ids.append(fact_id)
+        for job in _signal_jobs_for_item(item, source):
+            pending_jobs[job["job_id"]] = job
 
     conn.execute(
         """
@@ -113,12 +116,23 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
             now,
         ),
     )
+    for job in pending_jobs.values():
+        enqueue_processing_job(
+            conn,
+            job_type=job["job_type"],
+            scope_type=job["scope_type"],
+            scope_id=job["scope_id"],
+            priority=job["priority"],
+        )
     conn.commit()
-    if affected_fact_ids:
-        from app.behavior_signals.service import update_signals_for_facts
-
-        update_signals_for_facts(conn, affected_fact_ids, reason="telemetry_ingest")
-    return {"batch_id": batch_id, "accepted": accepted, "duplicates": duplicates}
+    job_ids = sorted(pending_jobs)
+    return {
+        "batch_id": batch_id,
+        "accepted": accepted,
+        "duplicates": duplicates,
+        "processing_jobs_queued": len(job_ids),
+        "processing_job_ids": job_ids,
+    }
 
 
 def _validate_batch_protocol(batch: dict) -> None:
@@ -404,3 +418,54 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
                 risk.get("object_type", "unknown"),
             ),
         )
+
+
+def _signal_jobs_for_item(item: dict, source: str) -> list[dict]:
+    jobs: list[dict] = []
+    category = str(item.get("category") or "")
+    if error := item.get("error_signature"):
+        error_category = str(error.get("category") or category)
+        if error_category in {"tool_execution_failure", "workflow_step_failure"}:
+            jobs.append(_job("execution", canonical_signature(str(error["signature_key"])), 80))
+    if category in {"tool_execution_timeout", "workflow_step_timeout"}:
+        jobs.append(_job("timeout", _timeout_scope_key(item, source), 80))
+    risk = item.get("risk") if isinstance(item.get("risk"), dict) else {}
+    risk_type = str(risk.get("risk_type") or category)
+    if risk_type == "file_change":
+        conversation_ref = str((item.get("source_refs") or {}).get("conversation_ref") or "")
+        if conversation_ref:
+            jobs.append(_job("file_change", conversation_ref, 60))
+    if risk_type == "destructive_operation":
+        jobs.append(_job("risk", "destructive_operation", 90))
+    if risk_type == "sensitive_content_exposure":
+        object_type = str(risk.get("object_type") or "sensitive_object")
+        jobs.append(_job("risk", f"sensitive_content_exposure:{object_type}", 95))
+    return jobs
+
+
+def _job(scope_type: str, scope_id: str, priority: int) -> dict:
+    return {
+        "job_id": f"{JOB_TYPE_SIGNAL_UPDATE}:{scope_type}:{scope_id}",
+        "job_type": JOB_TYPE_SIGNAL_UPDATE,
+        "scope_type": scope_type,
+        "scope_id": scope_id,
+        "priority": priority,
+    }
+
+
+def _timeout_scope_key(item: dict, source: str) -> str:
+    projection = _normalized_projections(item)[0].get("projection") or item.get("projection") or {}
+    refs = item.get("source_refs") or {}
+    category = str(item.get("category") or "")
+    if category == "workflow_step_timeout" and projection.get("workflow") and projection.get("run_id"):
+        return f"workflow:{projection.get('workflow')}:{projection.get('run_id')}:{projection.get('command_fingerprint')}"
+    agent_type = refs.get("agent_type") or source or "unknown-agent"
+    workspace = refs.get("workspace_id") or refs.get("workspace_path") or "unknown-workspace"
+    conversation = refs.get("conversation_ref") or refs.get("session_ref") or "unknown-conversation"
+    tool = projection.get("tool_name") or projection.get("tool") or projection.get("name") or "tool"
+    status = "timeout" if projection.get("is_timeout") else f"exit:{projection.get('exit_code') or exit_code_from_summary(str(item.get('summary') or '')) or 'unknown'}"
+    workflow = projection.get("workflow") or ""
+    run_id = projection.get("run_id") or ""
+    if workflow and run_id:
+        return f"{agent_type}:{workspace}:workflow:{workflow}:{run_id}:{tool}:{status}"
+    return f"{agent_type}:{workspace}:{conversation}:{tool}:{status}"

@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from app.dashboard.service import get_dashboard_summary
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
+from app.processing.jobs import run_next_job
 
 
 def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
@@ -43,6 +44,8 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
                 ],
             },
         )
+        while run_next_job(conn, reason="test")["processed"]:
+            pass
 
         summary = get_dashboard_summary(conn, window="1h")
 
