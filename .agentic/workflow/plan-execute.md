@@ -13,7 +13,7 @@
 
 - 它可以从自然语言 `goal` 生成 `slice-brief.md`、`plan.md`、`tasks.json` 和 `task-graph.json`。
 - 它不能生成或改变产品级 `product-contract.json`、`stories.json` 或长期 acceptance matrix。
-- 如果目标需要定义或改变产品目标、用户角色、业务对象、数据模型、隐私、安全或长期验收矩阵，工作流必须失败并建议升级 `/ao-spec`。
+- 如果目标需要定义或改变产品目标、用户角色、业务对象、数据模型、安全、数据处理与上报模式或长期验收矩阵，工作流必须失败并建议升级 `/ao-spec`。
 - 如果目标只有一个局部 bug、配置、文案或 UI 小调整，工作流可以失败并建议降级 `/ao-small`。
 
 ## 输入参数
@@ -49,6 +49,7 @@ scope-resolve -> create-worktree -> resolve-slice-brief -> generate-plan -> plan
 - `artifacts/plan-gate.json`
 - `artifacts/task-graph-gate.json`
 - `artifacts/implementation.md`
+- `artifacts/task-execution-state.json`
 - `artifacts/changed-files.txt`
 - `artifacts/verification.md`
 - `artifacts/integration-verify.json`
@@ -82,6 +83,7 @@ scope-resolve -> create-worktree -> resolve-slice-brief -> generate-plan -> plan
 
 - `id`
 - `title`
+- `observable_outcome`
 - `acceptance_refs`
 - `component_refs`
 - `files_expected`
@@ -97,7 +99,8 @@ scope-resolve -> create-worktree -> resolve-slice-brief -> generate-plan -> plan
 ## 执行规则
 
 - 必须创建隔离 worktree。
-- 主工作区存在未提交变更时不得启动。
+- 一次 run 只创建一个 worktree；resume 同一 run 时必须复用原 worktree。
+- 主工作区存在未提交变更时不得启动。隔离 worktree 基于 `HEAD` 创建，不会携带未提交改动；显式 `--allow-dirty-source` 只允许记录 dirty evidence 后继续。
 - `plan-contract-gate` 和 `task-graph-gate` 通过后才能进入实现。
 - 所有 task 必须绑定 acceptance、component、verification command 和 done signal。
 - 集成后必须运行完整验证。
@@ -109,9 +112,10 @@ scope-resolve -> create-worktree -> resolve-slice-brief -> generate-plan -> plan
 
 - scope 不唯一：失败并列出候选 scope。
 - plan 缺少 tasks 或 task graph：失败。
-- task 缺少验收、组件、验证命令或 done signal：失败。
+- task 缺少验收、组件、可观察结果（observable_outcome）、验证命令或 done signal：失败。
 - task graph 存在循环依赖：失败。
 - 实现越界修改：失败。
 - required artifact 缺失：失败。
 - 验证失败且修复轮次耗尽：失败。
 - worktree 合并前主工作区漂移：失败并保留 worktree。
+- 已完成 run 的 worktree/branch 使用 `workflow cleanup --merged` 清理；旧 worktree 不得作为启动新 run 的前置阻塞条件。

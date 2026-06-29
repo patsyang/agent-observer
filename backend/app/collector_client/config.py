@@ -29,6 +29,7 @@ class CollectorConfig:
     max_events_per_cycle: int
     upload_batch_size: int
     evidence_mode: str
+    workdir: Path | None = None
 
     def source_root(self, source_kind: str) -> Path:
         for source in self.sources:
@@ -55,6 +56,7 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
         CollectorConfig(
             server_url=str(payload["server_url"]).rstrip("/"),
             collector_id=str(payload.get("collector_id", "windows-collector")),
+            workdir=workdir,
             state_path=state_path,
             telemetry_mode=str(payload.get("telemetry_mode", "fixture")),
             collection_interval_seconds=float(payload.get("collection_interval_seconds", 5)),

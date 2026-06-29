@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Callable
 
 from app.collector_client.config import CollectorConfig, load_config
+from app.collector_client.local_log import local_log_emit
 from app.collector_client.runtime import CommandResult, _json_result, _post_heartbeat, _run_once, _set_running, _start
 from app.collector_client.status import _state_payload, _status_payload
 from app.collector_client.transport import _get_json, _post_json
@@ -26,13 +27,48 @@ def run(argv: list[str] | None = None, cwd: Path | None = None, emit: Emit | Non
         return _json_result(2, {"status": "error", "error": error})
     if command == "status":
         return _json_result(0, _status_payload(config, verbose="--verbose" in args))
+    local_emit = local_log_emit(config.workdir or config.state_path.parent, config.collector_id)
     if command == "start":
-        return _start(config, emit)
+        return _start(config, _mirror_emit(local_emit, emit))
     if command == "stop":
         return _set_running(config, False)
     if command == "run-once":
-        return _run_once(config)
+        local_emit(
+            json.dumps(
+                {
+                    "status": "ok",
+                    "mode": "cycle_started",
+                    "collector_id": config.collector_id,
+                    "cycle": 1,
+                    "sources_summary": [
+                        {
+                            "source_id": source.source_id,
+                            "agent_type": source.agent_type,
+                            "display_name": source.display_name,
+                            "status": "enabled" if source.enabled else "disabled",
+                        }
+                        for source in config.sources
+                    ],
+                },
+                sort_keys=True,
+            )
+        )
+        result = _run_once(config, emit=local_emit, cycle=1)
+        payload = json.loads(result.output)
+        payload["mode"] = "cycle" if result.code == 0 else "cycle_error"
+        payload["cycle"] = 1
+        local_emit(json.dumps(payload, sort_keys=True))
+        return result
     return _json_result(2, {"status": "error", "error": "unknown_command"})
+
+
+def _mirror_emit(local_emit: Emit, emit: Emit | None) -> Emit:
+    def mirrored(line: str) -> None:
+        local_emit(line)
+        if emit:
+            emit(line)
+
+    return mirrored
 
 
 def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:

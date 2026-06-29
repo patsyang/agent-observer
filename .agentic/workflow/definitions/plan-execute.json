@@ -106,7 +106,18 @@
       "depends_on": [
         "task-graph-gate"
       ],
-      "required_artifacts": ["implementation.md", "changed-files.txt", "verification.md"]
+      "required_artifacts": [
+        "implementation.md",
+        "changed-files.txt",
+        "verification.md",
+        {
+          "path": "task-execution-state.json",
+          "kind": "json",
+          "validators": [
+            "task_execution_state_contract"
+          ]
+        }
+      ]
     },
     {
       "id": "integration-verify",

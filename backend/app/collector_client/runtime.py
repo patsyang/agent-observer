@@ -5,6 +5,7 @@ import os
 import socket
 import threading
 import time
+import traceback
 import urllib.error
 from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
@@ -181,6 +182,19 @@ def _run_once(
     except (OSError, ValueError, urllib.error.URLError) as exc:
         state["last_error"] = str(exc)
         save_state(config.state_path, state)
+        _emit(
+            emit,
+            {
+                "status": "error",
+                "mode": "runtime_error",
+                "collector_id": config.collector_id,
+                "cycle": cycle,
+                "error": str(exc),
+                "exception_type": type(exc).__name__,
+                "traceback": traceback.format_exc(),
+                **_state_payload(state, compact=True),
+            },
+        )
         return _json_result(2, {"status": "error", "collector_id": config.collector_id, "error": str(exc), **_state_payload(state)})
     state["cursor"]["last_sequence"] = next_sequence
     state["last_upload_at"] = datetime.now(timezone.utc).isoformat()
