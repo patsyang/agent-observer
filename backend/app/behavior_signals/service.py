@@ -25,6 +25,9 @@ from app.behavior_signals.helpers import (
     key_path_label as _key_path_label,
     high_confidence_sensitive as _high_confidence_sensitive,
     object_type_label as _object_type_label,
+    failure_group as _failure_group,
+    first_text as _first_text,
+    exit_code_from_summary as _exit_code_from_summary,
 )
 
 def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
@@ -33,6 +36,7 @@ def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
     for builder in (
         lambda db, why: build_tool_execution_failures(db, why, _upsert_signal),
         lambda db, why: build_execution_timeouts(db, why, _upsert_signal),
+        lambda db, why: detect_repeated_failures(db, why, _upsert_signal),
         _build_destructive_operations,
         _build_change_volume_anomalies,
         _build_key_file_changes,
@@ -387,6 +391,161 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
             )
         )
     return signals
+
+
+def detect_repeated_failures(
+    conn: sqlite3.Connection,
+    reason: str,
+    upsert_signal,
+) -> list[dict]:
+    """Detect signatures that repeat >= 3 times within the same conversation.
+
+    Excludes:
+    - Signatures already classified as workflow_gate_blocked
+    - Signatures with accepted_risk or expected_nonzero_exit conclusion
+    """
+    # Load conclusion codes that should be excluded
+    excluded_codes = {"accepted_risk", "expected_nonzero_exit"}
+    handled = conn.execute(
+        "select signal_id, conclusion_code from signal_decisions where decision_state = 'handled'"
+    ).fetchall()
+    excluded_signal_ids: set[str] = {
+        row["signal_id"] for row in handled if (row["conclusion_code"] or "").lower() in excluded_codes
+    }
+
+    # Build a set of signature_keys whose facts are tied to excluded signals.
+    # We match via behavior_signals.signal_key (the raw key) which corresponds
+    # to error_signature_facts.signature_key.
+    excluded_sig_keys: set[str] = set()
+    if excluded_signal_ids:
+        # For each excluded signal, find its signal_key, then find all
+        # error_signature_facts that share that key.
+        for sid in excluded_signal_ids:
+            row = conn.execute(
+                "select signal_key from behavior_signals where signal_id = ?", (sid,)
+            ).fetchone()
+            if row:
+                excluded_sig_keys.add(row["signal_key"])
+
+    # Also check risk_signals table for accepted_risk / expected_nonzero_exit risk_type
+    excluded_risk_fact_ids: set[str] = set()
+    risk_rows = conn.execute(
+        """
+        select rs.fact_id
+        from risk_signals rs
+        where rs.risk_type in ('accepted_risk', 'expected_nonzero_exit')
+        """
+    ).fetchall()
+    excluded_risk_fact_ids = {row["fact_id"] for row in risk_rows}
+
+    # Find signatures with >= 3 occurrences
+    signatures = conn.execute(
+        """
+        select signature_key, category, occurrences
+        from error_signatures
+        where occurrences >= 3
+          and category in ('tool_execution_failure', 'workflow_step_failure')
+        order by occurrences desc, signature_key
+        """
+    ).fetchall()
+
+    results: list[dict] = []
+    for sig in signatures:
+        sig_key = sig["signature_key"]
+        # Skip if signature already excluded by decision
+        if sig_key in excluded_sig_keys:
+            continue
+
+        # Fetch facts for this signature
+        facts = conn.execute(
+            """
+            select of.*
+            from error_signature_facts esf
+            join observed_facts of on of.fact_id = esf.fact_id
+            where esf.signature_key = ?
+            order by of.occurred_at, of.fact_id
+            """,
+            (sig_key,),
+        ).fetchall()
+
+        if not facts:
+            continue
+
+        # Skip if all facts are from accepted_risk / expected_nonzero_exit risk signals
+        if excluded_risk_fact_ids and all(f["fact_id"] in excluded_risk_fact_ids for f in facts):
+            continue
+
+        # Group by conversation to detect within-conversation repetition
+        by_conversation: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for fact in facts:
+            conv = fact["conversation_ref"] or fact["session_ref"] or "unknown-conversation"
+            by_conversation[conv].append(fact)
+
+        for conv_ref, group in by_conversation.items():
+            if len(group) < 3:
+                continue
+
+            projections = []
+            for fact in group:
+                proj = _primary_projection(conn, fact["fact_id"])
+                projections.append(proj)
+
+            tool = _first_text(projections, "tool_name", "tool", "name") or "工具调用"
+            exit_code = _first_text(projections, "exit_code") or _exit_code_from_summary(group[-1]["summary"] or "")
+
+            # Check if any fact is from a workflow_gate_blocked classification
+            # by examining the reason stored in behavior_signals
+            gate_blocked = False
+            for fact in group:
+                # Check via risk_signals table for workflow_gate_blocked
+                gate_row = conn.execute(
+                    """
+                    select rs.risk_type from risk_signals rs
+                    join observed_facts of on of.fact_id = rs.fact_id
+                    where of.fact_id = ? and rs.risk_type = 'workflow_gate_blocked'
+                    limit 1
+                    """,
+                    (fact["fact_id"],),
+                ).fetchone()
+                if gate_row:
+                    gate_blocked = True
+                    break
+
+            if gate_blocked:
+                continue
+
+            title = f"Agent 重复犯错：{tool} 在同一会话中失败 {len(group):,} 次"
+            results.append(
+                upsert_signal(
+                    conn,
+                    signal_key=f"repeated_tool_failure:{conv_ref}:{sig_key}",
+                    signal_kind="repeated_tool_failure",
+                    title=title,
+                    why_it_matters=f"同一工具调用在会话内重复失败 {len(group):,} 次，说明问题不在偶发，需要定位根本原因并防止反复犯错。",
+                    severity="high",
+                    confidence="high",
+                    priority_score=80,
+                    facts=group,
+                    affected_scope={
+                        "conversation_count": 1,
+                        "occurrence_count": len(group),
+                        "signature_key": sig_key,
+                        "tool_names": [tool],
+                        "exit_codes": [exit_code] if exit_code else [],
+                        "conversation_ref": conv_ref,
+                    },
+                    evidence_groups=[
+                        _failure_group(conn, "repeated_failure", "重复失败事件", group, projections),
+                    ],
+                    suggested_actions=[
+                        f"打开会话 {conv_ref}，检查 {tool} 的失败原因和最近输入；确认是否需要修正命令或环境。",
+                    ],
+                    reason=reason,
+                )
+            )
+
+    return results
+
 
 
 def _upsert_signal(
