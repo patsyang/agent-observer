@@ -27,6 +27,7 @@ type LoadState =
   | { status: 'error' }
   | {
       status: 'ready';
+      detailsLoading: boolean;
       collectors: CollectorsResponse;
       collectorCounts: DashboardSummary['collectors'];
       facts: FactsResponse;
@@ -86,6 +87,7 @@ export function DashboardPage({
         if (!cancelled) {
           setState({
             status: 'ready',
+            detailsLoading: true,
             collectors: { collectors: summary.collectors.items },
             collectorCounts: summary.collectors,
             facts: { facts: summary.facts.items, total: summary.facts.total, page: 1, page_size: 5, has_more: summary.facts.total > summary.facts.items.length },
@@ -116,6 +118,7 @@ export function DashboardPage({
           const [signals, usage, risks, processing] = results;
           return {
             ...current,
+            detailsLoading: false,
             signals: signals.status === 'fulfilled' ? signals.value : current.signals,
             usage: usage.status === 'fulfilled' ? usage.value : current.usage,
             risks: risks.status === 'fulfilled' ? risks.value : current.risks,
@@ -152,6 +155,7 @@ export function DashboardPage({
   const onlineCollectors = state.collectors.collectors.filter((collector) => collector.source_status === 'online');
   const activeSignals = state.signals.signals.filter((signal) => signal.decision_state !== 'handled');
   const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
+  const isLoading = state.detailsLoading;
   const submitFilters = () => {
     setSubmittedFilters({ ...draftFilters, workspaceQuery: draftFilters.workspaceQuery.trim() });
     setRefreshToken((value) => value + 1);
@@ -206,6 +210,7 @@ export function DashboardPage({
           <button
             aria-label="刷新"
             className="icon-button dashboard-refresh-button"
+            disabled={isLoading}
             onClick={submitFilters}
             title="刷新"
             type="button"
@@ -230,7 +235,7 @@ export function DashboardPage({
       </section>
 
       <div className="usage-row" data-testid="usage-row">
-        <UsageTrendChart usage={state.usage} />
+        <UsageTrendChart loading={isLoading} usage={state.usage} />
       </div>
 
       <div className="workbench-grid">
@@ -241,7 +246,9 @@ export function DashboardPage({
           </div>
           <p className="panel-intro">每条信号都对应一个可判断的风险模式，并按会话、对象或失败类型组织证据。</p>
           <div className="panel-body">
-            {activeSignals.length === 0 ? (
+            {isLoading ? (
+              <p>正在加载信号...</p>
+            ) : activeSignals.length === 0 ? (
               <p>当前没有需要人工处理的信号；请确认 collector 已运行并有 {agentLabel(submittedFilters.agentType)} 会话内容入库。</p>
             ) : (
               <div className="signal-list">
