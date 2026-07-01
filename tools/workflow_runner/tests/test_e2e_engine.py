@@ -167,6 +167,67 @@ def test_resume_reruns_only_failed_node(tmp_path: Path, monkeypatch) -> None:
     assert "error" not in resumed["nodes"][0]
 
 
+def test_resume_respects_no_worktree_when_original_run_skipped_worktree(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """resume_run 必须继承原始 run 的 --no-worktree 设置。
+
+    当原始 run 使用 use_worktree=False 且主工作区存在未提交变更时，
+    resume 若默认 use_worktree=True 会因 _ensure_clean_git_root 失败。
+    """
+    monkeypatch.setenv("AGENTIC_FACTORY_HOME", str(tmp_path / "home"))
+    control_root = tmp_path / "control"
+    project_root = tmp_path / "apps" / "app-a"
+    control_root.mkdir()
+    project_root.mkdir(parents=True)
+    write_definition(
+        control_root,
+        name="two-node",
+        primary_inputs=["goal"],
+        worktree=True,
+        nodes=[
+            {"id": "execute", "required_artifacts": ["implementation.md"]},
+            {"id": "review", "required_artifacts": ["review.md"]},
+        ],
+    )
+    fake_codex = tmp_path / "fake_codex.py"
+    write_resume_fake_codex(fake_codex)
+    write_project_config(project_root, [sys.executable, str(fake_codex)])
+    _git(project_root, "init")
+    _git(project_root, "config", "user.email", "test@example.com")
+    _git(project_root, "config", "user.name", "Test User")
+    (project_root / "README.md").write_text("# app-a\n", encoding="utf-8")
+    _git(project_root, "add", "README.md", ".agentic/project.json")
+    _git(project_root, "commit", "-m", "init app")
+    (project_root / "uncommitted.txt").write_text("dirty\n", encoding="utf-8")
+
+    context = create_run_context(
+        control_root,
+        WorkflowInput(
+            workflow="two-node",
+            goal="resume no-worktree test",
+            project_root=str(project_root),
+        ),
+        run_id="run_resume_no_worktree",
+    )
+    prepare_run(context)
+
+    with pytest.raises(RuntimeError, match="review"):
+        run_e2e_workflow(context, use_worktree=False)
+
+    state = json.loads((context.run_dir / "run.json").read_text(encoding="utf-8"))
+    assert state["status"] == "FAILED"
+    assert state["worktree"] is None
+
+    (context.run_dir / "artifacts" / "allow-review.txt").write_text("ok", encoding="utf-8")
+    result = resume_run(control_root, "run_resume_no_worktree")
+
+    assert result.return_code == 0
+    resumed = json.loads((context.run_dir / "run.json").read_text(encoding="utf-8"))
+    assert resumed["status"] == "PASSED"
+    assert resumed["worktree"] is None
+
+
 def test_record_node_clears_stale_error_after_success() -> None:
     run_state: dict[str, object] = {}
     record_node(run_state, "execute", status="FAILED", error="missing artifact")
@@ -314,6 +375,85 @@ def test_implement_story_loop_requires_all_stories_passed_even_if_output_says_co
         "implement-story-loop:1",
         "implement-story-loop:2",
         "after:0",
+    ]
+
+
+def test_implement_story_loop_aborts_after_consecutive_max_turns_truncation(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    # 回归测试：error_max_turns 在 generic_cli._return_code_for_profile 中返回 0（软成功），
+    # 但 loop 节点 until 未达成时，连续 3 次 max_turns 截断应停止 loop 避免无限重试。
+    monkeypatch.setenv("AGENTIC_FACTORY_HOME", str(tmp_path / "home"))
+    control_root = tmp_path / "control"
+    project_root = tmp_path / "apps" / "app-a"
+    control_root.mkdir()
+    project_root.mkdir(parents=True)
+    write_definition(
+        control_root,
+        name="loop-max-turns-test",
+        primary_inputs=["goal"],
+        nodes=[
+            {
+                "id": "implement-story-loop",
+                "type": "loop",
+                "until": "COMPLETE",
+                "max_iterations": 5,
+                "required_artifacts": ["implementation-state.json", "progress.md"],
+            },
+        ],
+    )
+    fake_adapter = tmp_path / "fake_max_turns_adapter.py"
+    fake_adapter.write_text(
+        "\n".join(
+            [
+                "import json, os, sys",
+                "from pathlib import Path",
+                "argv = sys.argv[1:]",
+                "node = os.environ['AO_NODE_ID']",
+                "iteration = int(os.environ.get('AO_LOOP_ITERATION', '0') or '0')",
+                "artifacts = Path(os.environ['AO_ARTIFACTS_DIR'])",
+                "with (artifacts / 'loop-log.txt').open('a', encoding='utf-8') as handle:",
+                "    handle.write(f'{node}:{iteration}\\n')",
+                "final_message = Path(argv[argv.index('--output-last-message') + 1])",
+                "# 模拟 claude max_turns 截断：final_message 是 error_max_turns JSON",
+                "payload = {"
+                "  'type':'result',"
+                "  'subtype':'error_max_turns',"
+                "  'terminal_reason':'max_turns',"
+                "  'is_error':True,"
+                "  'num_turns':31,"
+                "}",
+                "final_message.write_text(json.dumps(payload), encoding='utf-8')",
+                "# stories.json 中 story 永远 passes=false（until 未达成）",
+                "(artifacts / 'implementation-state.json').write_text('{\"status\":\"ok\"}', encoding='utf-8')",
+                "(artifacts / 'progress.md').write_text('partial progress', encoding='utf-8')",
+                "stories = [{'id':'S1','passes':False}]",
+                "(artifacts / 'stories.json').write_text(json.dumps(stories), encoding='utf-8')",
+                "print(json.dumps(payload))",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    write_project_config(project_root, [sys.executable, str(fake_adapter)])
+    context = create_run_context(
+        control_root,
+        WorkflowInput(workflow="loop-max-turns-test", goal="loop", project_root=str(project_root)),
+        run_id="run_loop_max_turns_abort",
+    )
+    prepare_run(context)
+
+    with pytest.raises(RuntimeError, match="max_turns"):
+        run_e2e_workflow(context, use_worktree=False)
+
+    # 应该在 3 次 iteration 后停止，而不是跑满 5 次
+    log_lines = (context.run_dir / "artifacts" / "loop-log.txt").read_text(
+        encoding="utf-8"
+    ).splitlines()
+    assert log_lines == [
+        "implement-story-loop:1",
+        "implement-story-loop:2",
+        "implement-story-loop:3",
     ]
 
 

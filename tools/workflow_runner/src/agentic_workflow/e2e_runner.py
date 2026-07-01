@@ -202,7 +202,8 @@ def resume_run(repo_root: Path, run_id: str) -> WorkflowRunResult:
         message="workflow resume started",
         artifact_path=str(context.run_dir),
     )
-    return run_e2e_workflow(context, resume=True)
+    use_worktree = bool(status.get("worktree"))
+    return run_e2e_workflow(context, resume=True, use_worktree=use_worktree)
 
 
 def cleanup_run(repo_root: Path, run_id: str, *, force: bool = False) -> bool:
@@ -610,23 +611,42 @@ def _run_loop_node(
     until = str(node.get("until") or "COMPLETE")
     max_iterations = int(node.get("max_iterations") or 1)
     last_output = ""
+    consecutive_failures = 0
     for iteration in range(1, max_iterations + 1):
-        if runtime_adapter:
-            last_output = _execute_runtime_adapter_node(
-                context,
-                node=node,
-                node_id=node_id,
-                runtime_adapter=runtime_adapter,
-                artifacts_dir=artifacts_dir,
-                worktree_path=worktree_path,
-                extra_env={"AO_LOOP_ITERATION": str(iteration)},
-                log_suffix=f"-{iteration}",
+        iteration_succeeded = False
+        try:
+            if runtime_adapter:
+                last_output = _execute_runtime_adapter_node(
+                    context,
+                    node=node,
+                    node_id=node_id,
+                    runtime_adapter=runtime_adapter,
+                    artifacts_dir=artifacts_dir,
+                    worktree_path=worktree_path,
+                    extra_env={"AO_LOOP_ITERATION": str(iteration)},
+                    log_suffix=f"-{iteration}",
+                )
+            else:
+                _ensure_default_node_execution_allowed(context)
+                _write_default_artifacts(context, node_id, artifacts_dir)
+                last_output = until
+            _validate_required_artifacts(context, node_id, artifacts_dir)
+            iteration_succeeded = True
+        except RuntimeError as error:
+            consecutive_failures += 1
+            last_output = str(error)
+            append_event(
+                context.run_dir / "workflow-event.jsonl",
+                run_id=context.run_id,
+                workflow=context.definition.name,
+                step=f"loop:{node_id}",
+                status="failed",
+                message=f"iteration {iteration} failed (consecutive={consecutive_failures}): {error}",
+                artifact_path=str(artifacts_dir),
             )
-        else:
-            _ensure_default_node_execution_allowed(context)
-            _write_default_artifacts(context, node_id, artifacts_dir)
-            last_output = until
-        _validate_required_artifacts(context, node_id, artifacts_dir)
+            if consecutive_failures >= 3:
+                raise
+        # 即使 iteration 失败，until 可能在之前的 iteration 中已达成，需要检查。
         if _loop_reached_until(
             node_id=node_id,
             until=until,
@@ -634,6 +654,29 @@ def _run_loop_node(
             output=last_output,
         ):
             return {"iterations": iteration, "output": last_output}
+        # 只有 iteration "成功"但 until 未满足时，才检查 max_turns 截断导致的假成功。
+        # error_max_turns 在 generic_cli._return_code_for_profile 中返回 0（软成功），
+        # 但 loop 节点需要 until 实际达成。若连续 3 次 max_turns 截断仍未达成，
+        # 停止 loop 避免无限重试（story 可能需要手动干预或提高 --max-turns）。
+        if iteration_succeeded and _output_indicates_max_turns_truncation(last_output):
+            consecutive_failures += 1
+            append_event(
+                context.run_dir / "workflow-event.jsonl",
+                run_id=context.run_id,
+                workflow=context.definition.name,
+                step=f"loop:{node_id}",
+                status="failed",
+                message=f"iteration {iteration} hit max_turns without reaching until={until!r} (consecutive={consecutive_failures})",
+                artifact_path=str(artifacts_dir),
+            )
+            if consecutive_failures >= 3:
+                raise RuntimeError(
+                    f"loop node {node_id} aborted: {consecutive_failures} consecutive iterations "
+                    f"hit max_turns without reaching until={until!r}; "
+                    f"consider raising --max-turns or splitting the story"
+                )
+        elif iteration_succeeded:
+            consecutive_failures = 0
     raise RuntimeError(
         f"loop node {node_id} did not reach until={until!r} "
         f"after {max_iterations} iterations; last output length={len(last_output)}"
@@ -650,6 +693,19 @@ def _loop_reached_until(
     if node_id == "implement-story-loop":
         return _all_stories_passed(artifacts_dir / "stories.json")
     return _output_contains_completion_signal(output, until)
+
+
+def _output_indicates_max_turns_truncation(output: str) -> bool:
+    # claude code CLI 在 --output-format json 下，max_turns 截断时输出：
+    # {"type":"result","subtype":"error_max_turns",...,"terminal_reason":"max_turns",...}
+    # generic_cli._return_code_for_profile 将其视为软成功（返回 0），
+    # 但 loop 节点需要识别这种"假成功"以避免无限重试。
+    return (
+        '"subtype":"error_max_turns"' in output
+        or '"subtype": "error_max_turns"' in output
+        or '"terminal_reason":"max_turns"' in output
+        or '"terminal_reason": "max_turns"' in output
+    )
 
 
 def _all_stories_passed(path: Path) -> bool:
