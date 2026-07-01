@@ -89,6 +89,27 @@ def usage_summary(conn: sqlite3.Connection, fact_ids: list[str]) -> dict:
     }
 
 
+def usage_facts_for_signals(conn: sqlite3.Connection, fact_ids: list[str]) -> list[dict]:
+    """Return usage fact rows joined to observed_facts for a list of fact IDs.
+
+    Used by usage anomaly builders to attach usage evidence to signals.
+    """
+    if not fact_ids:
+        return []
+    placeholders = ",".join("?" for _ in fact_ids)
+    rows = conn.execute(
+        f"""
+        select us.*, of.occurred_at, of.conversation_ref, of.session_ref, of.agent_type
+        from usage_signals us
+        join observed_facts of on of.fact_id = us.fact_id
+        where us.fact_id in ({placeholders})
+        order by us.fact_id
+        """,
+        fact_ids,
+    ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _entry_base(fact: sqlite3.Row, refs: dict, specific: dict, evidence_ref: str, category: str, preview: str) -> dict:
     return {
         "evidence_ref": evidence_ref,

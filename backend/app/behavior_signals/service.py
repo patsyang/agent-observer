@@ -5,7 +5,7 @@ from collections import Counter, defaultdict
 
 from app.behavior_signals.common import dumps, now_iso, signal_id, snapshot_hash
 from app.time_ranges import range_bounds_iso
-from app.behavior_signals.evidence import enrichment_status_summary, usage_summary
+from app.behavior_signals.evidence import enrichment_status_summary, usage_summary, usage_facts_for_signals
 from app.behavior_signals.execution import build_execution_timeouts, build_tool_execution_failures
 from app.behavior_signals.presentation import row_to_signal
 from app.behavior_signals.workspace import signal_workspace_matches, workspace_summary, workspaces_from_facts
@@ -28,6 +28,10 @@ from app.behavior_signals.helpers import (
     failure_group as _failure_group,
     first_text as _first_text,
     exit_code_from_summary as _exit_code_from_summary,
+    content_event_types as _content_event_types,
+    tool_call_event_types as _tool_call_event_types,
+    is_final_response as _is_final_response,
+    LOOP_STUCK_WINDOW_MINUTES,
 )
 
 def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
@@ -37,6 +41,8 @@ def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
         lambda db, why: build_tool_execution_failures(db, why, _upsert_signal),
         lambda db, why: build_execution_timeouts(db, why, _upsert_signal),
         lambda db, why: detect_repeated_failures(db, why, _upsert_signal),
+        lambda db, why: detect_loop_stuck(db, why, _upsert_signal),
+        lambda db, why: detect_usage_anomalies(db, why, _upsert_signal),
         _build_destructive_operations,
         _build_change_volume_anomalies,
         _build_key_file_changes,
@@ -545,6 +551,476 @@ def detect_repeated_failures(
             )
 
     return results
+
+
+def detect_loop_stuck(
+    conn: sqlite3.Connection,
+    reason: str,
+    upsert_signal,
+) -> list[dict]:
+    """Detect agent loops: tool calls without new content events in a 10-minute window.
+
+    Triggers when:
+    - Same conversation has tool calls (function_call / function_call_output)
+    - But no new content events (agent_prompt / agent_response / agent_reasoning)
+      within a 10-minute window based on occurred_at.
+
+    Does NOT trigger:
+    - Conversations that ended normally (have a final agent_response)
+    - Idle conversations (no events at all)
+    """
+    from datetime import datetime, timedelta, timezone
+
+    content_types = _content_event_types()
+    tool_types = _tool_call_event_types()
+
+    # Fetch all content events and tool call events, ordered by conversation and time
+    ct_placeholders = ",".join("?" for _ in content_types)
+    tc_placeholders = ",".join("?" for _ in tool_types)
+    sql = (
+        "select fact_id, fact_type, category, source_specific_json,"
+        " source_event_type, summary, occurred_at,"
+        " conversation_ref, session_ref"
+        " from observed_facts"
+        " where ("
+        "   (fact_type = 'content'"
+        "    and ("
+        "      category IN ({ct})"
+        "      OR source_specific_json LIKE '%\"event_type\":\"agent_response\"%'"
+        "      OR source_specific_json LIKE '%\"codex_event_type\":\"agent_response\"%'"
+        "    ))"
+        "   OR ("
+        "     category IN ({tc})"
+        "     OR source_specific_json LIKE '%\"event_type\":\"function_call\"%'"
+        "     OR source_specific_json LIKE '%\"event_type\":\"function_call_output\"%'"
+        "     OR source_specific_json LIKE '%\"codex_event_type\":\"function_call\"%'"
+        "     OR source_specific_json LIKE '%\"codex_event_type\":\"function_call_output\"%'"
+        "   )"
+        "  )"
+        " order by conversation_ref, occurred_at, fact_id"
+    ).format(ct=ct_placeholders, tc=tc_placeholders)
+    rows = conn.execute(sql, list(content_types) + list(tool_types)).fetchall()
+
+    if not rows:
+        return []
+
+    # Group by conversation
+    by_conv: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for row in rows:
+        conv = row["conversation_ref"] or row["session_ref"] or "unknown-conversation"
+        by_conv[conv].append(row)
+
+    results: list[dict] = []
+    window = timedelta(minutes=LOOP_STUCK_WINDOW_MINUTES)
+
+    for conv_ref, events in by_conv.items():
+        # Sort by occurred_at
+        events.sort(key=lambda r: (r["occurred_at"] or "", r["fact_id"]))
+
+        content_events = [e for e in events if e["category"] in content_types]
+        tool_events = [e for e in events if e["category"] in tool_types]
+
+        # Idle: no events at all
+        if not content_events and not tool_events:
+            continue
+
+        # Normal end: has a final agent_response
+        has_final = any(_is_final_response(e) for e in content_events)
+        if has_final:
+            continue
+
+        # Need tool events to detect loop (tool calls without content = stuck)
+        if not tool_events:
+            continue
+
+        # Check if there's a 10-minute window with tool calls but no new content
+        # Strategy: for each tool event, look back 10 minutes.
+        # If there are tool events in that window but no content event appeared, it's stuck.
+        # More precisely: find the gap between last content event and most recent tool event.
+        if not content_events:
+            # No content events at all, but tool events exist -> likely stuck
+            # Use the last tool event as the "stuck" point
+            last_tool = tool_events[-1]
+            first_tool = tool_events[0]
+            # Calculate time span
+            try:
+                t_first = datetime.fromisoformat(first_tool["occurred_at"])
+                t_last = datetime.fromisoformat(last_tool["occurred_at"])
+                span = t_last - t_first
+            except (ValueError, TypeError):
+                continue
+
+            if span >= window:
+                # Long span of tool calls with zero content = definitely stuck
+                results.append(_make_loop_stuck_signal(
+                    conn, upsert_signal, conv_ref, tool_events, reason, span
+                ))
+            elif len(tool_events) >= 3:
+                # Multiple tool calls with no content at all is suspicious
+                results.append(_make_loop_stuck_signal(
+                    conn, upsert_signal, conv_ref, tool_events, reason, span
+                ))
+            continue
+
+        # Has content events + tool events: check for gaps
+        # Walk through content events and see if tool events accumulated during gaps
+        last_content_time = None
+        for ce in content_events:
+            try:
+                last_content_time = datetime.fromisoformat(ce["occurred_at"])
+            except (ValueError, TypeError):
+                continue
+
+        # Check the tail: tool events after the last content event
+        tail_tools = []
+        for te in tool_events:
+            try:
+                t = datetime.fromisoformat(te["occurred_at"])
+                if last_content_time and t > last_content_time:
+                    tail_tools.append(te)
+            except (ValueError, TypeError):
+                continue
+
+        if len(tail_tools) >= 3:
+            # 3+ tool calls after last content event = loop stuck
+            try:
+                t_first = datetime.fromisoformat(tail_tools[0]["occurred_at"])
+                t_last = datetime.fromisoformat(tail_tools[-1]["occurred_at"])
+                span = t_last - t_first
+            except (ValueError, TypeError):
+                span = window
+            results.append(_make_loop_stuck_signal(
+                conn, upsert_signal, conv_ref, tail_tools, reason, span
+            ))
+            continue
+
+        # Check for gaps between content events where tools accumulated
+        content_times = []
+        for ce in content_events:
+            try:
+                content_times.append(datetime.fromisoformat(ce["occurred_at"]))
+            except (ValueError, TypeError):
+                continue
+
+        for i in range(len(content_times) - 1):
+            gap_start = content_times[i]
+            gap_end = content_times[i + 1]
+            gap = gap_end - gap_start
+            if gap < window:
+                continue
+            # Count tool events in this gap
+            gap_tools = []
+            for te in tool_events:
+                try:
+                    t = datetime.fromisoformat(te["occurred_at"])
+                    if gap_start < t < gap_end:
+                        gap_tools.append(te)
+                except (ValueError, TypeError):
+                    continue
+            if len(gap_tools) >= 3:
+                results.append(_make_loop_stuck_signal(
+                    conn, upsert_signal, conv_ref, gap_tools, reason, gap
+                ))
+
+    return results
+
+
+def detect_usage_anomalies(
+    conn: sqlite3.Connection,
+    reason: str,
+    upsert_signal,
+) -> list[dict]:
+    """Detect usage anomalies at runtime: usage_spike, low_cache_hit_rate, unknown_usage_dominant.
+
+    Thresholds:
+    - usage_spike: single fact input_tokens + output_tokens > 100_000, priority=70
+    - low_cache_hit_rate: input_tokens > 10_000 AND cache_hit_rate < 10%, priority=65
+    - unknown_usage_dominant: within 1-hour window, activity_tag=unknown占比 > 50%, priority=60
+    """
+    from datetime import datetime, timedelta, timezone
+
+    # Check if promoted_to_signal column exists in usage_signals
+    col_check = conn.execute("pragma table_info(usage_signals)").fetchall()
+    has_promoted = any(row["name"] == "promoted_to_signal" for row in col_check)
+
+    if has_promoted:
+        # Collect only usage facts not yet promoted to a signal
+        unused_usage_facts = conn.execute(
+            """
+            select us.fact_id, us.input_tokens, us.output_tokens, us.total_tokens,
+                   us.cached_input_tokens, us.cache_observed, us.activity_tag,
+                   us.conversation_id, us.session_id, us.account_ref,
+                   us.project_ref, us.unit_basis, us.observability_level,
+                   of.occurred_at, of.conversation_ref, of.session_ref, of.agent_type
+            from usage_signals us
+            join observed_facts of on of.fact_id = us.fact_id
+            where us.promoted_to_signal = 0
+            order by of.occurred_at
+            """
+        ).fetchall()
+    else:
+        # Fallback: get all usage facts when column doesn't exist
+        unused_usage_facts = conn.execute(
+            """
+            select us.fact_id, us.input_tokens, us.output_tokens, us.total_tokens,
+                   us.cached_input_tokens, us.cache_observed, us.activity_tag,
+                   us.conversation_id, us.session_id, us.account_ref,
+                   us.project_ref, us.unit_basis, us.observability_level,
+                   of.occurred_at, of.conversation_ref, of.session_ref, of.agent_type
+            from usage_signals us
+            join observed_facts of on of.fact_id = us.fact_id
+            order by of.occurred_at
+            """
+        ).fetchall()
+
+    if not unused_usage_facts:
+        return []
+
+    results: list[dict] = []
+
+    # --- usage_spike: single fact with input_tokens + output_tokens > 100,000 ---
+    spike_rows = []
+    for row in unused_usage_facts:
+        inp = int(row["input_tokens"] or 0)
+        outp = int(row["output_tokens"] or 0)
+        if inp + outp > 100_000:
+            spike_rows.append(row)
+
+    if spike_rows:
+        fact_ids = [r["fact_id"] for r in spike_rows]
+        usage_rows = usage_facts_for_signals(conn, fact_ids)
+        signals_by_conv = defaultdict(list)
+        for ur in usage_rows:
+            conv = ur.get("conversation_ref") or ur.get("session_ref") or "global"
+            signals_by_conv[conv].append(ur)
+
+        for conv_ref, group in signals_by_conv.items():
+            total_tokens = sum(int(u["input_tokens"] or 0) + int(u["output_tokens"] or 0) for u in group)
+            title = f"用量突增：单次调用共 {total_tokens:,} tokens（input={sum(int(u['input_tokens'] or 0) for u in group):,}, output={sum(int(u['output_tokens'] or 0) for u in group):,}）"
+            # Fetch full observed_facts rows for evidence groups
+            spike_conv_facts = []
+            for r in spike_rows:
+                cr = r["conversation_ref"] or r["session_ref"] or "global"
+                if cr == conv_ref:
+                    full = conn.execute("select * from observed_facts where fact_id = ?", (r["fact_id"],)).fetchone()
+                    if full:
+                        spike_conv_facts.append(dict(full))
+            results.append(
+                upsert_signal(
+                    conn,
+                    signal_key=f"usage_spike:{conv_ref}",
+                    signal_kind="usage_spike",
+                    title=title,
+                    why_it_matters="单次调用 token 用量远超常规水平，可能导致成本失控或被滥用，需要确认是否符合预期。",
+                    severity="medium",
+                    confidence="high",
+                    priority_score=70,
+                    facts=spike_conv_facts if spike_conv_facts else [dict(r) for r in spike_rows],
+                    affected_scope={
+                        "conversation_count": 1 if conv_ref != "global" else len(signals_by_conv),
+                        "total_tokens": total_tokens,
+                        "input_tokens": sum(int(u["input_tokens"] or 0) for u in group),
+                        "output_tokens": sum(int(u["output_tokens"] or 0) for u in group),
+                        "fact_count": len(group),
+                        "conversation_ref": conv_ref if conv_ref != "global" else None,
+                    },
+                    evidence_groups=[
+                        _object_group(conn, "conversation", f"用量突增 {conv_ref}", spike_conv_facts)
+                        if spike_conv_facts else [],
+                    ],
+                    suggested_actions=[
+                        f"检查会话 {conv_ref} 的调用详情，确认是否有异常大的输出或循环调用。",
+                    ],
+                    reason=reason,
+                )
+            )
+
+    # --- low_cache_hit_rate: input_tokens > 10,000 AND cache_hit_rate < 10% ---
+    low_cache_rows = []
+    for row in unused_usage_facts:
+        inp = int(row["input_tokens"] or 0)
+        cached = int(row["cached_input_tokens"] or 0)
+        cache_obs = bool(row["cache_observed"])
+        if inp > 10_000 and cache_obs and cached / inp < 0.10:
+            low_cache_rows.append(row)
+
+    if low_cache_rows:
+        fact_ids = [r["fact_id"] for r in low_cache_rows]
+        usage_rows = usage_facts_for_signals(conn, fact_ids)
+        signals_by_session = defaultdict(list)
+        for ur in usage_rows:
+            sess = ur.get("session_ref") or ur.get("session_id") or "unknown"
+            signals_by_session[sess].append(ur)
+
+        for sess_ref, group in signals_by_session.items():
+            total_inp = sum(int(u["input_tokens"] or 0) for u in group)
+            total_cached = sum(int(u["cached_input_tokens"] or 0) for u in group)
+            hit_rate = round(total_cached / total_inp, 4) if total_inp > 0 else 0
+            title = f"缓存命中率过低：{hit_rate:.1%}（input={total_inp:,}, cached={total_cached:,}）"
+            # Fetch full observed_facts rows for evidence groups
+            lc_conv_facts = []
+            for r in low_cache_rows:
+                sr = r["session_ref"] or r["session_id"] or "unknown"
+                if sr == sess_ref:
+                    full = conn.execute("select * from observed_facts where fact_id = ?", (r["fact_id"],)).fetchone()
+                    if full:
+                        lc_conv_facts.append(dict(full))
+            results.append(
+                upsert_signal(
+                    conn,
+                    signal_key=f"low_cache_hit_rate:{sess_ref}",
+                    signal_kind="low_cache_hit_rate",
+                    title=title,
+                    why_it_matters="大输入量场景下缓存命中率低于 10%，说明缓存策略未生效或输入内容变化过大，导致重复计算成本高。",
+                    severity="medium",
+                    confidence="high",
+                    priority_score=65,
+                    facts=lc_conv_facts if lc_conv_facts else [dict(r) for r in low_cache_rows],
+                    affected_scope={
+                        "session_count": 1,
+                        "total_input_tokens": total_inp,
+                        "cached_input_tokens": total_cached,
+                        "cache_hit_rate": hit_rate,
+                        "fact_count": len(group),
+                        "session_ref": sess_ref,
+                    },
+                    evidence_groups=[
+                        _object_group(conn, "session", f"低缓存命中会话 {sess_ref}", lc_conv_facts)
+                        if lc_conv_facts else [],
+                    ],
+                    suggested_actions=[
+                        f"检查会话 {sess_ref} 的输入内容是否频繁变化；考虑启用更细粒度的缓存策略。",
+                    ],
+                    reason=reason,
+                )
+            )
+
+    # --- unknown_usage_dominant: within 1-hour window, unknown activity_tag > 50% ---
+    # Parse timestamps and group by account/project within 1-hour windows
+    now = datetime.now(timezone.utc)
+    hour_ago = now - timedelta(hours=1)
+
+    # Group by account_ref within 1-hour windows
+    hourly_buckets: dict[str, list[dict]] = defaultdict(list)
+    for row in unused_usage_facts:
+        try:
+            occ = datetime.fromisoformat(row["occurred_at"])
+            if occ.tzinfo is None:
+                occ = occ.replace(tzinfo=timezone.utc)
+        except (ValueError, TypeError):
+            continue
+        if occ < hour_ago:
+            continue
+        # Bucket by account and hour
+        bucket_key = occ.strftime("%Y-%m-%dT%H")
+        account = row["account_ref"] or "unknown-account"
+        key = f"{account}:{bucket_key}"
+        hourly_buckets[key].append(dict(row))
+
+    for key, group in hourly_buckets.items():
+        account, _bucket = key.split(":", 1)
+        total = len(group)
+        unknown_count = sum(1 for f in group if f.get("activity_tag") == "unknown")
+        if total > 0 and unknown_count / total > 0.50:
+            fact_ids = [f["fact_id"] for f in group]
+            usage_rows = usage_facts_for_signals(conn, fact_ids)
+            title = f"未知用量主导：1 小时内 {unknown_count}/{total} 条 activity_tag=unknown"
+            # Fetch full observed_facts rows for evidence groups
+            unk_facts = []
+            for f in group:
+                full = conn.execute("select * from observed_facts where fact_id = ?", (f["fact_id"],)).fetchone()
+                if full:
+                    unk_facts.append(dict(full))
+            results.append(
+                upsert_signal(
+                    conn,
+                    signal_key=f"unknown_usage_dominant:{account}:{_bucket}",
+                    signal_kind="unknown_usage_dominant",
+                    title=title,
+                    why_it_matters="短时间内大量用量记录的 activity_tag 为 unknown，说明采集端未能正确标记用途，影响成本归因和分析。",
+                    severity="low",
+                    confidence="high",
+                    priority_score=60,
+                    facts=unk_facts if unk_facts else [dict(r) for r in unused_usage_facts],
+                    affected_scope={
+                        "account_ref": account,
+                        "hour_bucket": _bucket,
+                        "total_facts": total,
+                        "unknown_count": unknown_count,
+                        "unknown_ratio": round(unknown_count / total, 4),
+                    },
+                    evidence_groups=[
+                        _object_group(conn, "account", f"账号 {account} 1 小时窗口", unk_facts)
+                        if unk_facts else [],
+                    ],
+                    suggested_actions=[
+                        f"检查账号 {account} 的采集端配置，确认 activity_tag 是否正确标记。",
+                    ],
+                    reason=reason,
+                )
+            )
+
+    return results
+
+
+def _make_loop_stuck_signal(
+    conn: sqlite3.Connection,
+    upsert_signal,
+    conv_ref: str,
+    tool_events: list[sqlite3.Row],
+    reason: str,
+    span: timedelta,
+) -> dict:
+    """Build an agent_loop_stuck signal from detected tool events."""
+    # Gather projections for context
+    projections = []
+    for te in tool_events:
+        proj = _primary_projection(conn, te["fact_id"])
+        projections.append(proj)
+
+    tool_names = set()
+    for p in projections:
+        tn = p.get("tool_name") or p.get("tool") or p.get("name")
+        if tn:
+            tool_names.add(str(tn))
+
+    fact_ids = [te["fact_id"] for te in tool_events]
+    facts = conn.execute(
+        "select * from observed_facts where fact_id in ({}) order by occurred_at, fact_id".format(
+            ",".join("?" for _ in fact_ids)
+        ),
+        fact_ids,
+    ).fetchall()
+
+    if not facts:
+        facts = tool_events
+
+    title = f"Agent 卡循环：{len(tool_events):,} 次工具调用无产出（{span.total_seconds()/60:.0f} 分钟）"
+    return upsert_signal(
+        conn,
+        signal_key=f"agent_loop_stuck:{conv_ref}",
+        signal_kind="agent_loop_stuck",
+        title=title,
+        why_it_matters="Agent 在一段时间内反复调用工具但没有产生新的内容输出，可能陷入无效循环，浪费资源且无法推进任务。",
+        severity="high",
+        confidence="high",
+        priority_score=75,
+        facts=facts,
+        affected_scope={
+            "conversation_count": 1,
+            "tool_call_count": len(tool_events),
+            "window_minutes": LOOP_STUCK_WINDOW_MINUTES,
+            "tool_names": sorted(tool_names) or ["unknown"],
+            "conversation_ref": conv_ref,
+        },
+        evidence_groups=[
+            _object_group(conn, "conversation", f"卡循环会话 {conv_ref}", facts),
+        ],
+        suggested_actions=[
+            f"打开会话 {conv_ref}，检查最近的工具调用链是否陷入无效循环；考虑设置最大重试次数。",
+        ],
+        reason=reason,
+    )
 
 
 
