@@ -55,7 +55,7 @@ export function signalKindLabel(value: string): string {
     low_cache_hit_rate: '缓存命中率低',
     unknown_usage_dominant: '未知活动主导'
   };
-  return labels[value] ?? '行为风险';
+  return labels[value] ?? '未知信号';
 }
 
 export function usageSummaryText(summary: {
