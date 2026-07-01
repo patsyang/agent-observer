@@ -10,13 +10,43 @@ from app.behavior_signals.common import dumps, loads, now_iso
 from app.behavior_signals.evidence import enrichment_entries, evidence_entries
 from app.conversations.workspace import empty_workspace, workspace_from_rows
 
-KEY_PATH_PATTERNS = (
-    (re.compile(r"(^|/)\.gitignore$", re.I), "项目忽略规则"),
-    (re.compile(r"db/migrations?|migration", re.I), "数据库迁移"),
-    (re.compile(r"collector|collector_client", re.I), "采集器实现"),
-    (re.compile(r"workflow|commands?/", re.I), "工作流或命令入口"),
-    (re.compile(r"policy|package|stack-contract|agentic\.lock", re.I), "策略或发布配置"),
-)
+
+CONTENT_EVENT_TYPES = frozenset({"agent_prompt", "agent_response", "agent_reasoning"})
+TOOL_CALL_EVENT_TYPES = frozenset({"function_call", "function_call_output"})
+LOOP_STUCK_WINDOW_MINUTES = 10
+
+
+def content_event_types() -> frozenset[str]:
+    return CONTENT_EVENT_TYPES
+
+
+def tool_call_event_types() -> frozenset[str]:
+    return TOOL_CALL_EVENT_TYPES
+
+
+def is_final_response(fact: sqlite3.Row) -> bool:
+    """Return True if a fact represents a final agent_response (normal conversation end)."""
+    if fact["fact_type"] != "content":
+        return False
+    specific = loads(fact["source_specific_json"] or "{}")
+    event_type = specific.get("event_type") or specific.get("codex_event_type") or ""
+    if event_type == "agent_response":
+        # Final responses typically have is_final or similar marker
+        projection = loads(fact["projection_json"] or "{}")
+        if projection.get("is_final") or projection.get("finish_reason"):
+            return True
+        # Also check source_specific for final marker
+        if specific.get("is_final"):
+            return True
+    # Fallback: check source_event_type column
+    rv_et = fact["source_event_type"]
+    rv_cat = fact["category"]
+    if rv_et == "agent_response" and rv_cat == "agent_response":
+        # Heuristic: if summary mentions completion/final
+        summary = fact.get("summary") or ""
+        if "final" in summary.lower() or "completion" in summary.lower():
+            return True
+    return False
 
 
 def remove_stale(conn: sqlite3.Connection, active_ids: list[str]) -> None:
@@ -195,13 +225,28 @@ def top_directories(paths: list[str]) -> list[str]:
     return [path for path, _ in dirs.most_common(5)]
 
 
-def key_path_label(path: str) -> str:
+def key_path_label(path: str, project_root: str | None = None) -> str:
+    """Label a file path by matching against configurable key-file patterns.
+
+    Patterns are loaded from *project_root*/key_file_patterns.json when
+    available, otherwise the built-in fallback patterns are used.
+    """
     if not path:
         return ""
     normalized = path.replace("\\", "/")
-    for pattern, label in KEY_PATH_PATTERNS:
-        if pattern.search(normalized):
-            return label
+    try:
+        from app.behavior_signals.common import load_key_file_patterns
+    except ImportError:
+        # Defensive fallback when common.py is not yet importable
+        return ""
+
+    raw_patterns = load_key_file_patterns(project_root)
+    for pat_str, label in raw_patterns:
+        try:
+            if re.search(pat_str, normalized, re.I):
+                return label
+        except re.error:
+            continue
     return ""
 
 
