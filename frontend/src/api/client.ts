@@ -66,7 +66,7 @@ export function fetchCollectors(): Promise<CollectorsResponse> {
   return readJson<CollectorsResponse>('/api/collectors');
 }
 
-type AgentTypeFilter = '' | 'codex' | 'workbuddy';
+type AgentTypeFilter = '' | 'codex' | 'workbuddy' | 'claude';
 
 function addAgentFilter(params: URLSearchParams, agentType?: AgentTypeFilter | string): void {
   if (agentType) params.set('agent_type', agentType);

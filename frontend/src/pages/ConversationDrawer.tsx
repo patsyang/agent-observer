@@ -151,7 +151,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                   <strong>{actionableHits.length > 0 ? '其他技术活动已折叠' : '暂无需要分析的风险或错误命中'}</strong>
                   <p>
                     已折叠 {formatNumber(technicalHits.length)} 条低价值技术事件：
-                    {technicalHitSummary(technicalHits)}。这些记录只说明 Codex 执行过本地工具或产生了低证据事件，不代表需要处理的问题。
+                    {technicalHitSummary(technicalHits)}。这些记录只说明 {agentLabel(detail.agent_type)} 执行过本地工具或产生了低证据事件，不代表需要处理的问题。
                   </p>
                 </div>
               )}
@@ -165,6 +165,13 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
 
 function workspaceLabel(detail: ConversationDetail): string {
   return detail.workspace.workspace_label || basename(detail.workspace.workspace_path) || '工作区未知';
+}
+
+function agentLabel(agentType: string): string {
+  if (agentType === 'claude') return 'Claude Code';
+  if (agentType === 'codex') return 'Codex';
+  if (agentType === 'workbuddy') return 'WorkBuddy';
+  return 'Agent';
 }
 
 function basename(path: string): string {

@@ -5,12 +5,14 @@ from typing import Callable
 
 from app.collector_client.config import CollectorConfig, SourceConfig
 from app.collector_client.sources.base import SourceResult, source_payload
+from app.collector_client.sources import claude as claude_source
 from app.collector_client.sources import codex as codex_source
 from app.collector_client.sources import workbuddy as workbuddy_source
 
 SOURCE_COLLECTORS = {
     codex_source.SOURCE_KIND: codex_source.collect,
     workbuddy_source.SOURCE_KIND: workbuddy_source.collect,
+    claude_source.SOURCE_KIND: claude_source.collect,
 }
 
 

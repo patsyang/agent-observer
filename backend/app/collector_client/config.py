@@ -73,7 +73,12 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
 
 def _source_config(payload: dict, workdir: Path) -> SourceConfig:
     source_kind = str(payload["source_kind"])
-    default_root = Path.home() / (".workbuddy" if source_kind == "workbuddy_local" else ".codex")
+    if source_kind == "workbuddy_local":
+        default_root = Path.home() / ".workbuddy"
+    elif source_kind == "claude_local":
+        default_root = Path.home() / ".claude"
+    else:
+        default_root = Path.home() / ".codex"
     root = Path(os.path.expanduser(os.path.expandvars(str(payload.get("root", default_root)))))
     if not root.is_absolute():
         root = workdir / root

@@ -75,6 +75,7 @@ export function ConversationTable({
 
 function sourceLabel(row: ConversationSummary): string {
   if (row.agent_type === 'codex') return 'Codex';
+  if (row.agent_type === 'claude') return 'Claude Code';
   if (row.agent_type === 'workbuddy') return 'WorkBuddy';
   return row.agent_type || '未知';
 }

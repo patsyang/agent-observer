@@ -371,7 +371,7 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
     assert "raw_upload_enabled" not in config
     assert config["agent_version"] == "0.3.0"
     assert config["protocol_version"] == "agent-observer-telemetry/v3"
-    assert {source["source_id"] for source in config["sources"]} == {"codex-local", "workbuddy-local"}
+    assert {source["source_id"] for source in config["sources"]} == {"codex-local", "workbuddy-local", "claude-local"}
     assert "effective_policy" not in config
     assert "template_enabled" not in config
     assert "collection_policy" not in config
@@ -405,6 +405,7 @@ def test_packaged_collector_collects_codex_and_workbuddy_fixtures(tmp_path, monk
     config["collector_id"] = "packaged-fixture"
     config["sources"][0]["root"] = str(codex_home)
     config["sources"][1]["root"] = str(workbuddy_home)
+    config["sources"][2]["root"] = str(extract_dir / ".claude")
     config_path.write_text(json.dumps(config), encoding="utf-8")
     posts = []
 

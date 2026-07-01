@@ -104,6 +104,7 @@ export function severityLabel(severity: string): string {
 export function activityTagLabel(value: string): string {
   const labels: Record<string, string> = {
     codex_turn: 'Codex 对话',
+    claude_turn: 'Claude Code 对话',
     agent_turn: 'Agent 对话',
     workbuddy_turn: 'WorkBuddy 对话',
     bug_fix: '缺陷修复',
@@ -144,7 +145,7 @@ export function scopeValueLabel(scope: string, value: string): string {
 }
 
 export function looksLikeOpaqueRef(value: string): boolean {
-  return /\b(ref|proj|hash|fact|codex)[-:_]/i.test(value) || /^[a-f0-9]{12,}$/i.test(value);
+  return /\b(ref|proj|hash|fact|codex|claude)[-:_]/i.test(value) || /^[a-f0-9]{12,}$/i.test(value);
 }
 
 export function sumBacklog(data: CollectorsResponse): number {

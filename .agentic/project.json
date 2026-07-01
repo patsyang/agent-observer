@@ -3,14 +3,14 @@
   "project_id": "agent_observer",
   "project_name": "agent-observer",
   "model": {
-    "id": "codex-gpt-5"
+    "id": "claude-code-default"
   },
   "adapter": {
     "id": "generic-cli",
     "command": [
-      "codex"
+      "claude"
     ],
-    "profile": ".agentic/runtime-adapters/codex.json"
+    "profile": ".agentic/runtime-adapters/claude.json"
   },
   "verify": {
     "command": [

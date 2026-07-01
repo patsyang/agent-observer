@@ -226,6 +226,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('最近命中')).not.toBeInTheDocument();
     expect(screen.getByLabelText('筛选工作区')).toBeInTheDocument();
     expect(screen.getByLabelText('筛选Agent类型')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Claude Code' })).toHaveAttribute('value', 'claude');
     expect(screen.getByRole('button', { name: '刷新' })).toBeInTheDocument();
     await userEvent.click(screen.getByLabelText('时间范围：1小时'));
     expect(screen.getByRole('button', { name: '今天' })).toBeInTheDocument();

@@ -63,12 +63,7 @@ scripts/*.ps1
 !.env.example
 
 # Runtime data (generated at runtime)
-data/runtime/screenshots/
-data/runtime/debug-validation.json
-data/runtime/agent-observer-windows-*.zip
-data/runtime/manual-collector/
-data/runtime/manual-collector-current/
-data/runtime/manual-collector-latest/
+data/runtime/
 
 # Data directory runtime artifacts
 data/packages/
@@ -91,3 +86,6 @@ frontend/apps/
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite
 backend/data/packages/
+
+# Temporary test files
+test-*.txt

@@ -21,7 +21,7 @@ interface Props {
   loadProcessingStatus: () => Promise<ProcessingStatus>;
   onOpenSignal: (signalId: string) => void;
 }
-type AgentType = '' | 'codex' | 'workbuddy';
+type AgentType = '' | 'codex' | 'workbuddy' | 'claude';
 type LoadState =
   | { status: 'loading' }
   | { status: 'error' }
@@ -37,6 +37,13 @@ type LoadState =
     };
 function formatPercent(value?: number): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
+}
+
+function agentLabel(agentType: AgentType): string {
+  if (agentType === 'claude') return 'Claude Code';
+  if (agentType === 'codex') return 'Codex';
+  if (agentType === 'workbuddy') return 'WorkBuddy';
+  return 'Agent';
 }
 
 export function DashboardPage({
@@ -183,6 +190,7 @@ export function DashboardPage({
             >
               <option value="">全部</option>
               <option value="codex">Codex</option>
+              <option value="claude">Claude Code</option>
               <option value="workbuddy">WorkBuddy</option>
             </select>
           </label>
@@ -234,7 +242,7 @@ export function DashboardPage({
           <p className="panel-intro">每条信号都对应一个可判断的风险模式，并按会话、对象或失败类型组织证据。</p>
           <div className="panel-body">
             {activeSignals.length === 0 ? (
-              <p>当前没有需要人工处理的信号；请确认 collector 已运行并有 Codex 会话内容入库。</p>
+              <p>当前没有需要人工处理的信号；请确认 collector 已运行并有 {agentLabel(submittedFilters.agentType)} 会话内容入库。</p>
             ) : (
               <div className="signal-list">
                 {activeSignals.map((signal) => (

@@ -37,6 +37,15 @@
         "command": ["opencode"],
         "profile": ".agentic/runtime-adapters/opencode.json"
       }
+    },
+    {
+      "id": "claude-code-default",
+      "label": "Claude Code (Default)",
+      "adapter": {
+        "id": "generic-cli",
+        "command": ["claude"],
+        "profile": ".agentic/runtime-adapters/claude.json"
+      }
     }
   ]
 }

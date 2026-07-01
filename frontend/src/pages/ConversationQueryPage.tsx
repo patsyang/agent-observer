@@ -20,7 +20,7 @@ type Filters = {
   page_size: number;
 };
 
-type AgentType = '' | 'codex' | 'workbuddy';
+type AgentType = '' | 'codex' | 'workbuddy' | 'claude';
 
 const PAGE_SIZE = 20;
 
@@ -207,6 +207,7 @@ function AgentTypeSelect({
       >
         <option value="">全部</option>
         <option value="codex">Codex</option>
+        <option value="claude">Claude Code</option>
         <option value="workbuddy">WorkBuddy</option>
       </select>
     </label>

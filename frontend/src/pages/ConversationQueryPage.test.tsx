@@ -113,6 +113,7 @@ describe('ConversationQueryPage', () => {
     expect(screen.getByLabelText('开始')).toBeInTheDocument();
     await user.click(screen.getByRole('button', { name: '1小时' }));
     expect(screen.getByLabelText('Agent类型')).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: 'Claude Code' })).toHaveAttribute('value', 'claude');
     expect(screen.queryByLabelText('Source')).not.toBeInTheDocument();
     expect(loadConversations).toHaveBeenCalledWith({
       window: '1h',

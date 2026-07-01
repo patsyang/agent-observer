@@ -37,6 +37,8 @@ def _prepare_packaged_collector(tmp_path, extract_name: str):
             source["root"] = str(extract_dir / ".codex")
         if source["source_kind"] == "workbuddy_local":
             source["root"] = str(extract_dir / ".workbuddy")
+        if source["source_kind"] == "claude_local":
+            source["root"] = str(extract_dir / ".claude")
     config_path.write_text(json.dumps(config), encoding="utf-8")
     _write_codex_fixture(extract_dir / ".codex")
     _write_workbuddy_fixture(extract_dir / ".workbuddy")
@@ -153,7 +155,7 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
     assert calls[-1] == ("GET", "/api/collectors/package-test/enrichments/next")
     assert register_payloads[0]["protocol_version"] == "agent-observer-telemetry/v3"
     assert register_payloads[0]["agent_version"] == "0.3.0"
-    assert {source["source_kind"] for source in register_payloads[0]["sources"]} == {"codex_local", "workbuddy_local"}
+    assert {source["source_kind"] for source in register_payloads[0]["sources"]} == {"codex_local", "workbuddy_local", "claude_local"}
     assert all(payload["protocol_version"] == "agent-observer-telemetry/v3" for payload in heartbeat_payloads)
     assert all(payload["agent_version"] == "0.3.0" for payload in heartbeat_payloads)
     state = json.loads((extract_dir / "agent-observer.state.json").read_text(encoding="utf-8"))

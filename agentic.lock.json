@@ -8,11 +8,14 @@
     "PROJECT_SLUG": "agent_observer"
   },
   "files": {
+    ".agentic/runtime-adapters/claude.json": {
+      "sha256": "4338edd55c91864c862522e08dd09e980a75432edc1f9cd5905e3fec07376d00"
+    },
     ".agentic/runtime-adapters/codex.json": {
       "sha256": "a925f0cd57ea330b4c872e59dc68bf538dab6d91fd7a2b1d9a7f0082cfc616b5"
     },
     ".agentic/runtime-adapters/model-catalog.json": {
-      "sha256": "46d2af98ac97854c9a7fdf66893a2010b6a3c83f8e97e6f238b863bd5d8bb5fd"
+      "sha256": "ed6bcc028be1830cd05ded7a5c105878d090367d3d17dbb5e6c19050702f43b5"
     },
     ".agentic/runtime-adapters/opencode.json": {
       "sha256": "f46068d859ebb19df0fb14ba855fbbcc328d1e73fb14a16e41a09c8ef50edcad"
