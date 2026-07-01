@@ -30,6 +30,8 @@ export function conclusionCodeLabel(value: string): string {
     known_issue: '已知问题',
     needs_fix: '需要修复',
     accepted_risk: '接受风险',
+    expected_nonzero_exit: '期望非零退出',
+    duplicate_signal: '重复信号',
     not_actionable: '无需处理'
   };
   return labels[value] ?? value;
@@ -44,7 +46,14 @@ export function signalKindLabel(value: string): string {
     change_volume_anomaly: '变更量异常',
     key_file_change: '关键文件',
     destructive_operation_attempt: '破坏性操作',
-    sensitive_content_exposure: '敏感内容'
+    sensitive_content_exposure: '敏感内容',
+    workflow_gate_blocked: '工作门禁阻断',
+    validation_failure: '校验失败',
+    repeated_tool_failure: '重复工具失败',
+    agent_loop_stuck: 'Agent卡循环',
+    usage_spike: '用量激增',
+    low_cache_hit_rate: '缓存命中率低',
+    unknown_usage_dominant: '未知活动主导'
   };
   return labels[value] ?? '行为风险';
 }

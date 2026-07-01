@@ -146,6 +146,6 @@ export interface SignalsResponse {
 export type BehaviorSignalDetail = BehaviorSignal;
 
 export interface HandleSignalPayload {
-  conclusion_code: 'known_issue' | 'needs_fix' | 'accepted_risk' | 'not_actionable' | '';
+  conclusion_code: 'known_issue' | 'needs_fix' | 'accepted_risk' | 'expected_nonzero_exit' | 'duplicate_signal' | 'not_actionable' | '';
   note?: string;
 }

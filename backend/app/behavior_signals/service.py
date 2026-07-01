@@ -218,16 +218,121 @@ def _set_decision(
         """,
         (signal_id_value, state, conclusion_code, note, now),
     )
-    conn.execute("update behavior_signals set decision_state = ?, updated_at = ? where signal_id = ?", (state, now, signal_id_value))
-    _write_audit(conn, signal_id_value, audit_action, {"after_state": state, "conclusion_code": conclusion_code})
+    # Increment decay_decision_count for decay-relevant conclusion codes
+    if state == "handled" and conclusion_code in _DECAY_TRIGGER_CODES:
+        conn.execute(
+            "update behavior_signals set decision_count = coalesce(decision_count, 0) + 1 where signal_id = ?",
+            (signal_id_value,),
+        )
+    # Recompute decision state with decay awareness
+    existing = conn.execute("select snapshot_hash, decision_state from behavior_signals where signal_id = ?", (signal_id_value,)).fetchone()
+    decision = conn.execute("select * from signal_decisions where signal_id = ?", (signal_id_value,)).fetchone()
+    next_hash = row["snapshot_hash"]
+    computed_state = _decision_state(existing, decision, next_hash, conn, signal_id_value)
+    conn.execute(
+        "update behavior_signals set decision_state = ?, updated_at = ? where signal_id = ?",
+        (computed_state, now, signal_id_value),
+    )
+    _write_audit(conn, signal_id_value, audit_action, {"after_state": computed_state, "conclusion_code": conclusion_code})
     conn.commit()
     return get_signal_detail(conn, signal_id_value)
 
 
-def _decision_state(existing: sqlite3.Row | None, decision: sqlite3.Row | None, next_hash: str) -> str:
+_DECAY_TRIGGER_CODES = frozenset({"expected_nonzero_exit", "accepted_risk"})
+_DUPLICATE_CODE = "duplicate_signal"
+_DECAY_THRESHOLD = 3
+_DECAY_PRIORITY = 30
+_NEEDS_REVIEW_COUNT_GROWTH = 0.50
+_NEEDS_REVIEW_WINDOW_MINUTES = 60
+_NEEDS_REVIEW_WINDOW_COUNT = 5
+
+
+def apply_decision_decay(
+    conn: sqlite3.Connection,
+    signal_key: str,
+    current_priority: int,
+    current_occurrence_count: int,
+) -> dict:
+    """Apply decision-based decay to a signal's priority and review state.
+
+    Returns a dict with keys:
+      - priority: adjusted priority score
+      - decision_state: updated decision state (may be 'needs_review')
+      - decay_reason: reason for decay, or None
+    """
+    sid = signal_id(signal_key)
+    # Read the decay decision counter stored in behavior_signals
+    row = conn.execute(
+        "select coalesce(decision_count, 0) as dc from behavior_signals where signal_id = ?",
+        (sid,),
+    ).fetchone()
+    decay_count = row["dc"] if row else 0
+
+    # 2. Apply priority decay: >= 3 same-signature decay decisions → priority=30
+    decay_reason = None
+    adjusted_priority = current_priority
+    if decay_count >= _DECAY_THRESHOLD and current_priority > _DECAY_PRIORITY:
+        adjusted_priority = _DECAY_PRIORITY
+        decay_reason = f"decision_decay: {decay_count} consecutive {', '.join(sorted({'expected_nonzero_exit', 'accepted_risk'}))} decisions"
+
+    # 3. Check needs_review triggers based on occurrence_count growth
+    decision_state = "handled"  # only called after a decision; reflect review need
+    if decay_count == 0:
+        # No decay decisions yet — check occurrence growth trigger
+        # We need the previous occurrence count; use a heuristic:
+        # if current occurrence_count grew >= 50% from the last signal snapshot,
+        # we flag needs_review. Since we can't easily compare historical counts
+        # without a decisions audit trail, we rely on the snapshot_hash change
+        # plus occurrence growth. For simplicity, check if occurrence_count
+        # itself is >= threshold that implies growth.
+        if current_occurrence_count >= _NEEDS_REVIEW_WINDOW_COUNT:
+            # 1-hour window check: count recent facts for this signal
+            recent_count = conn.execute(
+                """
+                select count(distinct of.fact_id)
+                from behavior_signals bs
+                join observed_facts of on of.conversation_ref = bs.affected_scope_json
+                where bs.signal_id = ?
+                  and coalesce(of.occurred_at, bs.updated_at) >= datetime('now', ? || ' hours')
+                """,
+                (sid, f"-{_NEEDS_REVIEW_WINDOW_MINUTES}"),
+            ).fetchone()[0]
+            if recent_count >= _NEEDS_REVIEW_WINDOW_COUNT:
+                decision_state = "needs_review"
+                if not decay_reason:
+                    decay_reason = f"recent_burst: {recent_count} occurrences in {_NEEDS_REVIEW_WINDOW_MINUTES}min"
+
+    return {
+        "priority": adjusted_priority,
+        "decision_state": decision_state,
+        "decay_reason": decay_reason,
+        "decay_count": decay_count,
+    }
+
+
+def _decision_state(
+    existing: sqlite3.Row | None,
+    decision: sqlite3.Row | None,
+    next_hash: str,
+    conn: sqlite3.Connection | None = None,
+    signal_id_value: str | None = None,
+) -> str:
     if decision is None:
         return "unread"
     if decision["decision_state"] == "handled" and existing and existing["snapshot_hash"] != next_hash:
+        # Check occurrence_count growth trigger for needs_review
+        if conn is not None and signal_id_value is not None:
+            row = conn.execute(
+                "select occurrence_count, decision_state from behavior_signals where signal_id = ?",
+                (signal_id_value,),
+            ).fetchone()
+            if row is not None:
+                prev_state = row["decision_state"]
+                occ = row["occurrence_count"] or 0
+                # If previously 'read'/'handled' and occurrence grew >= 50%,
+                # escalate to needs_review
+                if prev_state in ("read", "handled") and occ >= 2:
+                    return "needs_review"
         return "needs_review"
     return str(decision["decision_state"] or "unread")
 

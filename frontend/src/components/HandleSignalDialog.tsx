@@ -30,6 +30,8 @@ export function HandleSignalDialog({ onCancel, onSubmit }: Props) {
             <option value="known_issue">已知问题</option>
             <option value="needs_fix">需要修复</option>
             <option value="accepted_risk">接受风险</option>
+            <option value="expected_nonzero_exit">期望非零退出</option>
+            <option value="duplicate_signal">重复信号</option>
             <option value="not_actionable">无需处理</option>
           </select>
         </label>
