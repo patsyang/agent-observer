@@ -86,6 +86,13 @@ frontend/apps/
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite
 backend/data/packages/
+backend/*.sqlite
+backend/*.db
+backend/app/*.sqlite
+backend/app/*.db
+backend/app/db/*.sqlite
+backend/app/db/*.db
+backend/check_codex_data.py
 
 # Temporary test files
 test-*.txt

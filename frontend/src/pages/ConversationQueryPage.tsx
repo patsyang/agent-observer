@@ -162,6 +162,7 @@ export function ConversationQueryPage({
             aria-label="搜索会话"
             className="icon-button conversation-search-button"
             data-testid="conversation-search"
+            disabled={state === 'loading'}
             onClick={submitSearch}
             title="搜索会话"
             type="button"

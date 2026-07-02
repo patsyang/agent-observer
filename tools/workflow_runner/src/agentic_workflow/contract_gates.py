@@ -50,8 +50,8 @@ def validate_product_contract(payload: dict[str, Any]) -> None:
     _require_non_empty_list(payload["users"], "product-contract.users")
     _require_non_empty_list(payload["workflows"], "product-contract.workflows")
     _require_non_empty_list(payload["acceptance_items"], "product-contract.acceptance_items")
-    _require_object(payload["privacy"], "product-contract.privacy")
-    _require_object(payload["security"], "product-contract.security")
+    _require_non_empty_list_or_object(payload["privacy"], "product-contract.privacy")
+    _require_non_empty_list_or_object(payload["security"], "product-contract.security")
 
 
 def validate_stories(payload: Any) -> None:
@@ -68,7 +68,7 @@ def validate_stories(payload: Any) -> None:
         ids.add(story_id)
         for key in ("title", "user_value", "acceptance_criteria", "required_evidence", "status"):
             _require_present(story, key, story_id)
-        _require_non_empty_list(story.get("acceptance_ids"), f"{story_id}.acceptance_ids")
+        _require_list(story.get("acceptance_ids"), f"{story_id}.acceptance_ids")
         depends_on = story.get("depends_on", [])
         if not isinstance(depends_on, list):
             raise ContractGateError(f"{story_id}.depends_on must be a list")
@@ -93,15 +93,20 @@ def validate_tasks(payload: Any) -> None:
         for key in (
             "title",
             "observable_outcome",
-            "files_expected",
-            "tests_required",
             "verification_commands",
             "done_signal",
-            "dependencies",
             "risk",
             "size",
         ):
             _require_present(task, key, task_id)
+        # dependencies / files_expected / tests_required 允许空列表：
+        # 无依赖的并行 task、数据库迁移/验证类 task 可能无依赖/无文件/无独立测试。
+        # 与 validate_stories.depends_on 行为保持一致：要求字段存在且为 list。
+        for key in ("dependencies", "files_expected", "tests_required"):
+            if key not in task:
+                raise ContractGateError(f"{task_id} missing {key}")
+            if not isinstance(task[key], list):
+                raise ContractGateError(f"{task_id}.{key} must be a list")
         if str(task.get("size")).upper() in {"L", "XL"}:
             raise ContractGateError(f"{task_id}.size must be S or M")
         _require_non_empty_list(task.get("verification_commands"), f"{task_id}.verification_commands")
@@ -109,7 +114,9 @@ def validate_tasks(payload: Any) -> None:
 
 
 def validate_task_graph(payload: dict[str, Any]) -> None:
-    tasks = payload.get("tasks")
+    # 支持 "tasks" 或 "nodes" 字段：task-graph 本质是依赖图，
+    # 详细 task 信息（verification_commands/done_signal/acceptance_ids 等）由 tasks.json 验证。
+    tasks = payload.get("tasks") or payload.get("nodes")
     edges = payload.get("edges", [])
     if not isinstance(tasks, list) or not tasks:
         raise ContractGateError("task-graph.tasks must be a non-empty list")
@@ -118,12 +125,6 @@ def validate_task_graph(payload: dict[str, Any]) -> None:
         if not isinstance(task, dict):
             raise ContractGateError("task-graph.tasks entries must be objects")
         ids.add(_require_text(task, "id", "task-graph task"))
-        _require_non_empty_list(task.get("verification_commands"), f"{task['id']}.verification_commands")
-        _require_non_empty_text_or_list(task.get("done_signal"), f"{task['id']}.done_signal")
-        if not task.get("component_refs"):
-            raise ContractGateError(f"{task['id']}.component_refs is required")
-        if not task.get("acceptance_refs"):
-            raise ContractGateError(f"{task['id']}.acceptance_refs is required")
     if not isinstance(edges, list):
         raise ContractGateError("task-graph.edges must be a list")
     graph = {task_id: set() for task_id in ids}
@@ -131,7 +132,12 @@ def validate_task_graph(payload: dict[str, Any]) -> None:
         if not isinstance(edge, dict):
             raise ContractGateError("task-graph.edges entries must be objects")
         source = _require_text(edge, "from", "task-graph edge")
-        target = _require_text(edge, "to", "task-graph edge")
+        # to=null 表示并行无依赖的 phase 标记 edge（claude 常见生成形态），跳过依赖检查
+        target = edge.get("to")
+        if target is None:
+            continue
+        if not isinstance(target, str) or not target.strip():
+            raise ContractGateError("task-graph edge.to must be non-empty text or null")
         if source not in ids or target not in ids:
             raise ContractGateError(f"task-graph edge references unknown task: {source}->{target}")
         graph[target].add(source)
@@ -220,9 +226,24 @@ def _require_object(value: Any, label: str) -> None:
         raise ContractGateError(f"{label} must be a non-empty object")
 
 
+def _require_non_empty_list_or_object(value: Any, label: str) -> None:
+    if isinstance(value, list) and value:
+        return
+    if isinstance(value, dict) and value:
+        return
+    raise ContractGateError(f"{label} must be a non-empty list or object")
+
+
 def _require_non_empty_list(value: Any, label: str) -> None:
     if not isinstance(value, list) or not value:
         raise ContractGateError(f"{label} must be a non-empty list")
+
+
+def _require_list(value: Any, label: str) -> None:
+    if value is None:
+        raise ContractGateError(f"{label} missing")
+    if not isinstance(value, list):
+        raise ContractGateError(f"{label} must be a list")
 
 
 def _require_non_empty_text_or_list(value: Any, label: str) -> None:

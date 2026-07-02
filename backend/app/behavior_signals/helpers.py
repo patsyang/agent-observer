@@ -5,6 +5,7 @@ import json
 import re
 import sqlite3
 from collections import Counter
+from uuid import uuid4
 
 from app.behavior_signals.common import dumps, loads, now_iso
 from app.behavior_signals.evidence import enrichment_entries, evidence_entries
@@ -334,7 +335,7 @@ def normalize_note(note: str | None) -> str | None:
 
 def write_audit(conn: sqlite3.Connection, signal_id: str, action: str, metadata: dict) -> None:
     now = now_iso()
-    audit_id = hashlib.sha256(f"{signal_id}:{action}:{now}:{dumps(metadata)}".encode("utf-8")).hexdigest()[:24]
+    audit_id = hashlib.sha256(f"{signal_id}:{action}:{now}:{dumps(metadata)}:{uuid4().hex}".encode("utf-8")).hexdigest()[:24]
     conn.execute(
         """
         insert into audit_logs (audit_id, object_type, object_id, action, actor, metadata_json, created_at)

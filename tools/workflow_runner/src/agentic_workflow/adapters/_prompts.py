@@ -72,7 +72,7 @@ workflow_input：`{context.workflow_input.__dict__}`
 - 读取 `{context.run_dir / "input.json"}`。
 - 读取 `{context.run_dir / "artifacts" / "scope-resolution.json"}`。
 - 如果上方存在项目级技术栈契约，必须读取契约文件并在关键 JSON/Markdown 产物中写入相同的 `stack_contract_ref`。
-- 读取产物目录中已经存在的上游产物，并把它们作为当前节点输入。
+- 按节点命令要求读取必要的上游产物作为当前节点输入；命令未明确要求读取的产物不要主动整份读取，避免上下文过载。
 - 只完成当前 node，不跳过 workflow runner 的 artifact gate。
 - 必须把下列 required artifacts 写入产物目录，而不是写入仓库根目录：
 {required}

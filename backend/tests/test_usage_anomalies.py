@@ -298,6 +298,48 @@ def test_unknown_usage_dominant_outside_window_not_triggered(tmpdb):
     assert len(signals) == 0
 
 
+def test_unknown_usage_dominant_sliding_window_across_hour_boundary(tmpdb):
+    """滑动窗口语义：跨小时边界时仍应只触发 1 个信号（回归 hour-bucket bug）。
+
+    bug 根因：原实现用 occ.strftime("%Y-%m-%dT%H") 做固定小时桶分桶，
+    当 now 接近小时边界（如 23:23:23）时，事件跨度 25 分钟会跨越 T22/T23，
+    被切分到两个桶，各自独立计算 unknown 占比，导致误触发 2 个信号。
+    修复后改为按 account 的 1 小时滑动窗口统一计算占比。
+    """
+    from app.behavior_signals.service import _upsert_signal, detect_usage_anomalies
+
+    # 固定 now 到 23:23:23（claude full-verify 实际触发 bug 的时间点）
+    fixed_now = datetime(2026, 7, 1, 23, 23, 23, tzinfo=UTC)
+    items = [
+        _usage_item(
+            event_id=f"unknown-{i}",
+            input_tokens=100,
+            output_tokens=50,
+            activity_tag="unknown",
+            account_ref="account-alpha",
+            occurred_at=(fixed_now - timedelta(minutes=i * 5)).isoformat(),
+        )
+        for i in range(6)
+    ] + [
+        _usage_item(
+            event_id="known-001",
+            input_tokens=200,
+            output_tokens=100,
+            activity_tag="implementation",
+            account_ref="account-alpha",
+            occurred_at=(fixed_now - timedelta(minutes=2)).isoformat(),
+        ),
+    ]
+    with connect(tmpdb) as conn:
+        _ingest(conn, items)
+        results = detect_usage_anomalies(conn, "test", _upsert_signal, now=fixed_now)
+
+    unknown_signals = [r for r in results if r["signal_kind"] == "unknown_usage_dominant"]
+    assert len(unknown_signals) == 1
+    assert unknown_signals[0]["affected_scope"]["unknown_ratio"] > 0.50
+    assert unknown_signals[0]["affected_scope"]["total_facts"] == 7
+
+
 # ---------------------------------------------------------------------------
 # Integration test
 # ---------------------------------------------------------------------------

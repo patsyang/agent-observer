@@ -954,6 +954,272 @@ def test_stack_acceptance_requires_verify_all_command_coverage(tmp_path, monkeyp
         complete_run(context, summary="done", changed_files=[], skip_verify=True)
 
 
+def test_stack_acceptance_accepts_dict_component_evidence(tmp_path):
+    """复现 claude 实际生成的 component-evidence.json：evidence 是 dict 而非 list。
+
+    claude 自然生成 evidence: {type, test_command, test_result, exit_code, ...}，
+    而非 evidence: [...]。_validate_component_evidence 应兼容 dict 形式，
+    与 _validate_acceptance_evidence_paths 处理方式一致（line 248-249 将 dict 包成 list）。
+    """
+    from agentic_workflow.stack_contract import (
+        StackContract,
+        StackContractRef,
+        validate_stack_acceptance_artifacts,
+    )
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    ref = StackContractRef(
+        contract_id="test-stack",
+        revision=1,
+        hash="abc123",
+        status="confirmed",
+        path=".agentic/stack-contract.json",
+    )
+    contract_payload = {
+        "contract_id": "test-stack",
+        "revision": 1,
+        "status": "confirmed",
+        "components": [
+            {
+                "component_id": "backend",
+                "kind": "backend",
+                "language": "python",
+                "root": "backend",
+            }
+        ],
+        "commands": {"verify_all": ["python scripts/ao.py verify"]},
+    }
+    contract = StackContract(ref=ref, payload=contract_payload)
+    ref_dict = ref.to_dict()
+
+    (artifacts / "acceptance-matrix.json").write_text(
+        json.dumps(
+            {
+                "stack_contract_ref": ref_dict,
+                "result": "PASS",
+                "acceptance_items": [
+                    {
+                        "acceptance_id": "ACC-001",
+                        "story_id": "story-001",
+                        "result": "PASS",
+                        "behavior": "命令验证行为",
+                        "evidence": {
+                            "type": "package",
+                            "command": "python -m pytest",
+                            "exit_code": 0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    # claude 实际格式：evidence 是 dict 而非 list
+    (artifacts / "component-evidence.json").write_text(
+        json.dumps(
+            {
+                "stack_contract_ref": ref_dict,
+                "components": [
+                    {
+                        "component_id": "backend",
+                        "evidence": {
+                            "type": "package",
+                            "test_command": "cd backend && python -m pytest",
+                            "test_result": "340 passed",
+                            "exit_code": 0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifacts / "command-coverage.json").write_text(
+        json.dumps(
+            {
+                "stack_contract_ref": ref_dict,
+                "commands": [
+                    {
+                        "name": "verify_all",
+                        "command": "python scripts/ao.py verify",
+                        "result": "PASS",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    # 修复前 raise "component backend must include evidence"，修复后通过
+    validate_stack_acceptance_artifacts(artifacts, contract=contract, run_dir=tmp_path)
+
+
+def _make_test_stack_contract():
+    """构造最小 stack contract，用于 stack acceptance 校验测试。"""
+    from agentic_workflow.stack_contract import StackContract, StackContractRef
+
+    ref = StackContractRef(
+        contract_id="test-stack",
+        revision=1,
+        hash="abc123",
+        status="confirmed",
+        path=".agentic/stack-contract.json",
+    )
+    contract_payload = {
+        "contract_id": "test-stack",
+        "revision": 1,
+        "status": "confirmed",
+        "components": [
+            {
+                "component_id": "backend",
+                "kind": "backend",
+                "language": "python",
+                "root": "backend",
+            }
+        ],
+        "commands": {"verify_all": ["python scripts/ao.py verify"]},
+    }
+    return StackContract(ref=ref, payload=contract_payload), ref.to_dict()
+
+
+def _write_stack_acceptance_fixtures(
+    artifacts_dir: Path,
+    ref_dict: dict,
+    *,
+    commands: list,
+    summary: dict | None = None,
+) -> None:
+    """构造 stack acceptance 三件套，command-coverage 部分可定制。"""
+    (artifacts_dir / "acceptance-matrix.json").write_text(
+        json.dumps(
+            {
+                "stack_contract_ref": ref_dict,
+                "result": "PASS",
+                "acceptance_items": [
+                    {
+                        "acceptance_id": "ACC-001",
+                        "story_id": "story-001",
+                        "result": "PASS",
+                        "behavior": "命令验证行为",
+                        "evidence": {
+                            "type": "package",
+                            "command": "python -m pytest",
+                            "exit_code": 0,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    (artifacts_dir / "component-evidence.json").write_text(
+        json.dumps(
+            {
+                "stack_contract_ref": ref_dict,
+                "components": [
+                    {"component_id": "backend", "evidence": ["implementation.md"]}
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    coverage: dict = {"stack_contract_ref": ref_dict, "commands": commands}
+    if summary is not None:
+        coverage["summary"] = summary
+    (artifacts_dir / "command-coverage.json").write_text(
+        json.dumps(coverage), encoding="utf-8"
+    )
+
+
+def test_command_coverage_accepts_preexisting_failure(tmp_path):
+    """复现 claude 实际生成格式：预存失败用 result=FAIL + skip_reason + introduced_by_run=false。
+
+    与 production_gates.PASS_WITH_PREEXISTING 语义一致：
+    release gate 阻断本次引入的回归，而非要求修复所有历史问题。
+    summary.introduced_failures=0 表示本次 run 未引入新失败。
+    """
+    from agentic_workflow.stack_contract import validate_stack_acceptance_artifacts
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    contract, ref_dict = _make_test_stack_contract()
+
+    _write_stack_acceptance_fixtures(
+        artifacts,
+        ref_dict,
+        commands=[
+            {
+                "name": "verify_all",
+                "command": "python scripts/ao.py verify",
+                "result": "FAIL",
+                "exit_code": 1,
+                "skip_reason": "Pre-existing E2E failures not introduced by this run",
+                "failures": [
+                    {
+                        "file": "e2e/spec.ts",
+                        "test": "operator flow",
+                        "introduced_by_run": False,
+                    }
+                ],
+            }
+        ],
+        summary={
+            "total_commands": 1,
+            "passed": 0,
+            "failed": 1,
+            "failed_preexisting": 1,
+            "introduced_failures": 0,
+        },
+    )
+
+    # 修复前 raise "command coverage item is not passing: verify_all"，修复后通过
+    validate_stack_acceptance_artifacts(artifacts, contract=contract, run_dir=tmp_path)
+
+
+def test_command_coverage_rejects_introduced_failure(tmp_path):
+    """本次引入的失败（introduced_failures>0）必须被拒绝，即使有 skip_reason。"""
+    from agentic_workflow.stack_contract import (
+        StackContractError,
+        validate_stack_acceptance_artifacts,
+    )
+
+    artifacts = tmp_path / "artifacts"
+    artifacts.mkdir()
+    contract, ref_dict = _make_test_stack_contract()
+
+    _write_stack_acceptance_fixtures(
+        artifacts,
+        ref_dict,
+        commands=[
+            {
+                "name": "verify_all",
+                "command": "python scripts/ao.py verify",
+                "result": "FAIL",
+                "exit_code": 1,
+                "skip_reason": "attempted bypass",
+                "failures": [
+                    {
+                        "file": "test.py",
+                        "test": "new test",
+                        "introduced_by_run": True,
+                    }
+                ],
+            }
+        ],
+        summary={
+            "total_commands": 1,
+            "passed": 0,
+            "failed": 1,
+            "failed_preexisting": 0,
+            "introduced_failures": 1,
+        },
+    )
+
+    with pytest.raises(StackContractError, match="not passing"):
+        validate_stack_acceptance_artifacts(artifacts, contract=contract, run_dir=tmp_path)
+
+
 def test_stack_acceptance_requires_all_contract_component_evidence(tmp_path, monkeypatch):
     monkeypatch.setenv("AGENTIC_FACTORY_HOME", str(tmp_path / "home"))
     control_root = tmp_path / "control"

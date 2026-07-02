@@ -1,8 +1,19 @@
 import subprocess
 import sys
 import threading
+import time
 from dataclasses import dataclass
 from pathlib import Path
+
+
+# 轮询间隔：在此间隔内检查进程是否退出，同时检测管道是否已关闭。
+# 借鉴 sw-factory BaseCliProvider.HEARTBEAT_INTERVAL_SECONDS=30，缩短为 10s 以更快响应挂死。
+PROCESS_POLL_INTERVAL_SECONDS = 10
+
+# 管道关闭后给进程退出的宽限期。stdout/stderr 已 EOF 但进程未退出时
+# （如 claude.exe 写完结果后挂死），等待此宽限期后强杀。
+# 借鉴 sw-factory BaseCliProvider._wait_for_process 方案二：管道关闭检测。
+PIPE_CLOSED_GRACE_SECONDS = 10
 
 
 @dataclass(frozen=True)
@@ -41,16 +52,41 @@ def run_command(
     stdout_thread = _start_reader(process.stdout, stdout_chunks)
     stderr_thread = _start_reader(process.stderr, stderr_chunks)
     stdin_thread = _start_stdin_writer(process, stdin)
+
     timed_out = False
-    try:
-        process.wait(timeout=timeout_seconds)
-    except subprocess.TimeoutExpired:
-        timed_out = True
+    pipe_closed_dangling = False
+    deadline = time.monotonic() + timeout_seconds
+
+    while True:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            timed_out = True
+            break
+        poll_interval = min(PROCESS_POLL_INTERVAL_SECONDS, remaining)
+        try:
+            process.wait(timeout=poll_interval)
+            break  # 进程正常退出
+        except subprocess.TimeoutExpired:
+            # 借鉴 sw-factory 方案二：管道关闭检测
+            # stdout/stderr reader 线程均已结束（EOF）但进程未退出，
+            # 说明子进程已写完输出但拒不退出（claude.exe 已知行为：写出
+            # terminal_reason=completed 的结果 JSON 后进程挂死）。
+            # 给短宽限期，仍不退出则强杀并返回已捕获的输出。
+            if not stdout_thread.is_alive() and not stderr_thread.is_alive():
+                try:
+                    process.wait(timeout=PIPE_CLOSED_GRACE_SECONDS)
+                    break  # 进程在宽限期内退出
+                except subprocess.TimeoutExpired:
+                    pipe_closed_dangling = True
+                    break
+
+    if timed_out or pipe_closed_dangling:
         terminate_process_tree(process.pid)
         try:
             process.wait(timeout=10)
         except subprocess.TimeoutExpired:
             pass
+
     stdout_thread.join(timeout=5)
     stderr_thread.join(timeout=5)
     _join_stdin_writer(stdin_thread)
@@ -59,6 +95,16 @@ def run_command(
     if timed_out:
         message = f"命令执行超过 {timeout_seconds}s，已超时"
         return CommandResult(124, stdout, f"{stderr}\n{message}" if stderr else message)
+    if pipe_closed_dangling:
+        # 管道已关闭（输出完整捕获），但进程未自行退出，已强杀。
+        # 返回 0 让调用方通过 payload 校验决定真实成功/失败
+        # （generic_cli._return_code_for_profile 会检查 stdout JSON 的 success_json_conditions）。
+        message = (
+            f"子进程 stdout/stderr 已关闭但未自行退出"
+            f"（等待 {PIPE_CLOSED_GRACE_SECONDS}s 后强杀）；"
+            "输出已完整捕获，由调用方校验 payload 决定成败"
+        )
+        return CommandResult(0, stdout, f"{stderr}\n{message}" if stderr else message)
     return CommandResult(process.returncode, stdout, stderr)
 
 

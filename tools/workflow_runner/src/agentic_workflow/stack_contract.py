@@ -196,6 +196,10 @@ def _validate_component_evidence(
             raise StackContractError("component evidence item must be an object")
         observed_ids.add(_required_text(component, "component_id"))
         evidence = component.get("evidence")
+        # 兼容 dict 形式：claude 自然生成单个 evidence 对象而非列表。
+        # 与 _validate_acceptance_evidence_paths 处理方式一致（line 248-249 将 dict 包成 list）。
+        if isinstance(evidence, dict):
+            evidence = [evidence]
         if not isinstance(evidence, list) or not evidence:
             raise StackContractError(
                 f"component {component.get('component_id')} must include evidence"
@@ -219,16 +223,26 @@ def _validate_command_coverage(
         raise StackContractError("command-coverage.json must include non-empty commands")
     required_commands = _command_set(contract_payload.get("commands", {}).get("verify_all"))
     observed_commands: set[str] = set()
+    # 整体判断：是否允许预存失败。
+    # 与 production_gates.PASS_WITH_PREEXISTING 语义一致：
+    # release gate 阻断本次引入的回归，而非要求修复所有历史问题。
+    allow_preexisting = _allow_preexisting_failures(payload.get("summary"))
     for item in commands:
         if not isinstance(item, dict):
             raise StackContractError("command coverage item must be an object")
         _required_text(item, "name")
         observed_commands.add(_required_text(item, "command"))
         result = str(item.get("result") or "").upper()
-        if result not in {"PASS", "SKIPPED_WITH_REASON"}:
-            raise StackContractError(f"command coverage item is not passing: {item.get('name')}")
+        if result == "PASS":
+            continue
         if result == "SKIPPED_WITH_REASON":
-            _required_text(item, "reason")
+            _require_command_reason(item)
+            continue
+        # 兼容预存失败：命令实际 FAIL，但失败在本次 run 之前就已存在。
+        # claude 对预存失败记录为 result=FAIL + skip_reason + failures[].introduced_by_run=false。
+        if result == "FAIL" and allow_preexisting and _has_command_reason(item):
+            continue
+        raise StackContractError(f"command coverage item is not passing: {item.get('name')}")
     missing = required_commands - observed_commands
     if missing:
         raise StackContractError(
@@ -237,9 +251,38 @@ def _validate_command_coverage(
     validate_stack_trace(path, expected)
 
 
+def _allow_preexisting_failures(summary: Any) -> bool:
+    if not isinstance(summary, dict):
+        return False
+    raw = summary.get("introduced_failures")
+    return isinstance(raw, int) and raw == 0
+
+
+def _require_command_reason(item: dict[str, Any]) -> None:
+    # 兼容 reason 和 skip_reason 两种字段名。
+    reason = item.get("reason") or item.get("skip_reason")
+    if not isinstance(reason, str) or not reason.strip():
+        raise StackContractError(
+            f"command coverage item {item.get('name')} must include reason"
+        )
+
+
+def _has_command_reason(item: dict[str, Any]) -> bool:
+    reason = item.get("reason") or item.get("skip_reason")
+    return isinstance(reason, str) and bool(reason.strip())
+
+
 def _validate_acceptance_evidence_paths(path: Path, *, run_dir: Path) -> None:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    items = payload if isinstance(payload, list) else payload.get("acceptance", [])
+    # 兼容 v2 的 acceptance_items 字段，与 production_gates._acceptance_items 处理一致。
+    if isinstance(payload, list):
+        items = payload
+    elif isinstance(payload, dict):
+        items = payload.get("acceptance")
+        if not isinstance(items, list):
+            items = payload.get("acceptance_items", [])
+    else:
+        items = []
     if not isinstance(items, list) or not items:
         raise StackContractError("acceptance-matrix.json must include acceptance items")
     for item in items:

@@ -2,10 +2,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import UTC, datetime
 
 from app.sensitivity import sensitive_matches_from_text
-from app.time_ranges import parse_iso, range_bounds, window_cutoff
+from app.time_ranges import range_bounds_iso
 
 
 def get_risk_summary(
@@ -17,9 +16,15 @@ def get_risk_summary(
     start_at: str | None = None,
     end_at: str | None = None,
 ) -> dict:
-    range_start, range_end = range_bounds(window, start_at, end_at)
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
     clauses = []
     params: list[str] = []
+    if cutoff:
+        clauses.append("of.occurred_at >= ?")
+        params.append(cutoff)
+    if range_end:
+        clauses.append("of.occurred_at <= ?")
+        params.append(range_end)
     if agent_type:
         clauses.append("of.agent_type = ?")
         params.append(agent_type)
@@ -39,11 +44,6 @@ def get_risk_summary(
     ).fetchall()
     signals: dict[str, dict] = {}
     for row in rows:
-        occurred = _parse_time(row["occurred_at"])
-        if range_start and occurred < range_start:
-            continue
-        if range_end and occurred > range_end:
-            continue
         signal = signals.setdefault(
             row["signal_id"],
             {
@@ -110,14 +110,6 @@ def get_risk_summary(
             for item in signals
         ],
     }
-
-
-def _window_cutoff(window: str) -> datetime | None:
-    return window_cutoff(window)
-
-
-def _parse_time(value: str) -> datetime:
-    return parse_iso(value) or datetime.min.replace(tzinfo=UTC)
 
 
 def _normalized_object_type(risk_type: str, object_type: str, categories: set[str]) -> str:

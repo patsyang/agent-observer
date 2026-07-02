@@ -41,7 +41,7 @@ def create_run_context(
         project=workflow_input.project,
         project_root=workflow_input.project_root,
     )
-    is_project_run = project_root.resolve() != repo_root.resolve()
+    is_project_run = project is not None or project_root.resolve() != repo_root.resolve()
     project_config = load_project_config(project_root) if is_project_run else None
     stack_contract = (
         load_stack_contract(

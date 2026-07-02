@@ -834,6 +834,8 @@ def detect_usage_anomalies(
     conn: sqlite3.Connection,
     reason: str,
     upsert_signal,
+    *,
+    now: datetime | None = None,
 ) -> list[dict]:
     """Detect usage anomalies at runtime: usage_spike, low_cache_hit_rate, unknown_usage_dominant.
 
@@ -841,8 +843,16 @@ def detect_usage_anomalies(
     - usage_spike: single fact input_tokens + output_tokens > 100_000, priority=70
     - low_cache_hit_rate: input_tokens > 10_000 AND cache_hit_rate < 10%, priority=65
     - unknown_usage_dominant: within 1-hour window, activity_tag=unknown占比 > 50%, priority=60
+
+    ``now`` 用于注入参考时间，默认取当前 UTC 时间。测试通过传入跨小时边界的
+    固定时间点，可稳定复现滑动窗口语义。
     """
     from datetime import datetime, timedelta, timezone
+
+    if now is None:
+        now = datetime.now(timezone.utc)
+    elif now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
 
     # Check if promoted_to_signal column exists in usage_signals
     col_check = conn.execute("pragma table_info(usage_signals)").fetchall()
@@ -1000,13 +1010,14 @@ def detect_usage_anomalies(
                 )
             )
 
-    # --- unknown_usage_dominant: within 1-hour window, unknown activity_tag > 50% ---
-    # Parse timestamps and group by account/project within 1-hour windows
-    now = datetime.now(timezone.utc)
+    # --- unknown_usage_dominant: within 1-hour sliding window, unknown activity_tag > 50% ---
+    # 滑动窗口语义：以 now 为右端点，取 (now-1h, now] 内每个 account 的全部事件，
+    # 统一计算 unknown 占比。避免固定小时桶在小时边界处把同账号事件切分到不同桶
+    # 导致占比计算失真（跨边界时会误触发多个信号）。
     hour_ago = now - timedelta(hours=1)
 
-    # Group by account_ref within 1-hour windows
-    hourly_buckets: dict[str, list[dict]] = defaultdict(list)
+    # Group by account_ref within the 1-hour sliding window
+    account_groups: dict[str, list[dict]] = defaultdict(list)
     for row in unused_usage_facts:
         try:
             occ = datetime.fromisoformat(row["occurred_at"])
@@ -1016,14 +1027,10 @@ def detect_usage_anomalies(
             continue
         if occ < hour_ago:
             continue
-        # Bucket by account and hour
-        bucket_key = occ.strftime("%Y-%m-%dT%H")
         account = row["account_ref"] or "unknown-account"
-        key = f"{account}:{bucket_key}"
-        hourly_buckets[key].append(dict(row))
+        account_groups[account].append(dict(row))
 
-    for key, group in hourly_buckets.items():
-        account, _bucket = key.split(":", 1)
+    for account, group in account_groups.items():
         total = len(group)
         unknown_count = sum(1 for f in group if f.get("activity_tag") == "unknown")
         if total > 0 and unknown_count / total > 0.50:
@@ -1036,10 +1043,22 @@ def detect_usage_anomalies(
                 full = conn.execute("select * from observed_facts where fact_id = ?", (f["fact_id"],)).fetchone()
                 if full:
                     unk_facts.append(dict(full))
+            # 计算滑动窗口内事件的时间范围，作为 affected_scope 的时序证据
+            window_times: list[datetime] = []
+            for f in group:
+                try:
+                    t = datetime.fromisoformat(f["occurred_at"])
+                    if t.tzinfo is None:
+                        t = t.replace(tzinfo=timezone.utc)
+                    window_times.append(t)
+                except (ValueError, TypeError):
+                    continue
+            window_earliest = min(window_times).isoformat() if window_times else None
+            window_latest = max(window_times).isoformat() if window_times else None
             results.append(
                 upsert_signal(
                     conn,
-                    signal_key=f"unknown_usage_dominant:{account}:{_bucket}",
+                    signal_key=f"unknown_usage_dominant:{account}",
                     signal_kind="unknown_usage_dominant",
                     title=title,
                     why_it_matters="短时间内大量用量记录的 activity_tag 为 unknown，说明采集端未能正确标记用途，影响成本归因和分析。",
@@ -1049,7 +1068,8 @@ def detect_usage_anomalies(
                     facts=unk_facts if unk_facts else [dict(r) for r in unused_usage_facts],
                     affected_scope={
                         "account_ref": account,
-                        "hour_bucket": _bucket,
+                        "window_earliest_at": window_earliest,
+                        "window_latest_at": window_latest,
                         "total_facts": total,
                         "unknown_count": unknown_count,
                         "unknown_ratio": round(unknown_count / total, 4),

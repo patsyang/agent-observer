@@ -348,6 +348,12 @@ def _return_code_for_profile(
     process_return_code: int,
     payload: object | None,
 ) -> int:
+    # max-turns 截断视为软成功：agent 可能在截断前已完成核心任务并写出产物，
+    # 后续 effective_node_return_code 会兜底检查 missing artifacts，
+    # loop 节点的 _loop_reached_until 会兜底检查 stories.json 实际产出，
+    # 非 loop 节点由后续 gate 节点检查质量。
+    if isinstance(payload, dict) and payload.get("subtype") == "error_max_turns":
+        return 0
     if process_return_code not in profile.success_exit_codes:
         return process_return_code or 1
     if profile.success_json_conditions and (

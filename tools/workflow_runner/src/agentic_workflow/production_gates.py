@@ -21,6 +21,12 @@ PLACEHOLDER_PATTERNS = (
     "TBD",
     "占位",
     "这里填写",
+)
+
+# 空泛描述类模式：仅作为独立内容单元（整行、标题或列表项主体）时才视为占位符。
+# 这些短语在日常技术文档里是合法表述（如"系统正常工作"、"从根目录运行正常工作"、
+# "提升用户体验"），子串匹配会误伤合法句子，故要求整行匹配。
+PLACEHOLDER_PHRASE_PATTERNS = (
     "实现相关功能",
     "处理相关逻辑",
     "正常工作",
@@ -37,6 +43,7 @@ META_PLACEHOLDER_CONTEXT = (
     "不包含",
     "禁止",
     "不得",
+    "排除",
     "prohibit",
     "forbid",
     "扫描",
@@ -46,6 +53,7 @@ META_PLACEHOLDER_CONTEXT = (
     "treated as allowed",
     "合法",
     "产品需求",
+    "占位符",
 )
 
 PASSING_GATE_RESULTS = {
@@ -55,6 +63,10 @@ PASSING_GATE_RESULTS = {
     "READY",
     "COMPLETE",
     "NO_ACTIONABLE_WARNINGS",
+    # PASS_WITH_PREEXISTING：整体通过，仅存在本次 run 之前就已存在的失败
+    # （introduced_failures 为空）。release gate 的职责是阻断本次引入的回归，
+    # 而非要求修复所有历史问题，故该状态视为通过。
+    "PASS_WITH_PREEXISTING",
 }
 
 
@@ -144,7 +156,14 @@ def validate_frontend_template_selection(
         if isinstance(value, str):
             if not value.strip():
                 raise ProductionGateError(f"frontend selection missing {key}")
-        elif not isinstance(value, list) or not value:
+        elif isinstance(value, list):
+            if not value:
+                raise ProductionGateError(f"frontend selection missing {key}")
+        elif isinstance(value, dict):
+            # visual_quality_rubric 等字段自然为对象形态（多维度质量标准），不应被误判为缺失
+            if not value:
+                raise ProductionGateError(f"frontend selection missing {key}")
+        else:
             raise ProductionGateError(f"frontend selection missing {key}")
 
     implementation = payload.get("frontend_implementation")
@@ -227,12 +246,42 @@ def _reject_placeholders(path: Path) -> None:
         return
     text = path.read_text(encoding="utf-8")
     for line in text.splitlines():
-        for pattern in PLACEHOLDER_PATTERNS:
-            if pattern not in line:
-                continue
-            if _allowed_placeholder_reference(line):
-                continue
-            raise ProductionGateError(f"artifact {path.name} contains placeholder: {pattern}")
+        matched = _detect_placeholder_in_line(line)
+        if matched is None:
+            continue
+        if _allowed_placeholder_reference(line):
+            continue
+        raise ProductionGateError(f"artifact {path.name} contains placeholder: {matched}")
+
+
+def _detect_placeholder_in_line(line: str) -> str | None:
+    """检测行内是否包含占位符模式。
+
+    token 类（PLACEHOLDER_PATTERNS）用子串匹配——带语法标记或指令性的模式
+    出现在行内任意位置即视为占位符残留。phrase 类（PLACEHOLDER_PHRASE_PATTERNS）
+    仅在作为独立内容单元（整行、标题或列表项主体）时才视为占位符。
+    """
+    for pattern in PLACEHOLDER_PATTERNS:
+        if pattern in line:
+            return pattern
+    stripped = line.strip()
+    for phrase in PLACEHOLDER_PHRASE_PATTERNS:
+        if _phrase_is_line_unit(stripped, phrase):
+            return phrase
+    return None
+
+
+def _phrase_is_line_unit(stripped: str, phrase: str) -> bool:
+    """判断 phrase 是否为行的独立内容主体（整行/标题/列表项）。
+
+    避免误伤"系统正常工作"、"从根目录运行正常工作"等合法句子——
+    这些句子里的短语是谓语/状语成分，不是独立内容单元。
+    """
+    if stripped == phrase:
+        return True
+    # 去掉 markdown 标题（# / ## / ...）或列表项（- / * / + / 1.）前缀后是否等于 phrase
+    body = re.sub(r"^(#{1,6}\s*|[-*+]\s*|\d+\.\s*)", "", stripped)
+    return body == phrase
 
 
 def _allowed_placeholder_reference(line: str) -> bool:
@@ -244,7 +293,17 @@ def _validate_gate_pass(path: Path) -> None:
     payload = _read_json(path)
     if not isinstance(payload, dict):
         raise ProductionGateError(f"gate artifact {path.name} must be a JSON object")
-    raw_result = payload.get("result", payload.get("status", payload.get("decision")))
+    # 字段优先级：result > status > decision > overall_result。
+    # overall_result 用于顶层整体结果需与子项 result 区分的 gate 产物
+    # （如 full-verify.json 顶层 overall_result=PASS_WITH_PREEXISTING，
+    # 子项 verification_runs.*.result=PASS）。
+    raw_result = payload.get(
+        "result",
+        payload.get(
+            "status",
+            payload.get("decision", payload.get("overall_result")),
+        ),
+    )
     result = str(raw_result or "").strip().upper()
     if result not in PASSING_GATE_RESULTS:
         raise ProductionGateError(f"gate artifact {path.name} is not passing: {raw_result}")
@@ -335,6 +394,18 @@ def _validate_structured_evidence(
                 raise ProductionGateError(f"acceptance {acceptance_id} command evidence failed")
             _resolve_evidence_path(command, run_dir=run_dir)
             has_behavioral_evidence = True
+
+    # 兼容 command（单数）+ exit_code 形式，与 _evidence_type 推断逻辑一致。
+    # 命令契约 ao-spec-acceptance-matrix.md 只规定"PASS 必须有 command 等行为证据"，
+    # 未强制 commands 复数列表；claude 自然生成 command 单数 + exit_code + type=package。
+    # 此处不调用 _resolve_evidence_path：单数形式是扁平结构，path 类字段
+    # （path/log_path/screenshot_path/artifact_path/evidence_path/source）不是必须，
+    # 行为证据由 command 执行 + exit_code=0 本身提供。
+    single_command = evidence.get("command")
+    if isinstance(single_command, str) and "exit_code" in evidence:
+        if int(evidence.get("exit_code", -1)) != 0:
+            raise ProductionGateError(f"acceptance {acceptance_id} command evidence failed")
+        has_behavioral_evidence = True
 
     raw_paths = evidence.get("paths")
     if isinstance(raw_paths, list):

@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { UsageSummary } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 
-export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
+export function UsageTrendChart({ usage, loading }: { usage: UsageSummary; loading?: boolean }) {
   const chartHostRef = useRef<HTMLDivElement | null>(null);
   const [containerWidth, setContainerWidth] = useState(0);
   const points = usage.trend ?? [];
@@ -60,7 +60,9 @@ export function UsageTrendChart({ usage }: { usage: UsageSummary }) {
         </div>
       </div>
       <div className="panel-body">
-        {points.length === 0 ? (
+        {loading ? (
+          <p>正在加载用量数据...</p>
+        ) : points.length === 0 ? (
           <p>当前时间范围暂无用量数据。</p>
         ) : (
           <>

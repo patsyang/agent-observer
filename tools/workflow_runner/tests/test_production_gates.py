@@ -508,6 +508,76 @@ def test_acceptance_matrix_allows_v2_acceptance_items_and_structured_evidence(tm
     assert result[0]["acceptance_id"] == "A01"
 
 
+def test_acceptance_matrix_accepts_structured_single_command_evidence(tmp_path):
+    """复现 claude 实际生成的 evidence 格式：command（单数）+ exit_code + type。
+
+    命令契约 ao-spec-acceptance-matrix.md 只规定"PASS 必须有 command 等行为证据"，
+    未强制 commands 复数列表。claude 自然生成 command 单数 + exit_code + type=package。
+    _validate_structured_evidence 应与 _evidence_type 推断逻辑（line 671-672）一致，
+    识别 command 单数 + exit_code 作为命令行为证据。
+    """
+    matrix = tmp_path / "acceptance-matrix.json"
+    matrix.write_text(
+        json.dumps(
+            {
+                "result": "PASS",
+                "acceptance_items": [
+                    {
+                        "acceptance_id": "ACC-001",
+                        "story_id": "story-001",
+                        "result": "PASS",
+                        "behavior": "对包含真实 OpenAI key 的测试数据，100% 识别为 sensitive_content_exposure signal",
+                        "evidence": {
+                            "type": "package",
+                            "test_file": "backend/tests/test_sensitivity_rules.py",
+                            "test_count": 38,
+                            "test_result": "38 passed, 0 failed",
+                            "command": "cd backend && python -m pytest tests/test_sensitivity_rules.py -v",
+                            "exit_code": 0,
+                            "source_file": "backend/app/behavior_signals/sensitivity_rules.py",
+                            "details": "25 种预编译正则各有一条命中真实数据样本测试",
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    result = validate_acceptance_matrix(matrix, run_dir=tmp_path)
+
+    assert result[0]["acceptance_id"] == "ACC-001"
+
+
+def test_acceptance_matrix_rejects_structured_single_command_with_failure(tmp_path):
+    """command 单数 + exit_code 非 0 应判为命令证据失败。"""
+    matrix = tmp_path / "acceptance-matrix.json"
+    matrix.write_text(
+        json.dumps(
+            {
+                "result": "PASS",
+                "acceptance_items": [
+                    {
+                        "acceptance_id": "ACC-001",
+                        "story_id": "story-001",
+                        "result": "PASS",
+                        "behavior": "命令执行验证行为",
+                        "evidence": {
+                            "type": "package",
+                            "command": "cd backend && python -m pytest tests/test_sensitivity_rules.py -v",
+                            "exit_code": 1,
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="command evidence failed"):
+        validate_acceptance_matrix(matrix, run_dir=tmp_path)
+
+
 def test_ui_acceptance_requires_browser_or_playwright_evidence(tmp_path):
     source_path = tmp_path / "artifacts" / "st-008-verification.json"
     source_path.parent.mkdir()
@@ -679,6 +749,84 @@ def test_frontend_template_selection_accepts_traceable_independent_stack(tmp_pat
     )
 
     validate_frontend_template_selection(selection)
+
+
+def test_frontend_template_selection_accepts_visual_quality_rubric_as_object(tmp_path):
+    """visual_quality_rubric 为对象形态（多维度质量标准）应通过验证。
+
+    回归点：验证器曾只接受 str/list，把 dict 形态误判为缺失，
+    导致 claude 生成的结构化质量标准（label_correctness/type_safety 等维度）被拒。
+    """
+    selection = tmp_path / "frontend-template-selection.json"
+    selection.write_text(
+        json.dumps(
+            {
+                "frontend_required": True,
+                "template_id": "observability-dashboard",
+                "required_views": ["summary"],
+                "required_components": ["AppShell"],
+                "required_states": ["loading"],
+                "required_interactions": ["navigate"],
+                "api_contracts": ["GET /api/dashboard/summary"],
+                "e2e_scenarios": ["open summary"],
+                "visual_quality_rubric": {
+                    "label_correctness": "新增标签均有中文映射",
+                    "type_safety": "TypeScript 编译通过",
+                },
+                "frontend_implementation": {
+                    "mode": "independent_frontend",
+                    "stack_source": "spec_tech_stack",
+                    "source_root": "frontend",
+                    "package_manifest": "frontend/package.json",
+                    "framework": "React",
+                    "language": "TypeScript",
+                    "package_manager": "npm",
+                    "test_commands": ["npm --prefix frontend test"],
+                    "build_commands": ["npm --prefix frontend run build"],
+                    "e2e_commands": ["npx playwright test"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validate_frontend_template_selection(selection)
+
+
+def test_frontend_template_selection_rejects_empty_visual_quality_rubric_object(tmp_path):
+    """visual_quality_rubric 为空对象仍应被拒绝，确保放宽形态不降低非空要求。"""
+    selection = tmp_path / "frontend-template-selection.json"
+    selection.write_text(
+        json.dumps(
+            {
+                "frontend_required": True,
+                "template_id": "observability-dashboard",
+                "required_views": ["summary"],
+                "required_components": ["AppShell"],
+                "required_states": ["loading"],
+                "required_interactions": ["navigate"],
+                "api_contracts": ["GET /api/dashboard/summary"],
+                "e2e_scenarios": ["open summary"],
+                "visual_quality_rubric": {},
+                "frontend_implementation": {
+                    "mode": "independent_frontend",
+                    "stack_source": "spec_tech_stack",
+                    "source_root": "frontend",
+                    "package_manifest": "frontend/package.json",
+                    "framework": "React",
+                    "language": "TypeScript",
+                    "package_manager": "npm",
+                    "test_commands": ["npm --prefix frontend test"],
+                    "build_commands": ["npm --prefix frontend run build"],
+                    "e2e_commands": ["npx playwright test"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="visual_quality_rubric"):
+        validate_frontend_template_selection(selection)
 
 
 def test_acceptance_matrix_infers_command_evidence_type(tmp_path):
@@ -945,6 +1093,126 @@ def test_placeholder_scan_allows_negative_gate_report(tmp_path):
     )
 
 
+def test_placeholder_scan_allows_exclude_context(tmp_path):
+    """排除占位符的描述性文本不应被门禁拒绝。"""
+    artifact = tmp_path / "product-prd.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                "# Product PRD",
+                "",
+                "- 排除占位符模式：`<your-api-key>`、`${ENV_VAR}`",
+                "| ACC-004 | P0-A | 误报控制 | 排除占位符、环境变量引用 |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    validate_required_artifact_specs(
+        [ArtifactSpec(path="product-prd.md", kind="markdown")],
+        artifacts_dir=tmp_path,
+    )
+
+
+def test_placeholder_scan_allows_zhanweifu_meta_reference(tmp_path):
+    """讨论占位符概念的元引用文本（含"占位符"三字）不应被门禁拒绝。
+
+    回归点：PLACEHOLDER_PATTERNS 中"占位"会匹配到"占位符"这种元引用，
+    导致 production-spec.md 中描述验收标准、正则注释、误报指标的行被误判。
+    修复后将"占位符"加入 META_PLACEHOLDER_CONTEXT，允许元引用通过。
+    """
+    artifact = tmp_path / "production-spec.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                "# Production Spec",
+                "",
+                "1. 25 种识别类型 100% 命中真实数据、0% 误报占位符/环境变量引用。",
+                "    re.compile(r'(?:placeholder|example|sample|dummy|test)'), # 占位符关键词",
+                "| 零误报 | 占位符/环境变量引用/校验失败数字串 0% 误报 | 阻断 release |",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    validate_required_artifact_specs(
+        [ArtifactSpec(path="production-spec.md", kind="markdown")],
+        artifacts_dir=tmp_path,
+    )
+
+
+def test_placeholder_scan_rejects_bare_zhanwei(tmp_path):
+    """真正的"占位"占位符（不含"占位符"三字）仍应被门禁拒绝。"""
+    artifact = tmp_path / "implementation.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                "# Implementation",
+                "",
+                "此处为占位，待后续补充。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="placeholder"):
+        validate_required_artifact_specs(
+            [ArtifactSpec(path="implementation.md", kind="markdown")],
+            artifacts_dir=tmp_path,
+        )
+
+
+def test_placeholder_scan_allows_vague_phrase_in_sentence(tmp_path):
+    """空泛短语作为句子成分时不应被门禁拒绝。
+
+    回归点：PLACEHOLDER_PHRASE_PATTERNS 中的"正常工作"、"提升体验"等是日常
+    中文表述，出现在完整句子里是合法的（如"从根目录运行正常工作"、"提升
+    用户体验"）。子串匹配会误伤，改为整行匹配后应通过。
+    """
+    artifact = tmp_path / "full-verify.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                "# Full Verify",
+                "",
+                "但从项目根目录运行（via `scripts/ao.py verify`）正常工作。341 tests collected.",
+                "本次改动旨在提升体验，不引入回归。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    validate_required_artifact_specs(
+        [ArtifactSpec(path="full-verify.md", kind="markdown")],
+        artifacts_dir=tmp_path,
+    )
+
+
+def test_placeholder_scan_rejects_vague_phrase_as_line_unit(tmp_path):
+    """空泛短语作为独立内容单元（整行/标题/列表项）时应被门禁拒绝。"""
+    artifact = tmp_path / "implementation.md"
+    artifact.write_text(
+        "\n".join(
+            [
+                "# 实现相关功能",
+                "",
+                "处理相关逻辑",
+                "",
+                "- 正常工作",
+                "",
+                "1. 提升体验",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="placeholder"):
+        validate_required_artifact_specs(
+            [ArtifactSpec(path="implementation.md", kind="markdown")],
+            artifacts_dir=tmp_path,
+        )
+
+
 def test_gate_pass_validator_rejects_failed_gate_json(tmp_path):
     artifact = tmp_path / "spec-gate.json"
     artifact.write_text(
@@ -979,3 +1247,82 @@ def test_gate_pass_validator_accepts_stable_gate_status(tmp_path):
         ],
         artifacts_dir=tmp_path,
     )
+
+
+def test_gate_pass_validator_accepts_overall_result_pass_with_preexisting(tmp_path):
+    """overall_result=PASS_WITH_PREEXISTING 应通过 gate_pass 验证。
+
+    回归点：full-verify.json 顶层用 overall_result 字段（需与子项 result 区分），
+    值为 PASS_WITH_PREEXISTING（本次 run 无引入失败，仅存在历史预存失败）。
+    验证器曾只查 result/status/decision，导致 raw_result=None 被误判为 not passing。
+    """
+    artifact = tmp_path / "full-verify.json"
+    artifact.write_text(
+        json.dumps(
+            {
+                "overall_result": "PASS_WITH_PREEXISTING",
+                "summary": {"tasks_introduced_fail": 0, "tasks_preexisting_fail": 2},
+                "introduced_failures": [],
+                "preexisting_failures": [{"id": "PRE-ERR-001"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    validate_required_artifact_specs(
+        [
+            ArtifactSpec(
+                path="full-verify.json",
+                kind="json",
+                validators=["gate_pass"],
+            )
+        ],
+        artifacts_dir=tmp_path,
+    )
+
+
+def test_gate_pass_validator_rejects_overall_result_fail(tmp_path):
+    """overall_result=FAIL 仍应被拒绝，确保扩展字段不降低 FAIL 拦截能力。"""
+    artifact = tmp_path / "full-verify.json"
+    artifact.write_text(
+        json.dumps({"overall_result": "FAIL", "introduced_failures": ["FAIL-001"]}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="not passing"):
+        validate_required_artifact_specs(
+            [
+                ArtifactSpec(
+                    path="full-verify.json",
+                    kind="json",
+                    validators=["gate_pass"],
+                )
+            ],
+            artifacts_dir=tmp_path,
+        )
+
+
+def test_gate_pass_validator_prefers_result_over_overall_result(tmp_path):
+    """同时存在 result 和 overall_result 时，以 result 为准。
+
+    回归点：扩展 overall_result 字段后，必须保持原有字段优先级
+    （result > status > decision > overall_result），不能让 overall_result
+    覆盖顶层 result=FAIL 的 gate 产物。
+    """
+    artifact = tmp_path / "spec-gate.json"
+    artifact.write_text(
+        json.dumps({"result": "FAIL", "overall_result": "PASS"}),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ProductionGateError, match="not passing"):
+        validate_required_artifact_specs(
+            [
+                ArtifactSpec(
+                    path="spec-gate.json",
+                    kind="json",
+                    validators=["gate_pass"],
+                )
+            ],
+            artifacts_dir=tmp_path,
+        )
