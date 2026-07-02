@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import signal
 import socket
 import threading
 import time
@@ -98,47 +99,87 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
 
     cycles = 0
     stop_heartbeat = threading.Event()
+
+    def _handle_signal(_signum, _frame):
+        try:
+            patch_state(config.state_path, {"running": False})
+        except Exception:
+            pass
+        stop_heartbeat.set()
+
+    try:
+        signal.signal(signal.SIGINT, _handle_signal)
+        signal.signal(signal.SIGTERM, _handle_signal)
+    except (OSError, ValueError):
+        pass
+
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(config, stop_heartbeat), daemon=True)
     heartbeat_thread.start()
-    while load_state(config.state_path)["running"]:
+    while True:
+        try:
+            if not load_state(config.state_path)["running"]:
+                break
+        except Exception:
+            time.sleep(5)
+            continue
         cycle_no = cycles + 1
-        cycle_started_at = time.monotonic()
-        state = load_state(config.state_path)
-        effective_config = _refresh_policy_config(config, state, "collecting", "collecting")
-        state = load_state(config.state_path)
-        state["last_cycle_started_at"] = _utc_now()
-        state["process_heartbeat_at"] = state["last_cycle_started_at"]
-        state["runtime_phase"] = "collecting"
-        state["source_status"] = "online"
-        state["reason_code"] = "collecting"
-        save_state(config.state_path, state)
-        _emit(
-            emit,
-            {
-                "status": "ok",
-                "mode": "cycle_started",
-                "collector_id": config.collector_id,
-                "cycle": cycle_no,
-                "sources_summary": _configured_source_summaries(config),
-            },
-        )
-        result = _run_once(effective_config, heartbeat_reason="start_running", register=False, emit=emit, cycle=cycle_no)
-        payload = json.loads(result.output)
-        payload["mode"] = "cycle" if result.code == 0 else "cycle_error"
-        payload["cycle"] = cycle_no
-        payload["last_cycle_duration_ms"] = int((time.monotonic() - cycle_started_at) * 1000)
-        state = load_state(config.state_path)
-        state["last_cycle_duration_ms"] = payload["last_cycle_duration_ms"]
-        state["last_cycle_finished_at"] = _utc_now()
-        state["last_cycle_summary"] = payload.get("facts_summary", {})
-        state["process_heartbeat_at"] = state["last_cycle_finished_at"]
-        save_state(config.state_path, state)
-        if isinstance(payload.get("cursor"), dict):
-            payload["cursor"] = _cursor_payload(payload.get("cursor", {}))
-        _emit(emit, payload)
-        cycles += 1
-        if not _sleep_while_running(_config_with_policy(config, load_state(config.state_path)), emit):
-            break
+        try:
+            cycle_started_at = time.monotonic()
+            state = load_state(config.state_path)
+            effective_config = _refresh_policy_config(config, state, "collecting", "collecting")
+            state = load_state(config.state_path)
+            state["last_cycle_started_at"] = _utc_now()
+            state["process_heartbeat_at"] = state["last_cycle_started_at"]
+            state["runtime_phase"] = "collecting"
+            state["source_status"] = "online"
+            state["reason_code"] = "collecting"
+            save_state(config.state_path, state)
+            _emit(
+                emit,
+                {
+                    "status": "ok",
+                    "mode": "cycle_started",
+                    "collector_id": config.collector_id,
+                    "cycle": cycle_no,
+                    "sources_summary": _configured_source_summaries(config),
+                },
+            )
+            result = _run_once(effective_config, heartbeat_reason="start_running", register=False, emit=emit, cycle=cycle_no)
+            payload = json.loads(result.output)
+            payload["mode"] = "cycle" if result.code == 0 else "cycle_error"
+            payload["cycle"] = cycle_no
+            payload["last_cycle_duration_ms"] = int((time.monotonic() - cycle_started_at) * 1000)
+            state = load_state(config.state_path)
+            state["last_cycle_duration_ms"] = payload["last_cycle_duration_ms"]
+            state["last_cycle_finished_at"] = _utc_now()
+            state["last_cycle_summary"] = payload.get("facts_summary", {})
+            state["process_heartbeat_at"] = state["last_cycle_finished_at"]
+            save_state(config.state_path, state)
+            if isinstance(payload.get("cursor"), dict):
+                payload["cursor"] = _cursor_payload(payload.get("cursor", {}))
+            _emit(emit, payload)
+            cycles += 1
+            if not _sleep_while_running(_config_with_policy(config, load_state(config.state_path)), emit):
+                break
+        except Exception as exc:
+            try:
+                patch_state(config.state_path, {"last_error": str(exc)})
+            except Exception:
+                pass
+            _emit(
+                emit,
+                {
+                    "status": "error",
+                    "mode": "cycle_error",
+                    "collector_id": config.collector_id,
+                    "cycle": cycle_no,
+                    "error": str(exc),
+                    "exception_type": type(exc).__name__,
+                    "traceback": traceback.format_exc(),
+                },
+            )
+            time.sleep(5)
+            continue
     stop_heartbeat.set()
     heartbeat_thread.join(timeout=2)
     return _json_result(
@@ -260,7 +301,11 @@ def _upload_pending(
                 raise TimeoutError("batch_acceptance_unconfirmed") from exc
         del outbox[: len(chunk)]
         state["last_upload_at"] = datetime.now(timezone.utc).isoformat()
-        save_state(config.state_path, state)
+        try:
+            save_state(config.state_path, state)
+        except OSError:
+            outbox[:0] = chunk
+            raise
         _send_heartbeat(config, state, "uploading", "uploading")
         save_state(config.state_path, state)
     result = _post_heartbeat(config, state, "idle" if heartbeat_reason == "run_once_completed" else "waiting", heartbeat_reason)
@@ -287,8 +332,14 @@ def _run_pending_enrichment(config: CollectorConfig) -> int:
         return 0
     if not job or job.get("status") == "none":
         return 0
-    result = run_enrichment(config, job)
-    _post_json(config.server_url, f"/api/collectors/{config.collector_id}/enrichments/{job['job_id']}/result", result)
+    job_id = job.get("job_id")
+    if not job_id:
+        return 0
+    try:
+        result = run_enrichment(config, job)
+        _post_json(config.server_url, f"/api/collectors/{config.collector_id}/enrichments/{job_id}/result", result)
+    except Exception:
+        return 0
     return 1
 
 def _register_collector(config: CollectorConfig, state: dict[str, object], phase: str, reason_code: str) -> dict[str, Any]:
@@ -337,7 +388,8 @@ def _heartbeat_loop(config: CollectorConfig, stop_event: threading.Event) -> Non
                 str(state.get("reason_code") or "waiting"),
             )
             _remember_effective_policy(state, result)
-            save_state(config.state_path, state)
+            if isinstance(result, dict) and isinstance(result.get("effective_policy"), dict):
+                patch_state(config.state_path, {"effective_policy": state.get("effective_policy")})
         except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
             continue
 

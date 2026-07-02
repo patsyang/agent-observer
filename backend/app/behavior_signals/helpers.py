@@ -169,6 +169,31 @@ def primary_projection(conn: sqlite3.Connection, fact_id: str) -> dict:
     return loads(row["projection_json"]) if row is not None else {}
 
 
+def primary_projections_by_fact_id(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[str, dict]:
+    """Batch-fetch the primary (min projection_id) projection for each fact_id.
+
+    Returns a mapping ``fact_id -> projection dict``. Missing facts map to ``{}``.
+    """
+    if not fact_ids:
+        return {}
+    placeholders = ",".join("?" for _ in fact_ids)
+    rows = conn.execute(
+        f"""
+        select fact_id, projection_json
+        from evidence_projections
+        where fact_id in ({placeholders})
+        order by fact_id, projection_id
+        """,
+        fact_ids,
+    ).fetchall()
+    result: dict[str, dict] = {}
+    for row in rows:
+        key = row["fact_id"]
+        if key not in result:
+            result[key] = loads(row["projection_json"])
+    return result
+
+
 def first_text(projections: list[dict], *keys: str) -> str:
     for projection in projections:
         for key in keys:

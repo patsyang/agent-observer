@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import sqlite3
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 from app.collectors.service import list_collectors
+from app.db.connection import connect
 from app.facts.service import query_facts
 from app.behavior_signals.service import list_signals
 from app.time_ranges import range_bounds_iso, window_cutoff_iso
+
+
+def _db_path(conn: sqlite3.Connection) -> str:
+    row = conn.execute("pragma database_list").fetchone()
+    return str(row["file"]) if row and row["file"] else ""
 
 
 def get_dashboard_summary(
@@ -16,20 +23,70 @@ def get_dashboard_summary(
     start_at: str | None = None,
     end_at: str | None = None,
 ) -> dict:
-    collectors = _filter_collectors(list_collectors(conn), agent_type)
-    signals = list_signals(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
-    facts = query_facts(
-        conn,
-        window=window,
-        agent_type=agent_type,
-        include_health=False,
-        page=1,
-        page_size=5,
-        time_basis="occurred",
-        start_at=start_at,
-        end_at=end_at,
-    )
-    risks = _risk_top(conn, window, agent_type, start_at, end_at)
+    db_path = _db_path(conn)
+    if not db_path:
+        # Fallback to serial execution on the caller's connection when path lookup fails.
+        collectors = _filter_collectors(list_collectors(conn), agent_type)
+        signals = list_signals(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+        facts = query_facts(
+            conn,
+            window=window,
+            agent_type=agent_type,
+            include_health=False,
+            page=1,
+            page_size=5,
+            time_basis="occurred",
+            start_at=start_at,
+            end_at=end_at,
+        )
+        risks = _risk_top(conn, window, agent_type, start_at, end_at)
+        return _assemble_dashboard(window, collectors, signals, facts, risks)
+
+    def _collectors_worker() -> list[dict]:
+        with connect(db_path) as worker_conn:
+            return _filter_collectors(list_collectors(worker_conn), agent_type)
+
+    def _signals_worker() -> dict:
+        with connect(db_path) as worker_conn:
+            return list_signals(worker_conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+
+    def _facts_worker() -> dict:
+        with connect(db_path) as worker_conn:
+            return query_facts(
+                worker_conn,
+                window=window,
+                agent_type=agent_type,
+                include_health=False,
+                page=1,
+                page_size=5,
+                time_basis="occurred",
+                start_at=start_at,
+                end_at=end_at,
+            )
+
+    def _risks_worker() -> list[dict]:
+        with connect(db_path) as worker_conn:
+            return _risk_top(worker_conn, window, agent_type, start_at, end_at)
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        collectors_future = executor.submit(_collectors_worker)
+        signals_future = executor.submit(_signals_worker)
+        facts_future = executor.submit(_facts_worker)
+        risks_future = executor.submit(_risks_worker)
+        collectors = collectors_future.result()
+        signals = signals_future.result()
+        facts = facts_future.result()
+        risks = risks_future.result()
+    return _assemble_dashboard(window, collectors, signals, facts, risks)
+
+
+def _assemble_dashboard(
+    window: str,
+    collectors: list[dict],
+    signals: dict,
+    facts: dict,
+    risks: list[dict],
+) -> dict:
     return {
         "window": window,
         "collectors": {

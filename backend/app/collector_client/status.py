@@ -4,7 +4,7 @@ import os
 from datetime import datetime, timedelta, timezone
 
 from app.collector_client.config import CollectorConfig
-from app.collector_client.state import load_state
+from app.collector_client.state import load_state, patch_state
 
 STALE_HEARTBEAT_GRACE_SECONDS = 90
 
@@ -90,6 +90,9 @@ def _already_running(state: dict[str, object], config: CollectorConfig) -> bool:
     if not state.get("running"):
         return False
     liveness = _liveness(state, config.collection_interval_seconds)
+    if liveness == "stale_state":
+        patch_state(config.state_path, {"running": False, "reason_code": "stale_state_reset"})
+        return False
     return liveness in {"alive", "busy"}
 
 def _liveness(state: dict[str, object], interval_seconds: int) -> str:

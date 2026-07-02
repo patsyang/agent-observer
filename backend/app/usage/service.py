@@ -89,7 +89,10 @@ def _usage_rows(
         select us.*, ep.projection_id, ep.projection_json, of.occurred_at
         from usage_signals us
         join observed_facts of on of.fact_id = us.fact_id
-        left join evidence_projections ep on ep.fact_id = us.fact_id
+        left join evidence_projections ep on ep.projection_id = (
+          select projection_id from evidence_projections
+          where fact_id = us.fact_id order by projection_id limit 1
+        )
         {where}
         """,
         params,

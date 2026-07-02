@@ -277,7 +277,7 @@ def main() -> int:
 
     try:
         result = run(argv, emit=emit_line)
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         result = _json_result(2, {"status": "error", "error": str(exc)})
     if not human_start:
         print(result.output)

@@ -254,3 +254,22 @@ create index if not exists idx_observed_facts_effective_conversation_path_occurr
 
 create index if not exists idx_usage_signals_conversation_id
   on usage_signals(conversation_id);
+
+create index if not exists idx_risk_signals_fact_id
+  on risk_signals(fact_id);
+create index if not exists idx_risk_signals_risk_type_object_type
+  on risk_signals(risk_type, object_type);
+create index if not exists idx_risk_signals_severity
+  on risk_signals(severity);
+create index if not exists idx_observed_facts_source_event_type_occurred_at
+  on observed_facts(source_event_type, occurred_at desc);
+create index if not exists idx_usage_signals_fact_id
+  on usage_signals(fact_id);
+create index if not exists idx_behavior_signals_decision_priority_last_event
+  on behavior_signals(decision_state, priority_score desc, last_event_at desc);
+create index if not exists idx_signal_decisions_decision_state
+  on signal_decisions(decision_state);
+create index if not exists idx_enrichment_jobs_signal_id
+  on enrichment_jobs(signal_id);
+create index if not exists idx_enrichment_results_signal_id
+  on enrichment_results(signal_id);

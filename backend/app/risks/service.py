@@ -36,7 +36,10 @@ def get_risk_summary(
                ep.projection_id, ep.projection_json, ep.raw_content, of.occurred_at
         from risk_signals rs
         join observed_facts of on of.fact_id = rs.fact_id
-        left join evidence_projections ep on ep.fact_id = rs.fact_id
+        left join evidence_projections ep on ep.projection_id = (
+          select projection_id from evidence_projections
+          where fact_id = rs.fact_id order by projection_id limit 1
+        )
         {where}
         order by of.occurred_at desc
         """,

@@ -52,9 +52,12 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
         return None, "sources_required"
     if not sources:
         return None, "sources_required"
+    server_url = payload.get("server_url")
+    if not server_url:
+        return None, "missing_server_url"
     return (
         CollectorConfig(
-            server_url=str(payload["server_url"]).rstrip("/"),
+            server_url=str(server_url).rstrip("/"),
             collector_id=str(payload.get("collector_id", "windows-collector")),
             workdir=workdir,
             state_path=state_path,

@@ -19,6 +19,7 @@ from app.behavior_signals.helpers import (
     normalize_note as _normalize_note,
     conversation_refs as _conversation_refs,
     primary_projection as _primary_projection,
+    primary_projections_by_fact_id as _primary_projections_by_fact_id,
     risk_facts as _risk_facts,
     path_hint as _path_hint,
     top_directories as _top_directories,
@@ -144,16 +145,21 @@ def list_signals(
             "page_size": limit,
             "has_more": offset + len(rows) < int(total),
         }
+    workspace_where = ""
+    workspace_params: list[str] = []
+    if workspace_query:
+        workspace_where = " and bs.affected_scope_json like ?"
+        workspace_params.append(f"%{workspace_query}%")
     rows = conn.execute(
         f"""
         select bs.*, sd.conclusion_code as decision_conclusion_code, sd.note as decision_note
         from behavior_signals bs
         left join signal_decisions sd on sd.signal_id = bs.signal_id
         {latest_join}
-        {where}
+        {where}{workspace_where}
         order by bs.priority_score desc, coalesce(bs.last_event_at, bs.updated_at) desc, bs.signal_key
         """,
-        params,
+        [*params, *workspace_params],
     ).fetchall()
     signals = [row_to_signal(row, include_groups=False) for row in rows]
     if workspace_query:
@@ -596,10 +602,8 @@ def detect_repeated_failures(
             if len(group) < 3:
                 continue
 
-            projections = []
-            for fact in group:
-                proj = _primary_projection(conn, fact["fact_id"])
-                projections.append(proj)
+            projection_map = _primary_projections_by_fact_id(conn, [fact["fact_id"] for fact in group])
+            projections = [projection_map.get(fact["fact_id"], {}) for fact in group]
 
             tool = _first_text(projections, "tool_name", "tool", "name") or "工具调用"
             exit_code = _first_text(projections, "exit_code") or _exit_code_from_summary(group[-1]["summary"] or "")
@@ -691,15 +695,11 @@ def detect_loop_stuck(
         "   (fact_type = 'content'"
         "    and ("
         "      category IN ({ct})"
-        "      OR source_specific_json LIKE '%\"event_type\":\"agent_response\"%'"
-        "      OR source_specific_json LIKE '%\"codex_event_type\":\"agent_response\"%'"
+        "      OR source_event_type = 'agent_response'"
         "    ))"
         "   OR ("
         "     category IN ({tc})"
-        "     OR source_specific_json LIKE '%\"event_type\":\"function_call\"%'"
-        "     OR source_specific_json LIKE '%\"event_type\":\"function_call_output\"%'"
-        "     OR source_specific_json LIKE '%\"codex_event_type\":\"function_call\"%'"
-        "     OR source_specific_json LIKE '%\"codex_event_type\":\"function_call_output\"%'"
+        "     OR source_event_type IN ('function_call', 'function_call_output')"
         "   )"
         "  )"
         " order by conversation_ref, occurred_at, fact_id"
@@ -1098,10 +1098,8 @@ def _make_loop_stuck_signal(
 ) -> dict:
     """Build an agent_loop_stuck signal from detected tool events."""
     # Gather projections for context
-    projections = []
-    for te in tool_events:
-        proj = _primary_projection(conn, te["fact_id"])
-        projections.append(proj)
+    projection_map = _primary_projections_by_fact_id(conn, [te["fact_id"] for te in tool_events])
+    projections = [projection_map.get(te["fact_id"], {}) for te in tool_events]
 
     tool_names = set()
     for p in projections:

@@ -11,7 +11,12 @@ def load_state(path: Path) -> dict:
     with _STATE_LOCK:
         if not path.exists():
             return _default_state()
-        state = json.loads(path.read_text(encoding="utf-8"))
+        try:
+            state = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return _default_state()
+    if not isinstance(state, dict):
+        return _default_state()
     state.setdefault("schema_version", 3)
     state.setdefault("cursor", {})
     state["cursor"].setdefault("last_sequence", 0)

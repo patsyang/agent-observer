@@ -17,13 +17,16 @@ def local_log_emit(workdir: Path, collector_id: str) -> Emit:
     path = local_log_path(workdir)
 
     def emit(line: str) -> None:
-        payload = _payload_from_line(line)
-        payload.setdefault("collector_id", collector_id)
-        payload.setdefault("mode", payload.get("status", "event"))
-        entry = {"logged_at": datetime.now(timezone.utc).isoformat(), **payload}
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with path.open("a", encoding="utf-8") as handle:
-            handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        try:
+            payload = _payload_from_line(line)
+            payload.setdefault("collector_id", collector_id)
+            payload.setdefault("mode", payload.get("status", "event"))
+            entry = {"logged_at": datetime.now(timezone.utc).isoformat(), **payload}
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n")
+        except OSError:
+            pass
 
     return emit
 
