@@ -26,4 +26,5 @@ export interface DashboardSummary {
     top: RiskSummarySignal[];
     total: number;
   };
+  active_conversations?: number;
 }

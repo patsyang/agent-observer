@@ -41,7 +41,8 @@ def get_dashboard_summary(
             end_at=end_at,
         )
         risks = _risk_top(conn, window, agent_type, start_at, end_at)
-        return _assemble_dashboard(window, collectors, signals, facts, risks)
+        active_conversations = _active_conversation_count(conn, window, agent_type, start_at, end_at)
+        return _assemble_dashboard(window, collectors, signals, facts, risks, active_conversations)
 
     def _collectors_worker() -> list[dict]:
         with connect(db_path) as worker_conn:
@@ -71,16 +72,22 @@ def get_dashboard_summary(
         with connect(db_path) as worker_conn:
             return _risk_top(worker_conn, window, agent_type, start_at, end_at)
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    def _conversations_worker() -> int:
+        with connect(db_path) as worker_conn:
+            return _active_conversation_count(worker_conn, window, agent_type, start_at, end_at)
+
+    with ThreadPoolExecutor(max_workers=5) as executor:
         collectors_future = executor.submit(_collectors_worker)
         signals_future = executor.submit(_signals_worker)
         facts_future = executor.submit(_facts_worker)
         risks_future = executor.submit(_risks_worker)
+        conversations_future = executor.submit(_conversations_worker)
         collectors = collectors_future.result()
         signals = signals_future.result()
         facts = facts_future.result()
         risks = risks_future.result()
-    return _assemble_dashboard(window, collectors, signals, facts, risks)
+        active_conversations = conversations_future.result()
+    return _assemble_dashboard(window, collectors, signals, facts, risks, active_conversations)
 
 
 def _assemble_dashboard(
@@ -89,6 +96,7 @@ def _assemble_dashboard(
     signals: dict,
     facts: dict,
     risks: list[dict],
+    active_conversations: int,
 ) -> dict:
     return {
         "window": window,
@@ -113,6 +121,7 @@ def _assemble_dashboard(
             "top": risks[:5],
             "total": len(risks),
         },
+        "active_conversations": active_conversations,
     }
 
 
@@ -158,6 +167,34 @@ def _high_priority_signal_count(
         params,
     ).fetchone()
     return int(row["total"])
+
+
+def _active_conversation_count(
+    conn: sqlite3.Connection,
+    window: str,
+    agent_type: str | None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> int:
+    """窗口内有活动的 distinct 会话数（比事件总数更直观的 scope 单位）。"""
+    clauses: list[str] = ["conversation_ref != ''"]
+    params: list[str] = []
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
+    if cutoff:
+        clauses.append("occurred_at >= ?")
+        params.append(cutoff)
+    if range_end:
+        clauses.append("occurred_at <= ?")
+        params.append(range_end)
+    if agent_type:
+        clauses.append("agent_type = ?")
+        params.append(agent_type)
+    where = "where " + " and ".join(clauses)
+    row = conn.execute(
+        f"select count(distinct conversation_ref) as c from observed_facts {where}",
+        params,
+    ).fetchone()
+    return int(row["c"] or 0)
 
 
 def _risk_top(

@@ -217,7 +217,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('原始会话和用量已入库，信号正在更新')).not.toBeInTheDocument();
     expect(screen.queryByText('行为风险信号台')).not.toBeInTheDocument();
     expect(screen.queryByText(/默认只看最近 1 小时/)).not.toBeInTheDocument();
-    expect(screen.getByText('会话内容')).toBeInTheDocument();
+    expect(screen.getByText('活跃会话')).toBeInTheDocument();
     expect(screen.queryByText(/最近命中：/)).not.toBeInTheDocument();
     expect(screen.queryByText(/未上传原文/)).not.toBeInTheDocument();
     expect(screen.getByText('1 / 6')).toBeInTheDocument();

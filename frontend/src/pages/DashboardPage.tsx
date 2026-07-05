@@ -40,6 +40,7 @@ type LoadState =
       risks: RiskSummary;
       processing: ProcessingStatus;
       highPriorityCount: number;
+      activeConversations: number;
     };
 function formatPercent(value?: number): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
@@ -111,6 +112,7 @@ export function DashboardPage({
             risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top },
             processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
             highPriorityCount: summary.signals.high_priority_count ?? 0,
+            activeConversations: summary.active_conversations ?? 0,
           });
           setLastRefresh(new Date().toISOString());
         }
@@ -270,7 +272,7 @@ export function DashboardPage({
           value={`${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
           note="在线 / 总数"
         />
-        <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
+        <Metric label="活跃会话" value={formatNumber(state.activeConversations)} note="窗口内有活动的会话" />
         <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <RiskHeadlineMetric
