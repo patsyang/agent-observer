@@ -96,7 +96,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                   </header>
                   <ToolContextBlock context={hit.tool_context} />
                   <SensitiveEvidence matches={hit.sensitive_matches} />
-                  {!hit.tool_context && <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>}
+                  <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>
                   <small>{formatDateTime(hit.occurred_at)}</small>
                 </article>
               ))}
@@ -147,7 +147,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                       </header>
                       <ToolContextBlock context={hit.tool_context} />
                       <SensitiveEvidence matches={hit.sensitive_matches} />
-                      {!hit.tool_context && <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>}
+                      <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>
                       <small>{formatDateTime(hit.occurred_at)}</small>
                     </article>
                   ))}

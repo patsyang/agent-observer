@@ -103,11 +103,30 @@ def test_detect_exclusion_lows_placeholder_value():
     assert all(m["confidence"] == "low" for m in api)
 
 
-def test_detect_email_example_domain_not_excluded():
-    # example 移除后，example.com 的真 email 不被降级（detect_for_fact 仍取它）。
-    matches = det.detect("mail alice@example.com")
-    emails = [m for m in matches if m["category"] == "email"]
-    assert emails and emails[0]["confidence"] == "high"
+def test_detect_email_example_domain_excluded():
+    # example.{com|cn|local|test|invalid}（含子域）一律降级为 low（detect_for_fact
+    # 只取 high，故不写库），避免 test@example.com 等占位邮箱把敏感信号撑成几百条噪音。
+    for placeholder in (
+        "mail alice@example.com",
+        "send to pass@proxy.example.com",
+        "bob@example.cn",
+        "codex@example.local",
+        "secret@example.test",
+        "x@example.invalid",
+    ):
+        emails = [m for m in det.detect(placeholder) if m["category"] == "email"]
+        assert emails and all(m["confidence"] == "low" for m in emails), placeholder
+
+
+def test_detect_email_decorator_not_matched():
+    # Python 装饰器 / 框架路由不能被当成邮箱（曾经的主要误报源）。
+    assert det.detect("@pytest.mark.asyncio\ndef test_x(): pass") == []
+    assert det.detect("@app.get('/health')") == []
+    assert det.detect("@router.post('/items')") == []
+    # JSON 转义换行 \n 里的 n 不能被当成 local-part 起始。
+    decoded = det.detect_for_fact(None, '{"output":"pat\\n15035344@qq.com\\n"}')
+    emails = [m["matched_value"] for m in decoded if m["category"] == "email"]
+    assert emails == ["15035344@qq.com"]
 
 
 # ---------------------------------------------------------------------------

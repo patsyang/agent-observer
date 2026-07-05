@@ -103,13 +103,45 @@ def _load_projection(
     return proj, row["raw_content"]
 
 
-def _stamp_projection(proj: dict, matches: list[dict]) -> dict:
-    """把 sensitive_matches 注入 projection dict（不覆盖已有非空值）。"""
+def _stamp_projection(proj: dict, matches: list[dict], *, recompute: bool = False) -> dict:
+    """把 sensitive_matches 注入 projection dict。
+
+    增量模式（默认）：不覆盖已有非空值。
+    重算模式（recompute=True）：用新检测结果整体覆盖；无命中则清除旧字段，
+    保证旧误报（装饰器/换行 n 前缀/占位域）被彻底清掉。
+    """
+    if recompute:
+        if matches:
+            proj["sensitive_matches"] = matches
+            proj["sensitivity_confidence"] = "high"
+            proj["sensitive_categories"] = sorted({m["category"] for m in matches})
+        else:
+            proj.pop("sensitive_matches", None)
+            proj.pop("sensitivity_confidence", None)
+            proj.pop("sensitive_categories", None)
+        return proj
     if not proj.get("sensitive_matches"):
         proj["sensitive_matches"] = matches
         proj["sensitivity_confidence"] = "high"
         proj["sensitive_categories"] = sorted({m["category"] for m in matches})
     return proj
+
+
+def _reconcile_sensitive_risk(
+    conn: sqlite3.Connection, fact_id: str, object_type: str | None
+) -> None:
+    """重算模式专用：删除该 fact 旧的 sensitive risk_signal，有新命中再插入。"""
+    conn.execute(
+        "delete from risk_signals where signal_id = ?",
+        (f"risk:sensitive:{fact_id}",),
+    )
+    if object_type:
+        conn.execute(
+            "insert into risk_signals (signal_id, fact_id, risk_type, severity, object_type) "
+            "values (?, ?, 'sensitive_content_exposure', 'high', ?) "
+            "on conflict(signal_id) do update set object_type=excluded.object_type, severity='high'",
+            (f"risk:sensitive:{fact_id}", fact_id, object_type),
+        )
 
 
 def _update_projection_json(
@@ -138,9 +170,13 @@ def _upsert_risk_signal(
 
 
 def _process_fact(
-    conn: sqlite3.Connection, fact_id: str, *, dry_run: bool = False
+    conn: sqlite3.Connection, fact_id: str, *, dry_run: bool = False, recompute: bool = False
 ) -> dict | None:
-    """对单条 fact 跑 detector，命中则更新 projection + risk_signal（dry_run 只检测不写库）。"""
+    """对单条 fact 跑 detector，命中则更新 projection + risk_signal（dry_run 只检测不写库）。
+
+    recompute=True 时，无命中也会清除该 fact 旧的 sensitive_matches 与 risk_signal，
+    用于把旧检测器的误报从库里彻底清掉。
+    """
     proj_row = conn.execute(
         "select projection_id, projection_json, raw_content from evidence_projections "
         "where fact_id = ? order by projection_id limit 1",
@@ -160,14 +196,19 @@ def _process_fact(
         high = detect_for_fact(None, raw_content, source="backfill")
     else:
         high = detect_for_fact(proj_json_text, None, source="backfill")
-    if not high:
+    object_type = object_type_from_matches(high) if high else None
+    had_old = bool(proj.get("sensitive_matches"))
+    # 增量模式且无命中：无事可做。重算模式：即便无命中也要清除旧误报。
+    if not high and not (recompute and had_old):
         return None
-    object_type = object_type_from_matches(high)
     if not dry_run:
-        _stamp_projection(proj, high)
+        _stamp_projection(proj, high, recompute=recompute)
         _update_projection_json(conn, fact_id, proj_row["projection_id"],
                                 json.dumps(proj, ensure_ascii=False, sort_keys=True, default=str))
-        _upsert_risk_signal(conn, fact_id, object_type)
+        if recompute:
+            _reconcile_sensitive_risk(conn, fact_id, object_type)
+        elif object_type:
+            _upsert_risk_signal(conn, fact_id, object_type)
     return {
         "fact_id": fact_id,
         "object_type": object_type,
@@ -183,12 +224,22 @@ def backfill(
     sleep_seconds: float = SLEEP_DEFAULT,
     sample_size: int = SAMPLE_DEFAULT,
     dry_run: bool = False,
+    recompute: bool = False,
 ) -> dict:
-    """执行回填，返回统计摘要 + 抽样命中。"""
+    """执行回填，返回统计摘要 + 抽样命中。
+
+    recompute=True：重置水位线全量重扫，用新检测结果整体覆盖 projection 的
+    sensitive_matches 并删除/重建 sensitive risk_signal（清除旧误报）；结束后
+    入队一次全局信号重建，让 behavior_signals 与新 risk_signal 对齐。
+    """
     _ensure_watermark_table(conn)
+    if recompute and not dry_run:
+        _advance_watermark(conn, "", "", _now_iso())
+        conn.commit()
     stats: dict = {
         "scanned": 0,
         "hit_facts": 0,
+        "cleared_facts": 0,
         "by_object_type": {},
         "by_category": {},
         "samples": [],
@@ -196,7 +247,7 @@ def backfill(
         "last_created_at": "",
         "errors": 0,
     }
-    wm_created_at, wm_fact_id = _read_watermark(conn)
+    wm_created_at, wm_fact_id = (_read_watermark(conn) if not recompute else ("", ""))
     total_batches = 0
     while True:
         batch = _fetch_batch(conn, wm_created_at, wm_fact_id, batch_size)
@@ -208,15 +259,18 @@ def backfill(
             fact_id = row["fact_id"]
             created_at = row["created_at"]
             try:
-                hit = _process_fact(conn, fact_id, dry_run=dry_run)
+                hit = _process_fact(conn, fact_id, dry_run=dry_run, recompute=recompute)
                 if hit:
-                    stats["hit_facts"] += 1
-                    ot = hit["object_type"]
-                    stats["by_object_type"][ot] = stats["by_object_type"].get(ot, 0) + 1
-                    for m in hit["matches"]:
-                        cat = m["category"]
-                        stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
-                    batch_hits.append(hit)
+                    if hit["matches"]:
+                        stats["hit_facts"] += 1
+                        ot = hit["object_type"]
+                        stats["by_object_type"][ot] = stats["by_object_type"].get(ot, 0) + 1
+                        for m in hit["matches"]:
+                            cat = m["category"]
+                            stats["by_category"][cat] = stats["by_category"].get(cat, 0) + 1
+                        batch_hits.append(hit)
+                    else:
+                        stats["cleared_facts"] += 1
             except Exception as exc:  # [F6] 单条失败不中断
                 stats["errors"] += 1
                 print(f"  [error] fact_id={fact_id}: {type(exc).__name__}: {exc}",
@@ -233,11 +287,22 @@ def backfill(
             stats["samples"].extend(batch_hits[:remaining])
         total_batches += 1
         print(f"  batch {total_batches}: scanned={stats['scanned']} "
-              f"hits={stats['hit_facts']} errors={stats['errors']}")
+              f"hits={stats['hit_facts']} cleared={stats['cleared_facts']} "
+              f"errors={stats['errors']}")
         if sleep_seconds > 0:
             time.sleep(sleep_seconds)
     stats["last_fact_id"] = wm_fact_id
     stats["last_created_at"] = wm_created_at
+    if recompute and not dry_run and (stats["hit_facts"] or stats["cleared_facts"]):
+        try:
+            from app.processing.jobs import enqueue_global_signal_rebuild
+            job = enqueue_global_signal_rebuild(conn, reason="sensitive_recompute")
+            conn.commit()
+            stats["rebuild_job"] = job.get("job_id")
+            print(f"  enqueued signal rebuild: {job.get('job_id')}")
+        except Exception as exc:
+            stats["rebuild_error"] = str(exc)
+            print(f"  [warn] failed to enqueue signal rebuild: {exc}", file=sys.stderr)
     return stats
 
 
@@ -253,27 +318,36 @@ def main() -> int:
     parser.add_argument("--sleep", type=float, default=SLEEP_DEFAULT)
     parser.add_argument("--sample", type=int, default=SAMPLE_DEFAULT)
     parser.add_argument("--dry-run", action="store_true", help="只扫描统计，不写库")
+    parser.add_argument("--recompute", action="store_true",
+                        help="重算模式：重置水位线全量重扫，覆盖 projection sensitive_matches "
+                             "并删除/重建 sensitive risk_signal，清除旧误报；结束后入队信号重建")
     args = parser.parse_args()
 
     conn = connect(args.db)
     print(f"Backfilling {args.db} (batch={args.batch_size}, sleep={args.sleep}s, "
-          f"dry_run={args.dry_run})...")
+          f"dry_run={args.dry_run}, recompute={args.recompute})...")
     stats = backfill(
         conn,
         batch_size=args.batch_size,
         sleep_seconds=args.sleep,
         sample_size=args.sample,
         dry_run=args.dry_run,
+        recompute=args.recompute,
     )
     conn.close()
     print("\n=== Backfill summary ===")
-    print(f"scanned:       {stats['scanned']}")
-    print(f"hit_facts:     {stats['hit_facts']}")
-    print(f"errors:        {stats['errors']}")
-    print(f"by_object_type: {stats['by_object_type']}")
-    print(f"by_category:    {stats['by_category']}")
-    print(f"last_fact_id:   {stats['last_fact_id']}")
-    print(f"last_created_at:{stats['last_created_at']}")
+    print(f"scanned:         {stats['scanned']}")
+    print(f"hit_facts:       {stats['hit_facts']}")
+    print(f"cleared_facts:   {stats['cleared_facts']}")
+    print(f"errors:          {stats['errors']}")
+    print(f"by_object_type:  {stats['by_object_type']}")
+    print(f"by_category:     {stats['by_category']}")
+    if stats.get("rebuild_job"):
+        print(f"rebuild_job:     {stats['rebuild_job']}")
+    if stats.get("rebuild_error"):
+        print(f"rebuild_error:   {stats['rebuild_error']}")
+    print(f"last_fact_id:    {stats['last_fact_id']}")
+    print(f"last_created_at: {stats['last_created_at']}")
     if stats["samples"]:
         print(f"\n=== Sample hits (first {len(stats['samples'])}) ===")
         random.seed(42)

@@ -292,13 +292,20 @@ def high_confidence_sensitive(conn: sqlite3.Connection, fact_id: str) -> bool:
 
 
 def failure_group(conn: sqlite3.Connection, group_type: str, title: str, facts: list[sqlite3.Row], projections: list[dict]) -> dict:
+    paired = sorted(
+        zip(facts, projections),
+        key=lambda pair: (pair[0]["occurred_at"] or "", pair[0]["fact_id"]),
+        reverse=True,
+    )[:20]
+    newest_facts = [f for f, _ in paired]
+    newest_proj = [p for _, p in paired]
     return {
         "group_id": f"{group_type}:{hashlib.sha256(title.encode('utf-8')).hexdigest()[:8]}",
         "group_type": group_type,
         "title": title,
-        "summary": f"{len(facts):,} 条命中，最近 {facts[-1]['occurred_at'] if facts else '未知'}",
+        "summary": f"最近 {(facts[-1]['occurred_at'] if facts else None) or '未知'}",
         "count": len(facts),
-        "items": _items(conn, facts[:5], projections[:5]),
+        "items": _items(conn, newest_facts, newest_proj),
     }
 
 
@@ -319,7 +326,7 @@ def conversation_groups(conn: sqlite3.Connection, facts: list[sqlite3.Row], limi
                 "title": title,
                 "summary": f"{len(bucket):,} 条命中",
                 "count": len(bucket),
-                "items": _items(conn, bucket[:5]),
+                "items": _items(conn, _newest_facts(bucket, 5)),
             }
         )
     return groups
@@ -330,10 +337,26 @@ def object_group(conn: sqlite3.Connection, group_type: str, title: str, facts: l
         "group_id": f"{group_type}:{hashlib.sha256(title.encode('utf-8')).hexdigest()[:8]}",
         "group_type": group_type,
         "title": title,
-        "summary": f"{len(facts):,} 条命中",
+        "summary": _time_range_label(facts),
         "count": len(facts),
-        "items": _items(conn, facts[:5]),
+        "items": _items(conn, _newest_facts(facts, 20)),
     }
+
+
+def _newest_facts(facts: list[sqlite3.Row], limit: int = 20) -> list[sqlite3.Row]:
+    """按 occurred_at 倒序取最新的若干条（详情页要"最新"，不是最老）。"""
+    return sorted(facts, key=lambda f: (f["occurred_at"] or "", f["fact_id"]), reverse=True)[:limit]
+
+
+def _time_range_label(facts: list[sqlite3.Row]) -> str:
+    """事实的时间范围（YYYY-MM-DD ~ YYYY-MM-DD），给 summary 一句有意义的话，替代"N 条命中"的冗余。"""
+    times = sorted((f["occurred_at"] or "") for f in facts if f["occurred_at"])
+    if not times:
+        return ""
+    day = lambda ts: ts[:10]  # noqa: E731
+    if times[0] == times[-1]:
+        return day(times[0])
+    return f"{day(times[0])} ~ {day(times[-1])}"
 
 
 def directory_group(paths: list[str]) -> dict:

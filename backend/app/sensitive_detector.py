@@ -23,6 +23,7 @@ ingest 阶段 per-fact 调用一次，命中即写 ``risk_signals``（object_typ
 """
 from __future__ import annotations
 
+import json
 import re
 from typing import Any, Callable
 
@@ -86,7 +87,18 @@ def _iso7064_mod11_2_check(value: str) -> bool:
 RULES: list[dict[str, Any]] = [
     # --- Identity ---
     _rule("phone_number", rf"{_NB}(?:\+?86[-\s]?)?1[3-9]\d{{9}}{_NE}", "phone"),
-    _rule("email_address", r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", "email"),
+    _rule(
+        "email_address",
+        # 左边界 + local-part 必须以字母数字开头：挡住把前一个字符（尤其 JSON 转义
+        # 换行 \n 里的 n、git diff 的 +）吞进来的误判。配合 detect_for_fact 的解码，
+        # 行首装饰器 @pytest.x / @app.get 前面是真换行（无 local 字符）也不会命中。
+        # 不加 TLD 白名单：真实 TLD 有 1500+，白名单会静默漏检真实邮箱（如 .media/.law）；
+        # decode + 左边界已足以消灭装饰器误报（实测残余为零）。
+        # 注意：代价是 local-part 以 _ / . 开头的罕见邮箱（如 _foo@x.com）会被漏检，
+        # 换取挡住 \n 的 n 前缀这一主要误报源。
+        r"(?<![A-Za-z0-9._%+-])[A-Za-z0-9][A-Za-z0-9._%+-]*@[A-Za-z0-9.-]+\.[A-Za-z]{2,}",
+        "email",
+    ),
     _rule("china_id_card", rf"{_NB}\d{{17}}[\dXx]{_NE}", "id_card", validator=_iso7064_mod11_2_check),
     _rule("passport_number", r"(?i)(?:passport|pass_no)\s*[:=]\s*[A-Za-z0-9]{5,12}", "id_card"),
     # --- Payment ---
@@ -131,6 +143,7 @@ EXCLUSION_PATTERNS: list[re.Pattern] = [
     re.compile(r"^\$[A-Z_]+$"),  # $ENV_VAR
     re.compile(r"<[^>]*?-?key[^>]*?>", re.IGNORECASE),  # <your-api-key>
     re.compile(r"(?:placeholder|sample|dummy)", re.IGNORECASE),
+    re.compile(r"@(?:[a-z0-9.-]+\.)?example\.(?:com|org|net|edu|gov|cn|invalid|test|local)$", re.IGNORECASE),  # RFC 2606 占位域（含子域）
 ]
 
 
@@ -201,12 +214,69 @@ def detect_for_fact(projection_json_text: str, raw_content: str | None, *, sourc
 
     只取 high 命中是因为 risk_signal / projection.sensitive_matches 只持久化高可信
     命中；low（占位符/示例值）不写库。
+
+    扫描前先用 ``_decode_for_scan`` 把 JSON 记录解码成可读文本（真换行）——
+    raw_content 里换行被转义成字面 ``\\n``，直接扫会把 n 当成 email local-part
+    起始（``\\n15035344@qq.com`` → ``n15035344@qq.com``），并让行首装饰器
+    ``@pytest.mark.asyncio`` 被误判为邮箱。解码后换行变空白，两类误判同时消失。
     """
     text = "\n".join(p for p in (projection_json_text or "", raw_content or "") if p)
     if not text:
         return []
+    text = _decode_for_scan(text)
     text = text[:SCAN_BYTE_CAP]
     return [m for m in detect(text, source=source) if m["confidence"] == "high"]
+
+
+def _decode_for_scan(text: str) -> str:
+    """把 JSON 记录串解码为可读文本，换行还原为真换行。
+
+    优先 json.loads 后取所有标量值（字符串 + 数字，字段间真换行分隔）；失败
+    （多条记录拼接等）时，仅在文本看起来像 JSON（以 {/[/" 开头）时才反转义，
+    否则原样返回——避免把非 JSON 纯文本（如 Windows 路径 C:\\Users\\new）里的
+    反斜杠序列误破坏。两条路径都保证 ``\\n`` 不再以"反斜杠+n"形式进入正则。
+    """
+    stripped = text.lstrip()
+    looks_json = stripped[:1] in ('{', '[', '"')
+    try:
+        obj = json.loads(text)
+    except (ValueError, TypeError):
+        return _unescape_json_string(text) if looks_json else text
+    parts: list[str] = []
+    _collect_scalar_values(obj, parts)
+    if parts:
+        return "\n".join(parts)
+    return _unescape_json_string(text) if looks_json else text
+
+
+def _collect_scalar_values(obj: Any, out: list[str]) -> None:
+    """递归收集字符串与数字值（数字也收，避免 {"phone": 13812345678} 漏检）。"""
+    if isinstance(obj, str):
+        if obj:
+            out.append(obj)
+    elif isinstance(obj, bool):  # bool 是 int 子类，先判；True/False 不当数字收
+        return
+    elif isinstance(obj, (int, float)):
+        out.append(str(obj))
+    elif isinstance(obj, dict):
+        for value in obj.values():
+            _collect_scalar_values(value, out)
+    elif isinstance(obj, list):
+        for value in obj:
+            _collect_scalar_values(value, out)
+
+
+def _unescape_json_string(text: str) -> str:
+    """逐字符反转义常见 JSON 字符串转义（\\n \\t \\r \\" \\/ \\\\）。仅在文本像 JSON 时调用。"""
+    return (
+        text.replace("\\\\", "\x00")
+        .replace("\\n", "\n")
+        .replace("\\t", "\t")
+        .replace("\\r", "\r")
+        .replace('\\"', '"')
+        .replace("\\/", "/")
+        .replace("\x00", "\\")
+    )
 
 
 def object_type_from_matches(matches: list[dict[str, Any]]) -> str:

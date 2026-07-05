@@ -91,4 +91,54 @@ describe('ConversationDrawer', () => {
     render(<ConversationDrawer detail={detail} onClose={() => {}} />);
     expect(screen.getByText(/已折叠/)).toBeInTheDocument();
   });
+
+  it('有 tool_context 的命中也应展示可读文本（含敏感内容，不再被隐藏）', () => {
+    const detail: ConversationDetail = {
+      ...baseDetail,
+      hits: [
+        {
+          fact_id: 'fact-email-1',
+          category: 'tool_result',
+          fact_type: 'tool',
+          severity: 'high',
+          occurred_at: '2026-07-01T10:30:00Z',
+          summary: 'Bash 输出',
+          content_preview: '输出包含 15035344@qq.com 作为联系方式',
+          tool_context: {
+            tool_name: 'Bash',
+            command: 'grep -r @qq.com .',
+            command_excerpt: 'grep -r @qq.com .',
+            command_category: 'search',
+            exit_code: 0,
+            is_timeout: false,
+            timeout_ms: null,
+            timeout_after_ms: null,
+            wall_time_seconds: 1,
+            error_excerpt: '',
+            call_id: 'call-1',
+          },
+          sensitive_matches: [
+            {
+              category: 'email',
+              confidence: 'high',
+              match_type: 'email_address',
+              matched_value: '15035344@qq.com',
+              matched_preview: '15035344@qq.com',
+              reason_code: 'email_address',
+              evidence_key: 'backfill',
+            },
+          ],
+        },
+      ],
+    };
+    const { container } = render(<ConversationDrawer detail={detail} onClose={() => {}} />);
+    const text = container.textContent || '';
+    // tool_context 的命令展示
+    expect(text).toContain('grep');
+    // 敏感邮箱标签
+    expect(text).toContain('15035344@qq.com');
+    // 可读文本（content_preview）也要展示——本次修复核心：以前因 !tool_context 门控被隐藏
+    expect(text).toContain('输出包含');
+    expect(text).toContain('联系方式');
+  });
 });

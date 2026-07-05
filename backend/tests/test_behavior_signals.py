@@ -118,6 +118,7 @@ def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tm
     )
     second = _base_item("tool-failure-b", "tool_execution_failure", "error")
     second["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "分析故事定义与类型"}
+    second["occurred_at"] = "2026-06-18T11:00:00+00:00"  # 比 first 晚 → 详情按最新在前展示
     second.update(
         {
             "summary": "工具执行失败：python -m pytest，exit_code=1。",
@@ -142,7 +143,21 @@ def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tm
     assert signals[0]["occurrence_count"] == 2
     assert [group["group_type"] for group in detail["evidence_groups"]] == ["failure"]
     assert detail["linked_conversations"][0]["session_title"] == "分析故事定义与类型"
-    assert [item["tool_context"]["command"] for item in detail["evidence_groups"][0]["items"]] == ["npm test", "python -m pytest"]
+    # 详情命中事件按最新在前展示（second 更晚，故 python -m pytest 在前）
+    assert [item["tool_context"]["command"] for item in detail["evidence_groups"][0]["items"]] == ["python -m pytest", "npm test"]
+
+
+def test_object_group_summary_is_time_range_not_count():
+    # 回归保护：object_group 的 summary 是时间范围，不再是"N 条命中"（与 count badge 重复）。
+    from app.behavior_signals.helpers import _time_range_label
+
+    assert _time_range_label([
+        {"occurred_at": "2026-04-08T11:00:00+00:00"},
+        {"occurred_at": "2026-07-05T10:00:00+00:00"},
+    ]) == "2026-04-08 ~ 2026-07-05"
+    assert _time_range_label([{"occurred_at": "2026-07-05T10:00:00+00:00"}]) == "2026-07-05"
+    assert _time_range_label([]) == ""
+    assert _time_range_label([{"occurred_at": None}]) == ""
 
 
 def test_signals_expose_and_filter_workspace_scope(tmp_path):
