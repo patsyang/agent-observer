@@ -72,7 +72,7 @@ test('operator reviews behavior risk signals with grouped evidence', async ({ pa
     data: {
       batch_id: `signal-e2e-${suffix}`,
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       collector_id: 'signal-e2e',
       source: 'codex',
       source_id: 'codex-local',

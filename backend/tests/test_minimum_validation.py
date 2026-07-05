@@ -12,12 +12,9 @@ from app.validation.service import (
     FLOW_IDS,
     run_minimum_validation_experiment,
 )
-from source_payloads import default_sources
+from source_payloads import default_sources, default_versions
 
-CLIENT_PROTOCOL = {
-    "protocol_version": "agent-observer-telemetry/v3",
-    "agent_version": "0.3.0",
-}
+CLIENT_PROTOCOL = default_versions()
 
 
 def _validation_batch(
@@ -69,8 +66,7 @@ def _validation_batch(
         items.append(item)
     return {
         "batch_id": "batch-validation-001",
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",

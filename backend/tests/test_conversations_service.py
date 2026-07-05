@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from app.conversations.service import get_conversation_for_fact, get_conversation_query, query_conversations
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
+from source_payloads import default_versions
 
 
 def _item(
@@ -163,8 +164,7 @@ def test_query_conversations_groups_prompt_response_and_usage(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-alpha",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -198,8 +198,7 @@ def test_query_conversations_uses_recent_activity_to_show_full_context(tmp_path)
             conn,
             {
                 "batch_id": "batch-conversation-recent-activity",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
                 "source_id": "codex-local",
@@ -230,8 +229,7 @@ def test_query_conversations_includes_usage_only_activity(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-usage-only",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-workbuddy",
                 "source": "workbuddy",
                 "source_id": "workbuddy-local",
@@ -264,8 +262,7 @@ def test_query_conversations_exposes_codex_session_title(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-title",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -297,8 +294,7 @@ def test_query_conversations_exposes_and_filters_workspace(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-workspace",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -323,8 +319,7 @@ def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-redacted",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -382,8 +377,7 @@ def test_query_conversations_excludes_groups_without_complete_input_and_output(t
             conn,
             {
                 "batch_id": "batch-conversation-event-only",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -411,8 +405,7 @@ def test_query_conversations_filters_prompt_response_and_custom_range(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-filter",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -449,8 +442,7 @@ def test_query_conversations_searches_full_multiturn_content_and_browser_time_fo
             conn,
             {
                 "batch_id": "batch-conversation-full-search",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -483,8 +475,7 @@ def test_query_conversations_splits_codex_thread_by_prompt_lines(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-turn-split",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -520,8 +511,7 @@ def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-detail",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -554,8 +544,7 @@ def test_conversation_detail_hits_expose_tool_context(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-tool-context",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -596,8 +585,7 @@ def test_query_conversations_supports_dashboard_time_windows(tmp_path):
             conn,
             {
                 "batch_id": "batch-conversation-windows",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",
@@ -626,3 +614,61 @@ def test_query_conversations_supports_dashboard_time_windows(tmp_path):
     assert "conv-yesterday" not in {item["conversation_ref"] for item in today["conversations"]}
     assert "conv-yesterday" in {item["conversation_ref"] for item in week["conversations"]}
     assert "conv-previous-week" not in {item["conversation_ref"] for item in week["conversations"]}
+
+
+def test_conversation_detail_exposes_sensitive_matches_for_pii(tmp_path):
+    """detector 在 ingest 时自动给含 PII 的 content fact 写 risk_signal，使其出现在 hits 中并暴露完整敏感值作为证据。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-sensitive-conv",
+                **default_versions(),
+                "collector_id": "collector-codex",
+                "source": "codex",
+                "source_id": "codex-local",
+                "agent_type": "codex",
+                "source_kind": "codex_local",
+                "cursor": "cursor-sensitive",
+                "items": [
+                    _item("sensitive-prompt", "agent_prompt", "知道13521661669这个手机号吗？", (now - timedelta(minutes=2)).isoformat(), "conv-sensitive"),
+                    _item("sensitive-response", "agent_response", "13521661669是一个手机号。", (now - timedelta(minutes=1)).isoformat(), "conv-sensitive"),
+                ],
+            },
+        )
+        prompt_row = conn.execute(
+            "select fact_id from observed_facts where source_event_id='sensitive-prompt' limit 1"
+        ).fetchone()
+        response_row = conn.execute(
+            "select fact_id from observed_facts where source_event_id='sensitive-response' limit 1"
+        ).fetchone()
+        # detector 在 ingest 时自动给两条含手机号的 content fact 都写 risk_signal，
+        # 二者都应出现在 hits 中并暴露完整手机号（无需手动插 signal）。
+        detail = get_conversation_query(conn, "conv-sensitive")
+
+    msg_with_matches = [m for m in detail["messages"] if m.get("sensitive_matches")]
+    assert len(msg_with_matches) >= 1
+    phone_values = [
+        m["matched_value"]
+        for msg in msg_with_matches
+        for m in msg["sensitive_matches"]
+        if m["category"] == "phone"
+    ]
+    assert "13521661669" in phone_values
+
+    hit_fact_ids = {h["fact_id"] for h in detail["hits"]}
+    assert prompt_row["fact_id"] in hit_fact_ids
+    assert response_row["fact_id"] in hit_fact_ids
+
+    sensitive_hits = [h for h in detail["hits"] if h.get("sensitive_matches")]
+    assert len(sensitive_hits) >= 1
+    hit_phones = [
+        m["matched_value"]
+        for h in sensitive_hits
+        for m in h["sensitive_matches"]
+        if m["category"] == "phone"
+    ]
+    assert "13521661669" in hit_phones
+    # [F8] hit_count 必须计入有 risk_signal 的 content fact，不能只按 fact_type 统计
+    assert detail["hit_count"] >= len(sensitive_hits)

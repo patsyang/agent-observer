@@ -1,5 +1,5 @@
 import type { TimeWindowParam } from './types.facts';
-import type { ToolContext } from './types.signals';
+import type { SensitiveMatch, ToolContext } from './types.signals';
 
 export type ConversationTimeWindow = TimeWindowParam;
 
@@ -51,6 +51,7 @@ export interface ConversationMessage {
   occurred_at: string;
   content: string;
   raw_available: boolean;
+  sensitive_matches?: SensitiveMatch[];
 }
 
 export interface ConversationHit {
@@ -62,6 +63,7 @@ export interface ConversationHit {
   summary: string;
   content_preview: string;
   tool_context?: ToolContext | null;
+  sensitive_matches?: SensitiveMatch[];
 }
 
 export interface ConversationDetail extends ConversationSummary {

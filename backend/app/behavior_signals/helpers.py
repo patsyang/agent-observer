@@ -379,6 +379,12 @@ def object_type_label(value: str) -> str:
         "command": "命令",
         "auth": "认证对象",
         "credential": "认证凭据对象",
+        "phone": "手机号",
+        "email": "邮箱地址",
+        "id_card": "身份证号",
+        "bank_card": "银行卡号",
+        "cookie": "Cookie",
+        "sensitive_object": "敏感对象",
     }
     return labels.get(value, value)
 
@@ -389,6 +395,8 @@ def _items(conn: sqlite3.Connection, facts: list[sqlite3.Row], projections: list
     for fact, projection in zip(facts, projections):
         entries = evidence_entries(conn, fact)
         entry = entries[0] if entries else {}
+        full_projection = entry.get("projection") if isinstance(entry.get("projection"), dict) else projection
+        sensitive_matches = full_projection.get("sensitive_matches", []) if isinstance(full_projection, dict) else []
         items.append(
             {
                 "fact_id": fact["fact_id"],
@@ -405,6 +413,7 @@ def _items(conn: sqlite3.Connection, facts: list[sqlite3.Row], projections: list
                 "tool_name": projection.get("tool_name") or projection.get("tool") or projection.get("name"),
                 "exit_code": projection.get("exit_code") or exit_code_from_summary(fact["summary"]),
                 "tool_context": _tool_context(projection),
+                "sensitive_matches": sensitive_matches or [],
             }
         )
     return items

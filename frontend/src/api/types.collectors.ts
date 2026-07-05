@@ -60,6 +60,7 @@ export interface EffectivePolicy {
   max_events_per_cycle: number;
   upload_batch_size: number;
   worker_poll_interval_seconds: number;
+  outbox_soft_limit?: number;
 }
 
 export interface PolicyUpdatePayload {

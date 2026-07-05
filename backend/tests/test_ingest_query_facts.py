@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 from app.db.connection import connect
 from app.facts.service import get_fact_detail, query_facts
 from app.ingest.service import ingest_telemetry
+from source_payloads import default_versions
 
 
 def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
@@ -36,8 +37,7 @@ def _fact(event_id: str, occurred_at: str, **overrides) -> dict:
 def _batch(batch_id: str, items: list[dict]) -> dict:
     return {
         "batch_id": batch_id,
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",

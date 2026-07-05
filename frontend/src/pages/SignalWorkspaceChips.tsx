@@ -14,14 +14,13 @@ export function SignalWorkspaceChips({ workspaces }: Props) {
       {workspaces.length === 0 ? (
         <p>暂无可识别工作区。</p>
       ) : (
-        <div className="workspace-chip-row">
-          {workspaces.slice(0, 4).map((workspace) => (
+        <div className="workspace-chip-row workspace-chip-row--scrollable">
+          {workspaces.map((workspace) => (
             <span className="workspace-chip" key={workspace.workspace_id || workspace.workspace_path} title={workspace.workspace_path}>
               <strong>{workspace.workspace_label || '工作区未知'}</strong>
               <small>{workspace.workspace_path || '无路径'}</small>
             </span>
           ))}
-          {workspaces.length > 4 && <span className="workspace-chip workspace-chip--more">还有 {workspaces.length - 4} 个</span>}
         </div>
       )}
     </section>

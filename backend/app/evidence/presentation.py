@@ -4,8 +4,6 @@ import json
 import re
 from typing import Any
 
-from app.sensitivity import sensitive_categories_from_text
-
 
 def projection_preview(
     projection: dict[str, Any],
@@ -55,7 +53,7 @@ def projection_preview(
     sensitive_hits = []
     object_type = ""
     if has_risk_projection:
-        sensitive_hits = _sensitive_hits(projection) or _sensitive_hits_from_text(raw_content or "")
+        sensitive_hits = _sensitive_hits(projection)
         object_type = _normalized_object_type(_string_value(projection, "object_type"), sensitive_hits)
         if object_type in {"credential", "auth"} and not sensitive_hits:
             has_risk_projection = False
@@ -226,10 +224,6 @@ def _sensitive_hits(projection: dict[str, Any]) -> list[str]:
             if isinstance(match, dict) and match.get("confidence") == "high" and match.get("category")
         ]
     return []
-
-
-def _sensitive_hits_from_text(value: str) -> list[str]:
-    return sensitive_categories_from_text(value)
 
 
 def _normalized_object_type(object_type: str, sensitive_hits: list[str]) -> str:

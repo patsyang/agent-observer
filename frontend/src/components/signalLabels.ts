@@ -83,3 +83,16 @@ export function scopeText(scope: Record<string, unknown>): string {
     .map(([label, value]) => `${label} ${formatNumber(Number(value))}`);
   return parts.length ? parts.join(' / ') : '范围待确认';
 }
+
+export function sensitiveCategoryLabel(category: string): string {
+  const labels: Record<string, string> = {
+    phone: '手机号',
+    email: '邮箱',
+    id_card: '身份证号',
+    bank_card: '银行卡号',
+    token: '令牌',
+    secret: '密钥',
+    cookie: 'Cookie',
+  };
+  return labels[category] ?? category;
+}

@@ -2,10 +2,11 @@ create table if not exists effective_policies (
   id integer primary key check (id = 1),
   policy_version integer not null,
   enrichment_mode text not null,
-  collection_interval_seconds integer not null default 5,
+  collection_interval_seconds integer not null default 10,
   max_events_per_cycle integer not null default 500,
   upload_batch_size integer not null default 100,
-  worker_poll_interval_seconds integer not null default 10
+  worker_poll_interval_seconds integer not null default 10,
+  outbox_soft_limit integer not null default 5000
 );
 
 create table if not exists collectors (

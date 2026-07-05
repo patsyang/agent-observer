@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 
 from app.collector_client.cli import run
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.db.connection import connect
 from app.package.builder import build_windows_package
 from backend.tests.test_collectors_policy_package import _write_codex_fixture
@@ -153,11 +154,11 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
     assert calls.count(("POST", "/api/telemetry/ingest")) == 2
     assert calls.count(("POST", "/api/collectors/package-test/heartbeat")) >= 3
     assert calls[-1] == ("GET", "/api/collectors/package-test/enrichments/next")
-    assert register_payloads[0]["protocol_version"] == "agent-observer-telemetry/v3"
-    assert register_payloads[0]["agent_version"] == "0.3.0"
+    assert register_payloads[0]["protocol_version"] == COLLECTOR_PROTOCOL_VERSION
+    assert register_payloads[0]["agent_version"] == COLLECTOR_CLIENT_VERSION
     assert {source["source_kind"] for source in register_payloads[0]["sources"]} == {"codex_local", "workbuddy_local", "claude_local"}
-    assert all(payload["protocol_version"] == "agent-observer-telemetry/v3" for payload in heartbeat_payloads)
-    assert all(payload["agent_version"] == "0.3.0" for payload in heartbeat_payloads)
+    assert all(payload["protocol_version"] == COLLECTOR_PROTOCOL_VERSION for payload in heartbeat_payloads)
+    assert all(payload["agent_version"] == COLLECTOR_CLIENT_VERSION for payload in heartbeat_payloads)
     state = json.loads((extract_dir / "agent-observer.state.json").read_text(encoding="utf-8"))
     assert state["outbox"] == []
     assert state["cursor"]["last_sequence"] == 1
@@ -167,8 +168,8 @@ def test_packaged_collector_status_doctor_and_run_once_paths(tmp_path, monkeypat
     assert "raw_upload_enabled" not in state
     assert state["last_upload_at"]
     batch_items = uploaded_batches[0]["items"]
-    assert uploaded_batches[0]["protocol_version"] == "agent-observer-telemetry/v3"
-    assert uploaded_batches[0]["agent_version"] == "0.3.0"
+    assert uploaded_batches[0]["protocol_version"] == COLLECTOR_PROTOCOL_VERSION
+    assert uploaded_batches[0]["agent_version"] == COLLECTOR_CLIENT_VERSION
     assert {batch["source_kind"] for batch in uploaded_batches[:2]} == {"codex_local", "workbuddy_local"}
     assert len(batch_items) >= 2
     assert not any(item["category"] in {"collector_health", "collector_source_status"} for batch in uploaded_batches for item in batch["items"])

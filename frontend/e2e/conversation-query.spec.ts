@@ -11,7 +11,7 @@ test('operator queries conversations by prompt and response keywords', async ({ 
     data: {
       batch_id: `e2e-conversation-query-${suffix}`,
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       collector_id: 'collector-codex',
       source: 'codex',
       source_id: 'codex-local',
@@ -103,7 +103,7 @@ test('operator filters conversations by WorkBuddy agent and source', async ({ pa
     data: {
       batch_id: `e2e-workbuddy-conversation-${suffix}`,
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       collector_id: 'collector-workbuddy',
       source: 'workbuddy',
       source_id: 'workbuddy-local',

@@ -22,10 +22,11 @@ SCHEMA_SQL = """
           id integer primary key check (id = 1),
           policy_version integer not null,
           enrichment_mode text not null,
-          collection_interval_seconds integer not null default 5,
+          collection_interval_seconds integer not null default 10,
           max_events_per_cycle integer not null default 500,
           upload_batch_size integer not null default 100,
-          worker_poll_interval_seconds integer not null default 10
+          worker_poll_interval_seconds integer not null default 10,
+          outbox_soft_limit integer not null default 5000
         );
 
         create table if not exists collectors (
@@ -265,6 +266,85 @@ SCHEMA_SQL = """
           created_at text not null
         );
 
+        -- 会话物化层（写时维护，查询只读这一层；列名对齐 API 字段，零映射）
+        create table if not exists conversations (
+          conversation_ref text primary key,
+          base_ref text not null,
+          source_path_hash text not null default '',
+          start_line integer,
+          session_ref text not null default '',
+          session_title text not null default '',
+          agent_type text not null default '',
+          source_id text not null default '',
+          source_kind text not null default '',
+          ws_agent_type text not null default '',
+          ws_workspace_id text not null default '',
+          ws_workspace_path text not null default '',
+          ws_workspace_label text not null default '',
+          ws_workspace_alias_source text not null default '',
+          ws_workspace_confidence text not null default 'unknown',
+          started_at text not null,
+          last_event_at text not null,
+          first_prompt_at text,
+          first_response_at text,
+          prompt_preview text not null default '',
+          response_preview text not null default '',
+          prompt_count integer not null default 0,
+          response_count integer not null default 0,
+          event_count integer not null default 0,
+          hit_count integer not null default 0,
+          effective_units integer not null default 0,
+          model_call_count integer not null default 0,
+          max_single_call_units integer not null default 0,
+          cached_input_units integer not null default 0,
+          input_token_units integer not null default 0,
+          output_token_units integer not null default 0,
+          total_token_units integer not null default 0,
+          cache_write_input_units integer not null default 0,
+          reasoning_output_units integer not null default 0,
+          credit_total real not null default 0,
+          cache_observed_input_units integer not null default 0,
+          cache_hit_rate real not null default 0
+        );
+
+        create table if not exists conversation_messages (
+          fact_id text primary key,
+          conversation_ref text not null references conversations(conversation_ref) on delete cascade,
+          base_ref text not null,
+          source_path_hash text not null default '',
+          source_line integer,
+          role text not null check (role in ('user','assistant')),
+          category text not null,
+          occurred_at text not null,
+          content text not null,
+          raw_available integer not null default 0,
+          sensitive_matches_json text not null default '[]'
+        );
+
+        create table if not exists conversation_hits (
+          fact_id text primary key,
+          conversation_ref text not null references conversations(conversation_ref) on delete cascade,
+          base_ref text not null default '',
+          source_path_hash text not null default '',
+          source_line integer,
+          category text not null,
+          fact_type text not null,
+          severity text not null,
+          occurred_at text not null,
+          summary text not null,
+          content_preview text not null,
+          tool_context_json text,
+          sensitive_matches_json text not null default '[]'
+        );
+
+        create virtual table if not exists conversation_messages_fts using fts5(
+          content,
+          conversation_ref unindexed,
+          role unindexed,
+          fact_id unindexed,
+          tokenize = 'trigram'
+        );
+
 """
 
 
@@ -306,8 +386,8 @@ def _seed_effective_policy(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         insert or ignore into effective_policies
-          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size, worker_poll_interval_seconds)
-        values (1, 1, 'enabled', 5, 500, 100, 10)
+          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size, worker_poll_interval_seconds, outbox_soft_limit)
+        values (1, 1, 'enabled', 10, 500, 100, 10, 5000)
         """
     )
 
@@ -315,13 +395,15 @@ def _seed_effective_policy(conn: sqlite3.Connection) -> None:
 def _ensure_effective_policy_columns(conn: sqlite3.Connection) -> None:
     columns = {row["name"] for row in conn.execute("pragma table_info(effective_policies)").fetchall()}
     if "collection_interval_seconds" not in columns:
-        conn.execute("alter table effective_policies add column collection_interval_seconds integer not null default 5")
+        conn.execute("alter table effective_policies add column collection_interval_seconds integer not null default 10")
     if "max_events_per_cycle" not in columns:
         conn.execute("alter table effective_policies add column max_events_per_cycle integer not null default 500")
     if "upload_batch_size" not in columns:
         conn.execute("alter table effective_policies add column upload_batch_size integer not null default 100")
     if "worker_poll_interval_seconds" not in columns:
         conn.execute("alter table effective_policies add column worker_poll_interval_seconds integer not null default 10")
+    if "outbox_soft_limit" not in columns:
+        conn.execute("alter table effective_policies add column outbox_soft_limit integer not null default 5000")
 
 
 def _ensure_usage_signal_columns(conn: sqlite3.Connection) -> None:
@@ -418,6 +500,24 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on enrichment_jobs(signal_id);
         create index if not exists idx_enrichment_results_signal_id
           on enrichment_results(signal_id);
+        create index if not exists idx_conversations_last_event
+          on conversations(last_event_at desc);
+        create index if not exists idx_conversations_agent_last_event
+          on conversations(agent_type, last_event_at desc);
+        create index if not exists idx_conversations_source_last_event
+          on conversations(source_id, last_event_at desc);
+        create index if not exists idx_conversations_base_path
+          on conversations(base_ref, source_path_hash);
+        create index if not exists idx_conversations_started_at
+          on conversations(started_at);
+        create index if not exists idx_conv_messages_ref_occurred
+          on conversation_messages(conversation_ref, occurred_at, fact_id);
+        create index if not exists idx_conv_messages_base_path_line
+          on conversation_messages(base_ref, source_path_hash, source_line);
+        create index if not exists idx_conv_hits_ref_occurred
+          on conversation_hits(conversation_ref, occurred_at, fact_id);
+        create index if not exists idx_conv_hits_base_path
+          on conversation_hits(base_ref, source_path_hash, source_line);
         """
     )
 

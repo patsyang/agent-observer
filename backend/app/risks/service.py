@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import sqlite3
 
-from app.sensitivity import sensitive_matches_from_text
 from app.time_ranges import range_bounds_iso
 
 
@@ -62,7 +61,7 @@ def get_risk_summary(
         if row["projection_id"]:
             signal["evidence_refs"].append(row["projection_id"])
         if row["risk_type"] == "sensitive_content_exposure":
-            signal["sensitive_categories"].update(_sensitive_categories_for_projection(row["projection_json"], row["raw_content"]))
+            signal["sensitive_categories"].update(_sensitive_categories_for_projection(row["projection_json"]))
 
     grouped: dict[tuple[str, str], dict] = {}
     for signal in signals.values():
@@ -130,7 +129,7 @@ def _normalized_object_type(risk_type: str, object_type: str, categories: set[st
     return object_type
 
 
-def _sensitive_categories_for_projection(projection_json: str | None, raw_content: str | None) -> set[str]:
+def _sensitive_categories_for_projection(projection_json: str | None) -> set[str]:
     projection = _loads(projection_json)
     matches = projection.get("sensitive_matches")
     if isinstance(matches, list):
@@ -141,8 +140,6 @@ def _sensitive_categories_for_projection(projection_json: str | None, raw_conten
         }
         if normalized:
             return normalized
-    if raw_content:
-        return {match["category"] for match in sensitive_matches_from_text(raw_content, "raw_content")}
     return set()
 
 

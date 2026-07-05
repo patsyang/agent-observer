@@ -6,6 +6,7 @@ from app.dashboard.service import get_dashboard_summary
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from app.processing.jobs import run_next_job
+from source_payloads import default_versions
 
 
 def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
@@ -15,8 +16,7 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
             conn,
             {
                 "batch_id": "dashboard-summary-001",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-dashboard",
                 "source": "codex",
         "source_id": "codex-local",
@@ -54,6 +54,7 @@ def test_dashboard_summary_is_lightweight_and_windowed(tmp_path):
     assert "raw_content" not in summary["facts"]["items"][0]
     assert summary["signals"]["total"] >= 1
     assert summary["signals"]["items"][0]["signal_kind"] == "tool_execution_failure"
+    assert summary["signals"]["high_priority_count"] == 0
 
 
 def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):
@@ -63,8 +64,7 @@ def test_dashboard_summary_uses_event_time_not_backfill_ingest_time(tmp_path):
             conn,
             {
                 "batch_id": "dashboard-backfill-001",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-dashboard",
                 "source": "codex",
         "source_id": "codex-local",
@@ -110,8 +110,7 @@ def test_dashboard_summary_filters_by_agent_type(tmp_path):
                 conn,
                 {
                     "batch_id": f"dashboard-agent-{agent_type}",
-                    "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.3.0",
+                    **default_versions(),
                     "collector_id": "collector-dashboard",
                     "source": agent_type,
                     "source_id": source_id,
@@ -157,8 +156,7 @@ def test_dashboard_summary_today_window_starts_at_current_day(tmp_path):
                 conn,
                 {
                     "batch_id": f"batch-{event_id}",
-                    "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.3.0",
+                    **default_versions(),
                     "collector_id": "collector-dashboard",
                     "source": "codex",
                     "source_id": "codex-local",
@@ -190,3 +188,49 @@ def test_dashboard_summary_today_window_starts_at_current_day(tmp_path):
 
     assert summary["facts"]["total"] == 1
     assert summary["facts"]["items"][0]["source_event_id"] == "dashboard-today"
+
+
+def test_dashboard_summary_high_priority_count_excludes_low_priority_signals(tmp_path):
+    """high_priority_count 只统计 priority_score >= 80 的未处理信号。"""
+    observed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "dashboard-priority-001",
+                **default_versions(),
+                "collector_id": "collector-priority",
+                "source": "codex",
+                "source_id": "codex-local",
+                "agent_type": "codex",
+                "source_kind": "codex_local",
+                "cursor": "priority-1",
+                "items": [
+                    {
+                        "source_event_id": "dashboard-timeout-001",
+                        "fact_type": "error",
+                        "category": "tool_execution_timeout",
+                        "quality": "high",
+                        "severity": "high",
+                        "summary": "exec_command timed out after 30000ms",
+                        "occurred_at": observed_at,
+                        "span": "session:priority",
+                        "raw_hash": "hash-priority-timeout",
+                        "projection": {"tool_name": "exec_command", "exit_code": 124, "wall_time_seconds": 30.0},
+                        "error_signature": {"signature_key": "dashboard-timeout", "category": "tool_execution_timeout"},
+                        "source_refs": {"conversation_ref": "conv-priority"},
+                        "source_specific": {"event_type": "tool_result"},
+                        "raw_content": "command timed out",
+                        "upload_raw": True,
+                    }
+                ],
+            },
+        )
+        while run_next_job(conn, reason="test")["processed"]:
+            pass
+
+        summary = get_dashboard_summary(conn, window="1h")
+
+    # tool_execution_timeout 触发 build_execution_timeouts，priority_score=90 >= 80
+    assert summary["signals"]["high_priority_count"] >= 1
+

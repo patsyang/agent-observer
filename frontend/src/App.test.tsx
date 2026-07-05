@@ -58,7 +58,7 @@ describe('App shell', () => {
             policy_version: 1,
             raw_upload_mode: 'always_on',
             enrichment_mode: 'enabled',
-            collection_interval_seconds: 5,
+            collection_interval_seconds: 10,
             max_events_per_cycle: 500,
             upload_batch_size: 100,
             worker_poll_interval_seconds: 10
@@ -72,7 +72,7 @@ describe('App shell', () => {
           path: 'data/packages/agent-observer-windows.zip',
           sha256: '1234567890abcdef',
           server_url: 'http://127.0.0.1:8765',
-          agent_version: '0.3.0',
+          agent_version: '0.3.1',
           protocol_version: 'agent-observer-telemetry/v3'
         });
       })

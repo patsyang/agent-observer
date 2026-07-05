@@ -13,7 +13,7 @@ function collector(status: Collector['source_status']): Collector {
     hostname_hash: 'host-hash',
     windows_username_hash: 'user-hash',
     protocol_version: 'agent-observer-telemetry/v3',
-    agent_version: '0.3.0',
+    agent_version: '0.3.1',
     source_status: status,
     reason_code: status,
     policy_version: 1,

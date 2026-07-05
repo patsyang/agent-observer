@@ -7,7 +7,7 @@ import re
 from datetime import UTC, datetime
 from pathlib import Path
 
-from app.sensitivity import sensitive_categories_from_text
+from app.sensitive_detector import sensitive_categories_from_text
 from app.collector_client.tool_execution import command_text, parse_tool_output
 
 

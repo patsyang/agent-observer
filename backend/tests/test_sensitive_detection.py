@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.sensitivity import sensitive_matches_from_text
+from app.sensitive_detector import sensitive_matches_from_text
 
 
 def test_sensitive_detection_ignores_token_and_auth_business_words():

@@ -35,6 +35,7 @@ type LoadState =
       usage: UsageSummary;
       risks: RiskSummary;
       processing: ProcessingStatus;
+      highPriorityCount: number;
     };
 function formatPercent(value?: number): string {
   return `${((value ?? 0) * 100).toFixed(1)}%`;
@@ -100,7 +101,8 @@ export function DashboardPage({
             },
             usage: emptyUsage(requestWindow),
             risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top },
-            processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null }
+            processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
+            highPriorityCount: summary.signals.high_priority_count ?? 0,
           });
           setLastRefresh(new Date().toISOString());
         }
@@ -116,12 +118,14 @@ export function DashboardPage({
         setState((current) => {
           if (current.status !== 'ready') return current;
           const [signals, usage, risks, processing] = results;
+          const emptySignals: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
+          const emptyRisks: RiskSummary = { mode: 'summary', window: requestWindow, signals: [] };
           return {
             ...current,
             detailsLoading: false,
-            signals: signals.status === 'fulfilled' ? signals.value : current.signals,
-            usage: usage.status === 'fulfilled' ? usage.value : current.usage,
-            risks: risks.status === 'fulfilled' ? risks.value : current.risks,
+            signals: signals.status === 'fulfilled' ? signals.value : emptySignals,
+            usage: usage.status === 'fulfilled' ? usage.value : emptyUsage(requestWindow),
+            risks: risks.status === 'fulfilled' ? risks.value : emptyRisks,
             processing: processing.status === 'fulfilled' ? processing.value : current.processing
           };
         });
@@ -230,8 +234,9 @@ export function DashboardPage({
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
         <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
-        <Metric label="风险信号" value={formatNumber(highRiskCount)} note="高风险与敏感触达" />
-        <Metric label="待处理信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />
+        <Metric label="敏感命中" value={formatNumber(highRiskCount)} note="敏感内容暴露事件" />
+        <Metric label="高优先级" value={formatNumber(state.highPriorityCount)} note="priority≥80 待审核" />
+        <Metric label="待审核信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />
       </section>
 
       <div className="usage-row" data-testid="usage-row">

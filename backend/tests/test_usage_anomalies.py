@@ -11,6 +11,7 @@ from app.behavior_signals.service import rebuild_signals, list_signals
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from app.processing.jobs import run_next_job
+from source_payloads import default_versions
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +36,7 @@ def _usage_batch(items: list[dict]) -> dict:
     batch_id = f"batch-usage-{items[0].get('source_event_id', '0')}"
     return {
         "batch_id": batch_id,
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",
@@ -102,12 +102,12 @@ def _usage_item(
 # usage_spike tests
 # ---------------------------------------------------------------------------
 
-def test_usage_spike_triggered_when_total_tokens_exceeds_100k(tmpdb):
-    """Single usage fact with input+output > 100,000 triggers usage_spike signal."""
+def test_usage_spike_triggered_when_total_tokens_exceeds_500k(tmpdb):
+    """Single usage fact with input+output > 500,000 triggers usage_spike signal."""
     item = _usage_item(
         event_id="spike-001",
-        input_tokens=80_000,
-        output_tokens=50_000,  # total 130,000
+        input_tokens=400_000,
+        output_tokens=200_000,  # total 600,000
         activity_tag="debugging",
     )
     with connect(tmpdb) as conn:
@@ -119,15 +119,15 @@ def test_usage_spike_triggered_when_total_tokens_exceeds_100k(tmpdb):
     assert signals[0]["priority_score"] == 70
     assert signals[0]["severity"] == "medium"
     assert "用量突增" in signals[0]["title"]
-    assert signals[0]["affected_scope"]["total_tokens"] == 130_000
+    assert signals[0]["affected_scope"]["max_single_call_tokens"] == 600_000
 
 
 def test_usage_spike_not_triggered_below_threshold(tmpdb):
-    """input+output <= 100,000 should not trigger usage_spike."""
+    """input+output <= 500,000 should not trigger usage_spike."""
     item = _usage_item(
         event_id="normal-001",
-        input_tokens=50_000,
-        output_tokens=49_000,  # total 99,000
+        input_tokens=200_000,
+        output_tokens=200_000,  # total 400,000
     )
     with connect(tmpdb) as conn:
         _ingest(conn, [item])
@@ -138,10 +138,10 @@ def test_usage_spike_not_triggered_below_threshold(tmpdb):
 
 
 def test_usage_spike_multiple_facts_grouped(tmpdb):
-    """Multiple spike facts in same conversation grouped into one signal."""
+    """Multiple spike facts in same conversation grouped into one signal, reporting largest call."""
     items = [
-        _usage_item(event_id="spike-1", input_tokens=60_000, output_tokens=50_000, conversation_ref="conv-a"),
-        _usage_item(event_id="spike-2", input_tokens=70_000, output_tokens=40_000, conversation_ref="conv-a"),
+        _usage_item(event_id="spike-1", input_tokens=300_000, output_tokens=300_000, conversation_ref="conv-a"),  # 600K
+        _usage_item(event_id="spike-2", input_tokens=400_000, output_tokens=300_000, conversation_ref="conv-a"),  # 700K (largest)
     ]
     with connect(tmpdb) as conn:
         _ingest(conn, items)
@@ -150,7 +150,8 @@ def test_usage_spike_multiple_facts_grouped(tmpdb):
     signals = [s for s in list_signals(conn)["signals"] if s["signal_kind"] == "usage_spike"]
     assert len(signals) == 1
     assert signals[0]["affected_scope"]["conversation_count"] == 1
-    assert signals[0]["affected_scope"]["fact_count"] == 2
+    assert signals[0]["affected_scope"]["spike_call_count"] == 2
+    assert signals[0]["affected_scope"]["max_single_call_tokens"] == 700_000
 
 
 # ---------------------------------------------------------------------------
@@ -351,8 +352,8 @@ def test_integration_all_three_anomaly_types(tmpdb):
         # usage_spike
         _usage_item(
             event_id="spike-001",
-            input_tokens=80_000,
-            output_tokens=50_000,
+            input_tokens=400_000,
+            output_tokens=200_000,  # total 600,000
             activity_tag="debugging",
             conversation_ref="conv-spike",
             session_ref="session-spike",
@@ -402,7 +403,7 @@ def test_integration_all_three_anomaly_types(tmpdb):
 
     spike = next(s for s in all_signals if s["signal_kind"] == "usage_spike")
     assert spike["priority_score"] == 70
-    assert spike["affected_scope"]["total_tokens"] == 130_000
+    assert spike["affected_scope"]["max_single_call_tokens"] == 600_000
 
     cache = next(s for s in all_signals if s["signal_kind"] == "low_cache_hit_rate")
     assert cache["priority_score"] == 65

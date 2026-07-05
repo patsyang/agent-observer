@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import type { ConversationDetail, ConversationHit } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 import { ToolContextBlock } from '../components/ToolContextBlock';
+import { SensitiveEvidence } from '../components/SensitiveEvidence';
 import { factTypeLabel, formatDateTime, severityLabel } from './dashboardLabels';
 
 interface Props {
@@ -19,11 +20,15 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
   const actionableHits = remainingHits.filter(isActionableHit);
   const technicalHits = remainingHits.filter((hit) => !isActionableHit(hit));
   const conversationName = detail.session_title || detail.session_ref || detail.conversation_ref;
-  const highlightTerms = highlightedHits.flatMap((hit) => [
-    hit.tool_context?.command,
-    hit.tool_context?.command_excerpt,
-    hit.tool_context?.error_excerpt,
-  ]).filter((value): value is string => Boolean(value));
+  const highlightTerms = [
+    ...highlightedHits.flatMap((hit) => [
+      hit.tool_context?.command,
+      hit.tool_context?.command_excerpt,
+      hit.tool_context?.error_excerpt,
+    ]),
+    ...detail.messages.flatMap((m) => (m.sensitive_matches ?? []).map((match) => match.matched_value)),
+    ...detail.hits.flatMap((h) => (h.sensitive_matches ?? []).map((match) => match.matched_value)),
+  ].filter((value): value is string => typeof value === 'string' && value.length >= 7);
 
   return (
     <div className="drawer-backdrop" role="presentation">
@@ -90,7 +95,8 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                     <span>{severityLabel(hit.severity)}</span>
                   </header>
                   <ToolContextBlock context={hit.tool_context} />
-                  {!hit.tool_context && <p>{hitReadableText(hit)}</p>}
+                  <SensitiveEvidence matches={hit.sensitive_matches} />
+                  {!hit.tool_context && <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>}
                   <small>{formatDateTime(hit.occurred_at)}</small>
                 </article>
               ))}
@@ -140,7 +146,8 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                         <span>{severityLabel(hit.severity)}</span>
                       </header>
                       <ToolContextBlock context={hit.tool_context} />
-                      {!hit.tool_context && <p>{hitReadableText(hit)}</p>}
+                      <SensitiveEvidence matches={hit.sensitive_matches} />
+                      {!hit.tool_context && <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>}
                       <small>{formatDateTime(hit.occurred_at)}</small>
                     </article>
                   ))}
@@ -196,6 +203,7 @@ function formatPercent(value?: number): string {
 function isActionableHit(hit: ConversationHit): boolean {
   const category = hit.category.toLowerCase();
   if (hit.severity === 'high' || hit.severity === 'medium') return true;
+  if ((hit.sensitive_matches ?? []).some((m) => m.confidence === 'high')) return true;
   return [
     'tool_execution_failure',
     'tool_execution_timeout',
@@ -233,10 +241,12 @@ function technicalHitSummary(hits: ConversationHit[]): string {
 }
 
 function renderHighlightedText(content: string, terms: string[]) {
-  const term = terms.find((value) => value.length > 8 && content.includes(value));
-  if (!term) return content;
-  const parts = content.split(term);
-  return parts.flatMap((part, index) => (
-    index === parts.length - 1 ? [part] : [part, <mark key={`${term}-${index}`}>{term}</mark>]
-  ));
+  const validTerms = [...new Set(terms.filter((value) => value.length >= 7 && content.includes(value)))];
+  if (validTerms.length === 0) return content;
+  const escaped = validTerms.map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const regex = new RegExp(`(${escaped.join('|')})`, 'g');
+  const parts = content.split(regex).filter(Boolean);
+  return parts.map((part, index) =>
+    validTerms.includes(part) ? <mark key={`mark-${index}`}>{part}</mark> : part
+  );
 }

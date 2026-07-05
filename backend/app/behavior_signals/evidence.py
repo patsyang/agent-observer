@@ -23,6 +23,7 @@ def evidence_entries(conn: sqlite3.Connection, fact: sqlite3.Row) -> list[dict]:
         entry["raw_available"] = raw_available(bool(projection["upload_raw"]), projection["raw_content"])
         entry["raw_status"] = raw_status_label(bool(projection["upload_raw"]), projection["raw_content"])
         entry["projection"] = projection_json
+        entry["raw_content"] = projection["raw_content"] or ""
         entries.append(entry)
     return entries
 

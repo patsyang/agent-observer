@@ -16,7 +16,6 @@ from app.behavior_signals.helpers import (
     signature_facts,
     canonical_signature,
 )
-from app.behavior_signals.sensitivity_rules import scan_entry
 
 UpsertSignal = Callable[..., dict]
 
@@ -69,7 +68,7 @@ def build_tool_execution_failures(
                 priority_score=classification["priority"],
                 facts=facts,
                 affected_scope={"conversation_count": len(conversation_refs(facts)), "failure_count": len(facts), "tool_names": [tool], "exit_codes": [exit_code] if exit_code else [], "workflows": [workflow] if workflow else [], "run_ids": [run_id] if run_id else [], "failure_sub_type": classification["sub_type"]},
-                evidence_groups=[failure_group(conn, "failure", "命中事件", facts, projections), enrichment_group(conn, signal_id(signal_key)), _build_sensitivity_evidence(conn, facts)],
+                evidence_groups=[failure_group(conn, "failure", "命中事件", facts, projections), enrichment_group(conn, signal_id(signal_key))],
                 suggested_actions=["打开命中会话查看完整输入输出和错误摘要；若同一命令反复失败，优先修复环境或参数。"],
                 reason=reason,
             )
@@ -114,37 +113,12 @@ def build_execution_timeouts(
                 priority_score=90,
                 facts=facts,
                 affected_scope={"run_ids": [run_id] if run_id else [], "workflows": [workflow] if workflow else [], "timeout_count": len(facts), "duration_seconds": latest.get("wall_time_seconds"), "command_categories": [latest.get("command_category")] if latest.get("command_category") else []},
-                evidence_groups=[failure_group(conn, "failure", "命中事件", facts, [projections.get(f["fact_id"], {}) for f in facts]), _build_sensitivity_evidence(conn, facts)],
+                evidence_groups=[failure_group(conn, "failure", "命中事件", facts, [projections.get(f["fact_id"], {}) for f in facts])],
                 suggested_actions=["打开命中会话，核对超时命令、最近输入输出和工作区状态。"],
                 reason=reason,
             )
         )
     return signals
-
-
-def _build_sensitivity_evidence(conn: sqlite3.Connection, facts: list[sqlite3.Row]) -> dict:
-    """Run scan_entry on each fact and aggregate high-confidence hits."""
-    hits: list[dict] = []
-    for fact in facts:
-        fact_dict = dict(fact)
-        entry = {
-            "function_call_output": fact_dict.get("function_call_output"),
-            "agent_response": fact_dict.get("agent_response"),
-            "agent_reasoning": fact_dict.get("agent_reasoning"),
-            "command_arguments": fact_dict.get("command_arguments"),
-        }
-        hits.extend(scan_entry(entry))
-    if not hits:
-        return {}
-    categories = {h["category"] for h in hits}
-    return {
-        "group_id": "sensitivity:scan",
-        "group_type": "sensitivity",
-        "title": "敏感内容识别",
-        "summary": f"{len(hits):,} 条命中，覆盖 {', '.join(sorted(categories))}",
-        "count": len(hits),
-        "items": hits[:10],
-    }
 
 
 def _execution_group_key(fact: sqlite3.Row, projection: dict) -> str:

@@ -481,6 +481,16 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
         order by of.occurred_at, of.fact_id
         """
     ).fetchall()
+    # [F2] 防御性去重：同一 fact 若有多条 sensitive risk_signal（detector + 过渡期残留），
+    # 按 fact_id 去重，避免 occurrence_count / object_count 翻倍。
+    seen: set[str] = set()
+    deduped: list[sqlite3.Row] = []
+    for row in rows:
+        if row["fact_id"] in seen:
+            continue
+        seen.add(row["fact_id"])
+        deduped.append(row)
+    rows = deduped
     groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         if object_type and str(row["object_type"] or "sensitive_object") != object_type:
@@ -488,12 +498,12 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
         if _high_confidence_sensitive(conn, row["fact_id"]):
             groups[str(row["object_type"] or "sensitive_object")].append(row)
     signals = []
-    for object_type, facts in groups.items():
-        title = f"敏感内容暴露：{_object_type_label(object_type)}"
+    for obj_type, facts in groups.items():
+        title = f"敏感内容暴露：{_object_type_label(obj_type)}"
         signals.append(
             _upsert_signal(
                 conn,
-                signal_key=f"sensitive_content_exposure:{object_type}",
+                signal_key=f"sensitive_content_exposure:{obj_type}",
                 signal_kind="sensitive_content_exposure",
                 title=title,
                 why_it_matters="高可信敏感内容进入会话上下文后，需确认是否符合最小暴露原则。",
@@ -501,8 +511,8 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
                 confidence="high",
                 priority_score=100,
                 facts=facts,
-                affected_scope={"object_count": len(facts), "object_types": [object_type], "conversation_count": len(_conversation_refs(facts))},
-                evidence_groups=[_object_group(conn, "object", _object_type_label(object_type), facts)],
+                affected_scope={"object_count": len(facts), "object_types": [obj_type], "conversation_count": len(_conversation_refs(facts))},
+                evidence_groups=[_object_group(conn, "object", _object_type_label(obj_type), facts)],
                 suggested_actions=["进入命中会话确认敏感内容是否必要、是否已脱敏、是否需要清理本地记录。"],
                 reason=reason,
             )
@@ -683,7 +693,10 @@ def detect_loop_stuck(
     content_types = _content_event_types()
     tool_types = _tool_call_event_types()
 
-    # Fetch all content events and tool call events, ordered by conversation and time
+    # Fetch all content events and tool call events, ordered by conversation and time.
+    # Match by category only: source_event_type values in DB are granular (e.g.
+    # 'response_item:function_call') and don't include the bare values like
+    # 'function_call' or 'agent_response', so category is the reliable filter.
     ct_placeholders = ",".join("?" for _ in content_types)
     tc_placeholders = ",".join("?" for _ in tool_types)
     sql = (
@@ -692,15 +705,8 @@ def detect_loop_stuck(
         " conversation_ref, session_ref"
         " from observed_facts"
         " where ("
-        "   (fact_type = 'content'"
-        "    and ("
-        "      category IN ({ct})"
-        "      OR source_event_type = 'agent_response'"
-        "    ))"
-        "   OR ("
-        "     category IN ({tc})"
-        "     OR source_event_type IN ('function_call', 'function_call_output')"
-        "   )"
+        "   (fact_type = 'content' and category IN ({ct}))"
+        "   OR category IN ({tc})"
         "  )"
         " order by conversation_ref, occurred_at, fact_id"
     ).format(ct=ct_placeholders, tc=tc_placeholders)
@@ -840,7 +846,9 @@ def detect_usage_anomalies(
     """Detect usage anomalies at runtime: usage_spike, low_cache_hit_rate, unknown_usage_dominant.
 
     Thresholds:
-    - usage_spike: single fact input_tokens + output_tokens > 100_000, priority=70
+    - usage_spike: single fact input_tokens + output_tokens > 500_000, priority=70.
+      Reports the largest single call per conversation (NOT cumulative session total).
+      500K threshold avoids noise from normal context-window-sized calls (128K-200K).
     - low_cache_hit_rate: input_tokens > 10_000 AND cache_hit_rate < 10%, priority=65
     - unknown_usage_dominant: within 1-hour window, activity_tag=unknown占比 > 50%, priority=60
 
@@ -893,50 +901,58 @@ def detect_usage_anomalies(
 
     results: list[dict] = []
 
-    # --- usage_spike: single fact with input_tokens + output_tokens > 100,000 ---
+    # --- usage_spike: single call with input_tokens + output_tokens > 500,000 ---
+    # Threshold raised from 100K to 500K because modern LLMs have 128K-200K context
+    # windows; a single call near the context limit is normal, not a risk.
+    # 500K+ indicates potential loops, huge file ingestion, or runaway processes.
+    # Key fix: report the LARGEST single call, NOT cumulative session total.
+    SPIKE_THRESHOLD = 500_000
     spike_rows = []
     for row in unused_usage_facts:
         inp = int(row["input_tokens"] or 0)
         outp = int(row["output_tokens"] or 0)
-        if inp + outp > 100_000:
+        if inp + outp > SPIKE_THRESHOLD:
             spike_rows.append(row)
 
     if spike_rows:
-        fact_ids = [r["fact_id"] for r in spike_rows]
-        usage_rows = usage_facts_for_signals(conn, fact_ids)
-        signals_by_conv = defaultdict(list)
-        for ur in usage_rows:
-            conv = ur.get("conversation_ref") or ur.get("session_ref") or "global"
-            signals_by_conv[conv].append(ur)
+        # Group by conversation for context, but report the largest single call
+        signals_by_conv: dict[str, list[sqlite3.Row]] = defaultdict(list)
+        for r in spike_rows:
+            conv = r["conversation_ref"] or r["session_ref"] or "global"
+            signals_by_conv[conv].append(r)
 
         for conv_ref, group in signals_by_conv.items():
-            total_tokens = sum(int(u["input_tokens"] or 0) + int(u["output_tokens"] or 0) for u in group)
-            title = f"用量突增：单次调用共 {total_tokens:,} tokens（input={sum(int(u['input_tokens'] or 0) for u in group):,}, output={sum(int(u['output_tokens'] or 0) for u in group):,}）"
+            # Find the largest single call in this conversation
+            max_row = max(group, key=lambda r: int(r["input_tokens"] or 0) + int(r["output_tokens"] or 0))
+            max_total = int(max_row["input_tokens"] or 0) + int(max_row["output_tokens"] or 0)
+            title = (
+                f"用量突增：单次调用 {max_total:,} tokens"
+                f"（input={int(max_row['input_tokens'] or 0):,}, output={int(max_row['output_tokens'] or 0):,}）"
+                f"，会话内 {len(group)} 次超阈值"
+            )
             # Fetch full observed_facts rows for evidence groups
             spike_conv_facts = []
-            for r in spike_rows:
-                cr = r["conversation_ref"] or r["session_ref"] or "global"
-                if cr == conv_ref:
-                    full = conn.execute("select * from observed_facts where fact_id = ?", (r["fact_id"],)).fetchone()
-                    if full:
-                        spike_conv_facts.append(dict(full))
+            for r in group:
+                full = conn.execute("select * from observed_facts where fact_id = ?", (r["fact_id"],)).fetchone()
+                if full:
+                    spike_conv_facts.append(dict(full))
             results.append(
                 upsert_signal(
                     conn,
                     signal_key=f"usage_spike:{conv_ref}",
                     signal_kind="usage_spike",
                     title=title,
-                    why_it_matters="单次调用 token 用量远超常规水平，可能导致成本失控或被滥用，需要确认是否符合预期。",
+                    why_it_matters="单次调用 token 用量超过 50 万，远超常规水平，可能存在循环调用、巨大文件摄入或失控进程，需要确认是否符合预期。",
                     severity="medium",
                     confidence="high",
                     priority_score=70,
-                    facts=spike_conv_facts if spike_conv_facts else [dict(r) for r in spike_rows],
+                    facts=spike_conv_facts if spike_conv_facts else [dict(r) for r in group],
                     affected_scope={
                         "conversation_count": 1 if conv_ref != "global" else len(signals_by_conv),
-                        "total_tokens": total_tokens,
-                        "input_tokens": sum(int(u["input_tokens"] or 0) for u in group),
-                        "output_tokens": sum(int(u["output_tokens"] or 0) for u in group),
-                        "fact_count": len(group),
+                        "max_single_call_tokens": max_total,
+                        "spike_call_count": len(group),
+                        "input_tokens": int(max_row["input_tokens"] or 0),
+                        "output_tokens": int(max_row["output_tokens"] or 0),
                         "conversation_ref": conv_ref if conv_ref != "global" else None,
                     },
                     evidence_groups=[
@@ -944,7 +960,7 @@ def detect_usage_anomalies(
                         if spike_conv_facts else [],
                     ],
                     suggested_actions=[
-                        f"检查会话 {conv_ref} 的调用详情，确认是否有异常大的输出或循环调用。",
+                        f"检查会话 {conv_ref} 的调用详情，确认是否有循环调用或巨大文件摄入。",
                     ],
                     reason=reason,
                 )

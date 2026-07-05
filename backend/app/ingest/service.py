@@ -6,9 +6,15 @@ import hashlib
 from datetime import UTC, datetime
 
 from app.behavior_signals.helpers import canonical_signature, exit_code_from_summary
-from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
+from app.collector_client.version import COLLECTOR_PROTOCOL_VERSION
+from app.conversations.materialize import (
+    FactProjection,
+    apply as materialize_apply,
+    refresh as materialize_refresh,
+)
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
 from app.processing.jobs import JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
+from app.sensitive_detector import detect_for_fact, object_type_from_matches
 
 
 def _now() -> str:
@@ -37,12 +43,28 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     for item in batch.get("items", []):
         _validate_required_raw_content(item)
         source_event_id = item["source_event_id"]
+        sensitive_matches, sensitive_object_type = _detect_fact_sensitive(item)
+        if sensitive_matches:
+            _stamp_sensitive_into_item(item, sensitive_matches)
         existing = conn.execute(
             "select fact_id from observed_facts where collector_id = ? and source_id = ? and source_event_id = ?",
             (collector_id, source_id, source_event_id),
         ).fetchone()
         if existing:
             _enrich_existing_raw_projection(conn, existing["fact_id"], item)
+            if sensitive_matches:
+                _write_sensitive_risk(conn, existing["fact_id"], sensitive_object_type, pending_jobs)
+            _materialize_fact(
+                conn,
+                fact_id=existing["fact_id"],
+                item=item,
+                sensitive_matches=sensitive_matches,
+                preview=_list_projection_preview(item),
+                agent_type=agent_type,
+                source_id=source_id,
+                source_kind=source_kind,
+                dedup=True,
+            )
             duplicates += 1
             continue
         fact_id = _fact_id(conn, collector_id, source_id, source_event_id)
@@ -89,7 +111,19 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
             ),
         )
         _insert_evidence_projections(conn, fact_id, item)
+        if sensitive_matches:
+            _write_sensitive_risk(conn, fact_id, sensitive_object_type, pending_jobs)
         _insert_optional_signals(conn, fact_id, item)
+        _materialize_fact(
+            conn,
+            fact_id=fact_id,
+            item=item,
+            sensitive_matches=sensitive_matches,
+            preview=preview,
+            agent_type=agent_type,
+            source_id=source_id,
+            source_kind=source_kind,
+        )
         accepted += 1
         for job in _signal_jobs_for_item(item, source):
             pending_jobs[job["job_id"]] = job
@@ -135,11 +169,47 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
     }
 
 
+def _materialize_fact(
+    conn: sqlite3.Connection,
+    *,
+    fact_id: str,
+    item: dict,
+    sensitive_matches: list,
+    preview: dict,
+    agent_type: str,
+    source_id: str,
+    source_kind: str,
+    dedup: bool = False,
+) -> None:
+    """把这条 fact 投射进会话物化层（与 ingest 同事务，不 commit）。
+
+    单条失败不波及 ingest 事务（仿 _detect_fact_sensitive 的约定）；遗漏可由
+    ``scripts.rebuild_conversations`` 补齐。
+    """
+    try:
+        projection = FactProjection.from_item(
+            conn,
+            fact_id=fact_id,
+            item=item,
+            sensitive_matches=sensitive_matches,
+            preview=preview,
+            agent_type=agent_type,
+            source_id=source_id,
+            source_kind=source_kind,
+        )
+        if dedup:
+            materialize_refresh(conn, fact_id, projection)
+        else:
+            materialize_apply(conn, projection)
+    except Exception:
+        pass
+
+
 def _validate_batch_protocol(batch: dict) -> None:
     if batch.get("protocol_version") != COLLECTOR_PROTOCOL_VERSION:
         raise ValueError("unsupported_collector_protocol")
-    if batch.get("agent_version") != COLLECTOR_CLIENT_VERSION:
-        raise ValueError("unsupported_collector_version")
+    if not str(batch.get("agent_version") or "").strip():
+        raise ValueError("agent_version_required")
 
 
 def _batch_source_meta(batch: dict) -> dict[str, str]:
@@ -434,7 +504,7 @@ def _signal_jobs_for_item(item: dict, source: str) -> list[dict]:
     if risk_type == "file_change":
         conversation_ref = str((item.get("source_refs") or {}).get("conversation_ref") or "")
         if conversation_ref:
-            jobs.append(_job("file_change", conversation_ref, 60))
+            jobs.append(_job("file_change", conversation_ref, 80))
     if risk_type == "destructive_operation":
         jobs.append(_job("risk", "destructive_operation", 90))
     if risk_type == "sensitive_content_exposure":
@@ -451,6 +521,96 @@ def _job(scope_type: str, scope_id: str, priority: int) -> dict:
         "scope_id": scope_id,
         "priority": priority,
     }
+
+
+# ---------------------------------------------------------------------------
+# 敏感内容检测接入（L2 detector — sensitive risk_signal 的唯一写者）
+#
+# collector 不再做敏感检测，ingest 在写 projection 前算好 sensitive_matches 一次写齐
+# （零 read-back），命中即写 risk_signals（object_type 派生索引）+ 入队聚合 job。
+# detector 内部吞异常 [F6]、raw_content 截断，单条 fact 失败不波及事务。
+# ---------------------------------------------------------------------------
+
+_SENSITIVE_JOB_SCOPE = "sensitive_content_exposure"
+
+
+def _detect_fact_sensitive(item: dict) -> tuple[list[dict], str | None]:
+    """对 content/tool fact 跑 detector，返回 (high_matches, object_type)；无命中返回 ([], None)。
+
+    [F6] 整个函数体包 try/except，单条 fact 的任何异常（KeyError 等）都不波及 ingest 事务。
+    """
+    if item.get("fact_type") not in {"content", "tool"}:
+        return [], None
+    try:
+        # 优先只扫 raw_content（完整 record，含 content_text / command / args，最全）；缺失才扫
+        # projection_json —— 避免两者重叠导致同一 PII 被重复命中（raw_content 是 projection 的超集）。
+        raw_parts: list[str] = []
+        projection_parts: list[str] = []
+        for projection in _normalized_projections(item):
+            raw_content = _raw_content(projection, item)
+            if raw_content:
+                raw_parts.append(raw_content)
+            else:
+                projection_value = projection.get("projection") or projection.get("projection_json") or item.get("projection")
+                if projection_value:
+                    projection_parts.append(json.dumps(projection_value, ensure_ascii=False, sort_keys=True, default=str))
+        text = "\n".join(raw_parts) if raw_parts else "\n".join(projection_parts)
+        high = detect_for_fact(text, None, source="ingest")
+        if not high:
+            return [], None
+        return high, object_type_from_matches(high)
+    except Exception:
+        return [], None
+
+
+def _primary_projection_dict(item: dict) -> dict | None:
+    """取 item 的主 projection dict（用于注入 sensitive_matches）。"""
+    if item.get("evidence_projections"):
+        proj0 = item["evidence_projections"][0]
+        if not isinstance(proj0.get("projection"), dict):
+            proj0["projection"] = {}
+        return proj0["projection"]
+    projection = item.get("projection")
+    if not isinstance(projection, dict):
+        item["projection"] = {}
+        projection = item["projection"]
+    return projection
+
+
+def _stamp_sensitive_into_item(item: dict, matches: list[dict]) -> None:
+    """把 sensitive_matches 注入 item 主 projection dict，使后续 INSERT/UPDATE 一次写齐。
+
+    真值检测 [F1]：空 list 也视为"无"，避免 collector 写过的空 sensitive_matches 守卫失效。
+    """
+    target = _primary_projection_dict(item)
+    if target is None:
+        return
+    if not target.get("sensitive_matches"):
+        target["sensitive_matches"] = matches
+        target["sensitivity_confidence"] = "high"
+        target["sensitive_categories"] = sorted({m["category"] for m in matches})
+
+
+def _enqueue_sensitive_job(pending_jobs: dict[str, dict], object_type: str) -> None:
+    job_id = f"{JOB_TYPE_SIGNAL_UPDATE}:risk:{_SENSITIVE_JOB_SCOPE}:{object_type}"
+    pending_jobs[job_id] = {
+        "job_id": job_id,
+        "job_type": JOB_TYPE_SIGNAL_UPDATE,
+        "scope_type": "risk",
+        "scope_id": f"{_SENSITIVE_JOB_SCOPE}:{object_type}",
+        "priority": 95,
+    }
+
+
+def _write_sensitive_risk(conn: sqlite3.Connection, fact_id: str, object_type: str, pending_jobs: dict[str, dict]) -> None:
+    """UPSERT sensitive risk_signal。signal_id 是 PK，新 fact 插入；duplicate 时更新 object_type [F3]。"""
+    conn.execute(
+        "insert into risk_signals (signal_id, fact_id, risk_type, severity, object_type) "
+        "values (?, ?, 'sensitive_content_exposure', 'high', ?) "
+        "on conflict(signal_id) do update set object_type=excluded.object_type, severity='high'",
+        (f"risk:sensitive:{fact_id}", fact_id, object_type),
+    )
+    _enqueue_sensitive_job(pending_jobs, object_type)
 
 
 def _timeout_scope_key(item: dict, source: str) -> str:

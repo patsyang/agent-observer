@@ -5,13 +5,13 @@ from datetime import UTC, datetime, timedelta
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from app.processing.jobs import enqueue_global_signal_rebuild, enqueue_processing_job, processing_status, run_next_job
+from source_payloads import default_versions
 
 
 def _failure_batch() -> dict:
     return {
         "batch_id": "batch-processing",
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",

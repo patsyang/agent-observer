@@ -37,6 +37,16 @@ export interface EnrichmentAvailability {
   capabilities: EnrichmentCapability[];
 }
 
+export interface SensitiveMatch {
+  category: string;
+  match_type: string;
+  confidence: string;
+  evidence_key: string;
+  matched_preview: string;
+  matched_value: string;
+  reason_code: string;
+}
+
 export interface SignalEvidenceItem {
   evidence_ref: string;
   fact_id?: string | null;
@@ -53,6 +63,7 @@ export interface SignalEvidenceItem {
   raw_status?: string;
   risk_category_count?: number;
   sensitive_categories?: string[];
+  sensitive_matches?: SensitiveMatch[];
   tool_name?: string | null;
   exit_code?: string | number | null;
   tool_context?: ToolContext | null;

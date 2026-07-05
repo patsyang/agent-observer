@@ -5,6 +5,7 @@ import subprocess
 import zipfile
 
 from app.collector_client.cli import run
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.collectors.service import heartbeat, list_collectors, register_collector
 from app.db.connection import SOURCE_STATUSES, connect
 from app.ingest.service import ingest_telemetry
@@ -12,7 +13,7 @@ from app.package.builder import build_windows_package
 from app.policy import update_effective_policy
 from app.processing.jobs import run_next_job
 from app.behavior_signals.service import list_signals
-from source_payloads import default_sources
+from source_payloads import default_sources, default_versions
 
 
 def _write_codex_fixture(codex_home):
@@ -77,8 +78,7 @@ def test_register_reuses_collector_and_returns_policy(tmp_path):
             "hostname": "workstation-a",
             "windows_username": "dev-user",
             "agent_type": "codex",
-            "protocol_version": "agent-observer-telemetry/v3",
-            "agent_version": "0.3.0",
+            **default_versions(),
             "sources": default_sources(),
         }
         first = register_collector(conn, payload)
@@ -102,8 +102,7 @@ def test_collectors_can_share_default_source_ids_without_stealing_rows(tmp_path)
                 "hostname": "workstation-a",
                 "windows_username": "dev-user-a",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "sources": default_sources(),
             },
         )
@@ -114,8 +113,7 @@ def test_collectors_can_share_default_source_ids_without_stealing_rows(tmp_path)
                 "hostname": "workstation-b",
                 "windows_username": "dev-user-b",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "sources": default_sources(),
             },
         )
@@ -125,7 +123,27 @@ def test_collectors_can_share_default_source_ids_without_stealing_rows(tmp_path)
     assert {source["source_id"] for source in collectors["collector-b"]["sources"]} == {"codex-local", "workbuddy-local"}
 
 
-def test_register_rejects_stale_collector_version(tmp_path):
+def test_register_accepts_legacy_agent_version(tmp_path):
+    """agent_version 仅作记录，不作为兼容性门禁；旧客户端只要协议匹配即可注册。"""
+    with connect(tmp_path / "observer.sqlite") as conn:
+        result = register_collector(
+            conn,
+            {
+                "hostname": "workstation-a",
+                "windows_username": "dev-user",
+                "agent_type": "codex",
+                "protocol_version": "agent-observer-telemetry/v3",
+                "agent_version": "0.1.0",
+                "sources": default_sources(),
+            },
+        )
+
+    assert result["collector_id"]
+    row = conn.execute("select agent_version from collectors where collector_id = ?", (result["collector_id"],)).fetchone()
+    assert row["agent_version"] == "0.1.0"
+
+
+def test_register_requires_agent_version(tmp_path):
     with connect(tmp_path / "observer.sqlite") as conn:
         try:
             register_collector(
@@ -135,7 +153,7 @@ def test_register_rejects_stale_collector_version(tmp_path):
                     "windows_username": "dev-user",
                     "agent_type": "codex",
                     "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.1.0",
+                    "agent_version": "",
                     "sources": default_sources(),
                 },
             )
@@ -144,7 +162,7 @@ def test_register_rejects_stale_collector_version(tmp_path):
         else:
             error = ""
 
-    assert error == "unsupported_collector_version"
+    assert error == "agent_version_required"
 
 
 def test_register_requires_sources(tmp_path):
@@ -155,8 +173,7 @@ def test_register_requires_sources(tmp_path):
                 {
                     "hostname": "workstation-a",
                     "windows_username": "dev-user",
-                    "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.3.0",
+                    **default_versions(),
                 },
             )
         except ValueError as exc:
@@ -176,8 +193,7 @@ def test_register_rejects_partially_invalid_sources(tmp_path):
                 {
                     "hostname": "workstation-a",
                     "windows_username": "dev-user",
-                    "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.3.0",
+                    **default_versions(),
                     "sources": sources,
                 },
             )
@@ -199,7 +215,7 @@ def test_existing_collector_heartbeat_rejects_unsupported_protocol(tmp_path):
                 "windows_username": "dev-user",
                 "agent_type": "codex",
                 "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                "agent_version": "0.3.1",
                 "sources": default_sources(),
             },
         )
@@ -238,8 +254,7 @@ def test_collector_list_does_not_expose_raw_upload_override_state(tmp_path):
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "sources": default_sources(),
             },
         )
@@ -248,8 +263,7 @@ def test_collector_list_does_not_expose_raw_upload_override_state(tmp_path):
             conn,
             registered["collector_id"],
             {
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "source_status": "online",
                 "reason_code": "start_running",
                 "sources": default_sources(),
@@ -269,8 +283,7 @@ def test_heartbeat_persists_all_source_status_reasons(tmp_path):
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "sources": default_sources(),
             },
         )
@@ -281,8 +294,7 @@ def test_heartbeat_persists_all_source_status_reasons(tmp_path):
                 collector_id,
                 {
                     "source_status": status,
-                    "protocol_version": "agent-observer-telemetry/v3",
-                    "agent_version": "0.3.0",
+                    **default_versions(),
                     "reason_code": status,
                     "outbox_backlog": 2 if status == "outbox_backlog" else 0,
                     "sources": default_sources(),
@@ -302,8 +314,7 @@ def test_stale_heartbeat_is_reported_offline_without_deleting_collector(tmp_path
                 "hostname": "workstation-a",
                 "windows_username": "dev-user",
                 "agent_type": "codex",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "sources": default_sources(),
             },
         )
@@ -311,8 +322,7 @@ def test_stale_heartbeat_is_reported_offline_without_deleting_collector(tmp_path
             conn,
             registered["collector_id"],
             {
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "source_status": "online",
                 "reason_code": "start_running",
                 "sources": default_sources(),
@@ -337,8 +347,8 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
     assert package["filename"] == "agent-observer-windows.zip"
     assert package["sha256"]
     assert package["server_url"] == "http://127.0.0.1:8765"
-    assert package["agent_version"] == "0.3.0"
-    assert package["protocol_version"] == "agent-observer-telemetry/v3"
+    assert package["agent_version"] == COLLECTOR_CLIENT_VERSION
+    assert package["protocol_version"] == COLLECTOR_PROTOCOL_VERSION
     with zipfile.ZipFile(package["path"]) as archive:
         names = set(archive.namelist())
         assert "agent-observer.cmd" in names
@@ -363,14 +373,14 @@ def test_package_contains_adjacent_config_with_policy(tmp_path):
     assert config["server_url"] == "http://127.0.0.1:8765"
     assert config["collector_id"] == "windows-collector"
     assert config["history_window_days"] == 7
-    assert config["collection_interval_seconds"] == 5
+    assert config["collection_interval_seconds"] == 10
     assert config["heartbeat_interval_seconds"] == 10
     assert config["max_events_per_cycle"] == 500
     assert config["upload_batch_size"] == 100
     assert config["evidence_mode"] == "structured_projection"
     assert "raw_upload_enabled" not in config
-    assert config["agent_version"] == "0.3.0"
-    assert config["protocol_version"] == "agent-observer-telemetry/v3"
+    assert config["agent_version"] == COLLECTOR_CLIENT_VERSION
+    assert config["protocol_version"] == COLLECTOR_PROTOCOL_VERSION
     assert {source["source_id"] for source in config["sources"]} == {"codex-local", "workbuddy-local", "claude-local"}
     assert "effective_policy" not in config
     assert "template_enabled" not in config
@@ -432,8 +442,7 @@ def test_collector_ingest_creates_chinese_facts_and_signal(tmp_path):
         facts = []
         batch = {
             "batch_id": "collector-package-test-1",
-            "protocol_version": "agent-observer-telemetry/v3",
-            "agent_version": "0.3.0",
+            **default_versions(),
             "collector_id": "package-test",
             "source": "codex",
         "source_id": "codex-local",

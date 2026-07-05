@@ -9,7 +9,7 @@ test('operator views usage and governance trend after fixture ingestion', async 
     data: {
       batch_id: 'e2e-governance-001',
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       collector_id: 'collector-codex',
       source: 'codex',
       source_id: 'codex-local',

@@ -62,7 +62,7 @@ def load_config(workdir: Path) -> tuple[CollectorConfig | None, str | None]:
             workdir=workdir,
             state_path=state_path,
             telemetry_mode=str(payload.get("telemetry_mode", "fixture")),
-            collection_interval_seconds=float(payload.get("collection_interval_seconds", 5)),
+            collection_interval_seconds=float(payload.get("collection_interval_seconds", 10)),
             heartbeat_interval_seconds=float(payload.get("heartbeat_interval_seconds", 10)),
             sources=sources,
             history_window_days=int(payload.get("history_window_days", 7)),

@@ -8,14 +8,14 @@ from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from app.risks.service import get_risk_summary
 from app.usage.service import get_usage_summary
+from source_payloads import default_versions
 
 
 def _usage_risk_batch() -> dict:
     observed_at = datetime.now(UTC).replace(microsecond=0).isoformat()
     return {
         "batch_id": "batch-usage-001",
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",
@@ -456,8 +456,7 @@ def test_risk_summary_filters_unexplained_credential_false_positive(tmp_path):
             conn,
             {
                 "batch_id": "batch-risk-sensitive-context",
-                "protocol_version": "agent-observer-telemetry/v3",
-                "agent_version": "0.3.0",
+                **default_versions(),
                 "collector_id": "collector-codex",
                 "source": "codex",
         "source_id": "codex-local",

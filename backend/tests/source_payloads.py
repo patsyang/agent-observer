@@ -1,5 +1,15 @@
 from __future__ import annotations
 
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
+
+
+def default_versions() -> dict:
+    """返回当前 collector 客户端的协议与实现版本，供测试构造 payload 时引用常量而非硬编码字符串。"""
+    return {
+        "protocol_version": COLLECTOR_PROTOCOL_VERSION,
+        "agent_version": COLLECTOR_CLIENT_VERSION,
+    }
+
 
 def default_sources() -> list[dict]:
     return [

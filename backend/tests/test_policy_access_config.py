@@ -13,12 +13,9 @@ from app.collectors.service import (
 )
 from app.db.connection import connect
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
-from source_payloads import default_sources
+from source_payloads import default_sources, default_versions
 
-CLIENT_PROTOCOL = {
-    "protocol_version": "agent-observer-telemetry/v3",
-    "agent_version": "0.3.0",
-}
+CLIENT_PROTOCOL = default_versions()
 
 
 def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_path):
@@ -44,6 +41,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
     assert updated["max_events_per_cycle"] == 900
     assert updated["upload_batch_size"] == 120
     assert updated["worker_poll_interval_seconds"] == 12
+    assert updated["outbox_soft_limit"] == 5000
     assert audit["events"][0]["action"] == "policy_changed"
     assert audit["events"][0]["actor"] == "fixed-management-account"
     assert audit["events"][0]["metadata"] == {
@@ -52,6 +50,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
         "collection_interval_seconds": 8,
         "enrichment_mode": "disabled",
         "max_events_per_cycle": 900,
+        "outbox_soft_limit": 5000,
         "reason_code": "operator_policy_update",
         "raw_upload_mode": "always_on",
         "upload_batch_size": 120,
@@ -82,6 +81,27 @@ def test_policy_update_requires_current_version_and_rejects_unknown_fields(tmp_p
         with pytest.raises(ValueError, match="worker_poll_interval_seconds_out_of_range"):
             update_effective_policy(conn, {"expected_version": 1, "worker_poll_interval_seconds": 1})
 
+        with pytest.raises(ValueError, match="outbox_soft_limit_out_of_range"):
+            update_effective_policy(conn, {"expected_version": 1, "outbox_soft_limit": 100})
+
+        with pytest.raises(ValueError, match="outbox_soft_limit_out_of_range"):
+            update_effective_policy(conn, {"expected_version": 1, "outbox_soft_limit": 99999})
+
+
+def test_policy_update_can_change_outbox_soft_limit(tmp_path):
+    with connect(tmp_path / "observer.sqlite") as conn:
+        initial = get_effective_policy(conn)
+        updated = update_effective_policy(
+            conn,
+            {
+                "expected_version": initial["policy_version"],
+                "outbox_soft_limit": 8000,
+            },
+        )
+
+    assert updated["outbox_soft_limit"] == 8000
+    assert updated["policy_version"] == initial["policy_version"] + 1
+
 
 
 def test_collector_policy_no_longer_exposes_raw_upload_override_state(tmp_path):
@@ -111,10 +131,11 @@ def test_collector_policy_no_longer_exposes_raw_upload_override_state(tmp_path):
         collector = list_collectors(conn)[0]
 
     assert heartbeat_result["effective_policy"]["raw_upload_mode"] == "always_on"
-    assert heartbeat_result["effective_policy"]["collection_interval_seconds"] == 5
+    assert heartbeat_result["effective_policy"]["collection_interval_seconds"] == 10
     assert heartbeat_result["effective_policy"]["max_events_per_cycle"] == 500
     assert heartbeat_result["effective_policy"]["upload_batch_size"] == 100
     assert heartbeat_result["effective_policy"]["worker_poll_interval_seconds"] == 10
+    assert heartbeat_result["effective_policy"]["outbox_soft_limit"] == 5000
     assert "raw_upload_enabled" not in heartbeat_result["effective_policy"]
     assert "raw_upload_source" not in heartbeat_result["effective_policy"]
     assert "raw_upload_enabled" not in collector

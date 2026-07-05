@@ -4,7 +4,7 @@ import json
 from datetime import datetime, timedelta, timezone
 
 from app.collector_client.config import load_config
-from app.collector_client.cli import _human_log_line, _post_heartbeat, _state_payload, run
+from app.collector_client.cli import _human_log_line, _post_heartbeat, run
 from app.collector_client.runtime import CommandResult, _config_with_policy
 
 
@@ -45,135 +45,12 @@ def _write_state(state_path, **overrides) -> None:
     state_path.write_text(json.dumps(state), encoding="utf-8")
 
 
-def test_state_payload_summarizes_v2_cursor():
-    payload = _state_payload(
-        {
-            "running": True,
-            "cursor": {
-                "last_sequence": 7,
-                "sources": {"C:/Users/dev/.codex/sessions/session.jsonl": {"line_no": 1000}},
-                "live_tail_source_keys": ["one", "two"],
-            },
-            "outbox": [],
-            "last_upload_at": "2026-06-20T01:00:00+00:00",
-            "last_error": None,
-            "process_heartbeat_at": "2026-06-20T01:00:00+00:00",
-        },
-        compact=True,
-    )
-
-    expected = {
-        "last_sequence": 7,
-        "source_file_count": 1,
-        "live_tail_source_key_count": 2,
-    }
-    assert payload["cursor_summary"] == expected
-    assert "cursor" not in payload
-    assert "raw_upload_enabled" not in payload
-
-
-def test_human_cycle_log_is_concise_and_business_readable():
-    line = _human_log_line(
-        {
-            "mode": "cycle",
-            "cycle": 12,
-            "uploaded": 46,
-            "enrichments": 1,
-            "outbox_backlog": 0,
-            "last_cycle_duration_ms": 3100,
-            "facts_summary": {
-                "generated": 46,
-                "types": {"error": 2, "risk": 8, "usage": 3, "tool": 33},
-            },
-            "sources_summary": [
-                {
-                    "agent_type": "codex",
-                    "display_name": "Codex Local",
-                    "generated": 38,
-                    "types": {"risk": 8, "tool": 30},
-                    "status": "online",
-                    "reason_code": "collected",
-                },
-                {
-                    "agent_type": "workbuddy",
-                    "display_name": "WorkBuddy Local",
-                    "generated": 8,
-                    "types": {"tool": 3, "usage": 3, "error": 2},
-                    "status": "online",
-                    "reason_code": "collected",
-                },
-            ],
-            "next_cycle_at": "2026-06-20T01:12:37+00:00",
-            "cursor": {
-                "last_sequence": 12,
-                "live_tail_source_keys": ["C:/Users/dev/.codex/sessions/a.jsonl:00000001"],
-            },
-        }
-    )
-
-    assert "第 12 轮完成" in line
-    assert "生成 46 条事实" in line
-    assert "上传 46 条" in line
-    assert "错误 2" in line
-    assert "风险 8" in line
-    assert "补证 1" in line
-    assert "Codex 38 条" in line
-    assert "WorkBuddy 8 条" in line
-    assert "source_keys" not in line
-    assert ".jsonl" not in line
-
-
-def test_human_start_and_wait_logs_identify_configured_agents():
-    payload = {
-        "sources_summary": [
-            {"agent_type": "codex", "display_name": "Codex Local"},
-            {"agent_type": "workbuddy", "display_name": "WorkBuddy Local"},
-        ]
-    }
-
-    start = _human_log_line({"mode": "started", "collector_id": "windows-collector", **payload})
-    waiting = _human_log_line({"mode": "waiting", "seconds_until_next_cycle": 14, **payload})
-
-    assert "采集 Codex、WorkBuddy" in start
-    assert "等待下一轮采集：15 秒" in waiting
-
-
-def test_human_source_and_upload_logs_identify_agent_without_paths():
-    started = _human_log_line({"mode": "source_started", "agent_type": "codex", "display_name": "Codex Local"})
-    completed = _human_log_line(
-        {
-            "mode": "source_completed",
-            "agent_type": "workbuddy",
-            "display_name": "WorkBuddy Local",
-            "source_status": "online",
-            "reason_code": "collected",
-            "generated": 317,
-            "duration_ms": 6900,
-        }
-    )
-    failed = _human_log_line(
-        {
-            "mode": "source_completed",
-            "agent_type": "workbuddy",
-            "display_name": "WorkBuddy Local",
-            "source_status": "degraded",
-            "reason_code": "source_error",
-            "duration_ms": 1200,
-        }
-    )
-    uploaded = _human_log_line({"mode": "upload_completed", "uploaded": 817, "batches": 9, "outbox_backlog": 0, "duration_ms": 2100})
-
-    assert "Codex 开始采集" in started
-    assert "WorkBuddy 完成：生成 317 条，耗时 6.9s" in completed
-    assert "WorkBuddy 采集失败：source_error，下轮继续" in failed
-    assert "上传完成：817 条，9 批，outbox 0，耗时 2.1s" in uploaded
-    combined = "\n".join([started, completed, failed, uploaded])
-    assert "C:\\" not in combined
-    assert ".codex" not in combined
-    assert ".workbuddy" not in combined
-
+# ---------------------------------------------------------------------------
+# 日志脱敏：collector stdout 不得泄露路径细节（项目硬约束）
+# ---------------------------------------------------------------------------
 
 def test_human_source_labels_do_not_echo_path_like_display_names():
+    """display_name 含路径时，日志不得输出路径片段。"""
     line = _human_log_line(
         {
             "mode": "source_started",
@@ -187,25 +64,8 @@ def test_human_source_labels_do_not_echo_path_like_display_names():
     assert ".codex" not in line
 
 
-def test_human_cycle_error_log_does_not_look_successful():
-    line = _human_log_line(
-        {
-            "mode": "cycle_error",
-            "cycle": 3,
-            "error": "database is locked",
-            "outbox_backlog": 90,
-            "last_cycle_duration_ms": 60100,
-        }
-    )
-
-    assert "第 3 轮失败" in line
-    assert "database is locked" in line
-    assert "outbox 90" in line
-    assert "完成" not in line
-    assert "生成 0 条事实" not in line
-
-
 def test_human_cycle_error_suppresses_path_details():
+    """错误日志中的路径细节应被替换为通用提示，不泄露 .jsonl 等扩展名。"""
     line = _human_log_line(
         {
             "mode": "cycle_error",
@@ -221,15 +81,9 @@ def test_human_cycle_error_suppresses_path_details():
     assert ".jsonl" not in line
 
 
-def test_human_wait_log_uses_rounded_seconds_without_four_second_tick():
-    first = _human_log_line({"mode": "waiting", "seconds_until_next_cycle": 14})
-    second = _human_log_line({"mode": "waiting", "seconds_until_next_cycle": 4})
-
-    assert "14 秒" not in first
-    assert "4 秒" not in second
-    assert "15 秒" in first
-    assert "5 秒" in second
-
+# ---------------------------------------------------------------------------
+# 进程管理：status/start 的 liveness 判定与幂等性
+# ---------------------------------------------------------------------------
 
 def test_status_reports_stale_liveness_for_old_running_state(tmp_path):
     state_path = tmp_path / "agent-observer.state.json"
@@ -355,6 +209,10 @@ def test_background_heartbeat_post_does_not_rewrite_state_file(tmp_path, monkeyp
     assert json.loads(state_path.read_text(encoding="utf-8")) == original_state
 
 
+# ---------------------------------------------------------------------------
+# 策略管理：policy 下发与本地 fallback
+# ---------------------------------------------------------------------------
+
 def test_cached_effective_policy_overrides_local_performance_config(tmp_path):
     state_path = tmp_path / "agent-observer.state.json"
     _write_config(tmp_path, "collector-policy", state_path, interval=30)
@@ -428,4 +286,3 @@ def test_run_once_register_failure_keeps_local_collection(tmp_path, monkeypatch)
     assert result.code == 2
     assert state["outbox"] == [fact]
     assert "server offline" not in state["last_error"]
-

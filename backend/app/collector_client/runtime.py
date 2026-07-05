@@ -31,10 +31,33 @@ from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PRO
 
 Emit = Callable[[str], None]
 
+MAX_BACKOFF_SECONDS = 60
+
+
 @dataclass(frozen=True)
 class CommandResult:
     code: int
     output: str
+
+
+def _backoff_seconds(consecutive_errors: int) -> float:
+    """连续失败时的指数退避：5, 10, 20, 40, 60, 60, ..."""
+    if consecutive_errors <= 0:
+        return 0
+    return min(5 * (2 ** (consecutive_errors - 1)), MAX_BACKOFF_SECONDS)
+
+
+def _outbox_soft_limit(state: dict[str, object]) -> int:
+    """从 state.effective_policy 读取 outbox_soft_limit，缺失时回退到默认值 5000。"""
+    policy = state.get("effective_policy")
+    if isinstance(policy, dict):
+        try:
+            value = int(policy.get("outbox_soft_limit") or 0)
+            if 500 <= value <= 50000:
+                return value
+        except (TypeError, ValueError):
+            pass
+    return 5000
 
 
 def _json_result(code: int, payload: dict[str, object]) -> CommandResult:
@@ -115,6 +138,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
 
     heartbeat_thread = threading.Thread(target=_heartbeat_loop, args=(config, stop_heartbeat), daemon=True)
     heartbeat_thread.start()
+    consecutive_errors = 0
     while True:
         try:
             if not load_state(config.state_path)["running"]:
@@ -159,6 +183,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
                 payload["cursor"] = _cursor_payload(payload.get("cursor", {}))
             _emit(emit, payload)
             cycles += 1
+            consecutive_errors = 0
             if not _sleep_while_running(_config_with_policy(config, load_state(config.state_path)), emit):
                 break
         except Exception as exc:
@@ -166,6 +191,8 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
                 patch_state(config.state_path, {"last_error": str(exc)})
             except Exception:
                 pass
+            consecutive_errors += 1
+            backoff = _backoff_seconds(consecutive_errors)
             _emit(
                 emit,
                 {
@@ -176,9 +203,11 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
                     "error": str(exc),
                     "exception_type": type(exc).__name__,
                     "traceback": traceback.format_exc(),
+                    "consecutive_errors": consecutive_errors,
+                    "backoff_seconds": backoff,
                 },
             )
-            time.sleep(5)
+            time.sleep(backoff)
             continue
     stop_heartbeat.set()
     heartbeat_thread.join(timeout=2)
@@ -210,8 +239,14 @@ def _run_once(
     state["source_status"] = "online"
     state["reason_code"] = "collecting"
     save_state(config.state_path, state)
-    source_results = collect_sources(config, state, next_sequence, emit=lambda payload: _emit(emit, payload), cycle=cycle)
-    facts = [fact for result in source_results for fact in result.facts]
+    if len(state.get("outbox", [])) >= _outbox_soft_limit(state):
+        # outbox 积压超限，跳过采集只上传，避免雪崩
+        facts = []
+        source_results = []
+        state["reason_code"] = "outbox_backlog"
+    else:
+        source_results = collect_sources(config, state, next_sequence, emit=lambda payload: _emit(emit, payload), cycle=cycle)
+        facts = [fact for result in source_results for fact in result.facts]
     state["outbox"].extend(facts)
     state["runtime_phase"] = "uploading" if state["outbox"] else "idle"
     state["reason_code"] = "uploading" if state["outbox"] else heartbeat_reason
@@ -443,6 +478,7 @@ def _remember_effective_policy(state: dict[str, object], response: dict[str, Any
         "collection_interval_seconds": _policy_int(policy, "collection_interval_seconds"),
         "max_events_per_cycle": _policy_int(policy, "max_events_per_cycle"),
         "upload_batch_size": _policy_int(policy, "upload_batch_size"),
+        "outbox_soft_limit": _policy_int(policy, "outbox_soft_limit"),
     }
 
 

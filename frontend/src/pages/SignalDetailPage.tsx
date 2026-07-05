@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { ConversationDrawer } from './ConversationDrawer';
 import { EnrichmentPanel } from '../components/EnrichmentPanel';
 import { HandleSignalDialog } from '../components/HandleSignalDialog';
+import { SensitiveEvidence } from '../components/SensitiveEvidence';
 import { signalKindLabel } from '../components/signalLabels';
 import type { BehaviorSignalDetail, ConversationDetail, EnrichmentAvailability, EnrichmentJob, HandleSignalPayload, LinkedConversation } from '../api/types';
 import { SignalDetailSummary } from './SignalDetailSummary';
@@ -154,6 +155,7 @@ export function SignalDetailPage({
                     <div className="signal-event-main">
                       <strong>{item.summary}</strong>
                       <small>{item.content_preview}</small>
+                      <SensitiveEvidence matches={item.sensitive_matches} />
                       <ToolContextBlock context={item.tool_context} compact />
                     </div>
                     {item.fact_id && (

@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 
 
 MANAGEMENT_ACTOR = "fixed-management-account"
-DEFAULT_COLLECTION_INTERVAL_SECONDS = 5
+DEFAULT_COLLECTION_INTERVAL_SECONDS = 10
 DEFAULT_MAX_EVENTS_PER_CYCLE = 500
 DEFAULT_UPLOAD_BATCH_SIZE = 100
 DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 10
+DEFAULT_OUTBOX_SOFT_LIMIT = 5000
 
 
 def _now() -> str:
@@ -27,6 +28,7 @@ def get_effective_policy(conn: sqlite3.Connection) -> dict:
         "max_events_per_cycle": row["max_events_per_cycle"],
         "upload_batch_size": row["upload_batch_size"],
         "worker_poll_interval_seconds": row["worker_poll_interval_seconds"],
+        "outbox_soft_limit": row["outbox_soft_limit"],
     }
 
 
@@ -44,6 +46,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         "max_events_per_cycle",
         "upload_batch_size",
         "worker_poll_interval_seconds",
+        "outbox_soft_limit",
     }:
         raise ValueError(f"unsupported_policy_field:{sorted(extra_fields)[0]}")
 
@@ -75,6 +78,12 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             2,
             300,
         ),
+        "outbox_soft_limit": _bounded_int(
+            payload.get("outbox_soft_limit", current["outbox_soft_limit"]),
+            "outbox_soft_limit",
+            500,
+            50000,
+        ),
     }
     conn.execute(
         """
@@ -84,7 +93,8 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             collection_interval_seconds = ?,
             max_events_per_cycle = ?,
             upload_batch_size = ?,
-            worker_poll_interval_seconds = ?
+            worker_poll_interval_seconds = ?,
+            outbox_soft_limit = ?
         where id = 1
         """,
         (
@@ -94,6 +104,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             next_policy["max_events_per_cycle"],
             next_policy["upload_batch_size"],
             next_policy["worker_poll_interval_seconds"],
+            next_policy["outbox_soft_limit"],
         ),
     )
     _write_audit(
@@ -110,6 +121,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             "max_events_per_cycle": next_policy["max_events_per_cycle"],
             "upload_batch_size": next_policy["upload_batch_size"],
             "worker_poll_interval_seconds": next_policy["worker_poll_interval_seconds"],
+            "outbox_soft_limit": next_policy["outbox_soft_limit"],
             "reason_code": "operator_policy_update",
         },
     )

@@ -4,17 +4,18 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
+from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.db.connection import connect
 from app.facts.service import get_fact_detail, query_facts
 from app.ingest.service import ingest_telemetry
 from app.telemetry_batches.service import get_batch_status
+from source_payloads import default_versions
 
 
 def _batch(batch_id: str = "batch-001") -> dict:
     return {
         "batch_id": batch_id,
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",
@@ -109,8 +110,8 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
     assert error_count == 1
     assert usage_count == 1
     assert risk_count == 1
-    assert stored_batch["protocol_version"] == "agent-observer-telemetry/v3"
-    assert stored_batch["agent_version"] == "0.3.0"
+    assert stored_batch["protocol_version"] == COLLECTOR_PROTOCOL_VERSION
+    assert stored_batch["agent_version"] == COLLECTOR_CLIENT_VERSION
 
 
 def test_ingest_rejects_batch_without_protocol(tmp_path):
@@ -144,8 +145,7 @@ def test_duplicate_batch_is_idempotent(tmp_path):
 def test_content_fact_requires_raw_content(tmp_path):
     missing_raw = {
         "batch_id": "raw-off-batch",
-        "protocol_version": "agent-observer-telemetry/v3",
-        "agent_version": "0.3.0",
+        **default_versions(),
         "collector_id": "collector-codex",
         "source": "codex",
         "source_id": "codex-local",

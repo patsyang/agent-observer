@@ -10,6 +10,7 @@ from app.behavior_signals.service import rebuild_signals, list_signals
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from app.processing.jobs import run_next_job
+from source_payloads import default_versions
 
 
 # ---------------------------------------------------------------------------
@@ -35,8 +36,7 @@ def _ingest(conn: sqlite3.Connection, items: list[dict]) -> None:
         conn,
         {
             "batch_id": batch_id,
-            "protocol_version": "agent-observer-telemetry/v3",
-            "agent_version": "0.3.0",
+            **default_versions(),
             "collector_id": "collector-codex",
             "source": "codex",
             "source_id": "codex-local",

@@ -116,7 +116,7 @@ const summary: DashboardSummary = {
       hostname_hash: 'host-hash',
       windows_username_hash: 'user-hash',
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       source_status: 'online',
       reason_code: 'run_once',
       policy_version: 1,
@@ -212,10 +212,12 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument();
     expect(within(coreMetrics).getByText('实际计算Token')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('待处理信号')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('敏感命中')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('高优先级')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('待审核信号')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('3,175')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('900')).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('0')).toBeInTheDocument();
+    expect(within(coreMetrics).getAllByText('0')).toHaveLength(2);
     expect(screen.getByText(/实际计算Token 3,175/)).toBeInTheDocument();
     expect(screen.queryByText('未知活动')).not.toBeInTheDocument();
     expect(screen.queryByText('模型调用实际计算 token')).not.toBeInTheDocument();
@@ -347,6 +349,61 @@ describe('DashboardPage', () => {
 
     expect(await screen.findByLabelText('派生计算状态')).toHaveTextContent('派生计算：待处理');
     await waitFor(() => expect(screen.getByLabelText('派生计算状态')).toHaveTextContent('派生计算：空闲'), { timeout: 3000 });
+  });
+
+  it('clears signals when loadSignals fails instead of keeping stale data', async () => {
+    appendDashboardSlots();
+    const user = userEvent.setup();
+    const staleSignal = {
+      signal_id: 'sig-stale-001',
+      signal_key: 'tool_execution_failure:stale',
+      signal_kind: 'tool_execution_failure',
+      title: '过期的工具失败信号',
+      why_it_matters: '此信号已过期',
+      severity: 'high',
+      confidence: 'high',
+      priority_score: 60,
+      affected_scope: {},
+      evidence_groups: [],
+      linked_conversations: [],
+      workspace_refs: [],
+      workspace_summary: { mode: 'unknown', label: '未知', count: 0 },
+      usage_summary: { effective_units: 0, cached_units: 0, cache_hit_rate: null, no_usage_reason: 'no_usage' },
+      enrichment_status_summary: { status: 'unavailable', reason_code: 'no_evidence' },
+      suggested_actions: [],
+      decision_state: 'unread' as const,
+      conclusion_code: null,
+      note: null,
+      snapshot_hash: 'hash-stale'
+    };
+    const summaryWithSignal: DashboardSummary = {
+      ...summary,
+      signals: { total: 1, items: [staleSignal] }
+    };
+    const signalsWithStale: SignalsResponse = { signals: [staleSignal], total: 1, page: 1, page_size: 20, has_more: false };
+    const loadDashboardSummary = vi.fn(async () => summaryWithSignal);
+    const loadSignals = vi
+      .fn()
+      .mockResolvedValueOnce(signalsWithStale)
+      .mockRejectedValueOnce(new Error('network error'));
+    const loadUsageSummary = vi.fn(async () => usage);
+    const loadRiskSummary = vi.fn(async () => risks);
+    const loadProcessingStatus = vi.fn(async () => processingStatus);
+    render(
+      <DashboardPage
+        loadDashboardSummary={loadDashboardSummary}
+        loadSignals={loadSignals}
+        loadUsageSummary={loadUsageSummary}
+        loadRiskSummary={loadRiskSummary}
+        loadProcessingStatus={loadProcessingStatus}
+        onOpenSignal={() => {}}
+      />
+    );
+
+    await screen.findByText('过期的工具失败信号');
+    await user.click(screen.getByRole('button', { name: '刷新' }));
+    await waitFor(() => expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument());
+    expect(screen.queryByText('过期的工具失败信号')).not.toBeInTheDocument();
   });
 });
 

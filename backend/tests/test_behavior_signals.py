@@ -7,6 +7,7 @@ from app.db.connection import connect
 from app.evidence_enrichment.service import get_enrichment_availability, request_enrichment
 from app.ingest.service import ingest_telemetry
 from app.processing.jobs import run_next_job
+from source_payloads import default_versions
 
 
 def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
@@ -46,8 +47,7 @@ def _ingest(conn, items: list[dict]) -> None:
         conn,
         {
             "batch_id": f"batch-{items[0]['source_event_id']}",
-            "protocol_version": "agent-observer-telemetry/v3",
-            "agent_version": "0.3.0",
+            **default_versions(),
             "collector_id": "collector-codex",
             "source": "codex",
         "source_id": "codex-local",

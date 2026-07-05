@@ -31,7 +31,7 @@ test('public onboarding shows registered online collector and package download',
       windows_username: 'synthetic-user',
       agent_type: 'codex',
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       sources
     }
   });
@@ -42,7 +42,7 @@ test('public onboarding shows registered online collector and package download',
     {
       data: {
         protocol_version: 'agent-observer-telemetry/v3',
-        agent_version: '0.3.0',
+        agent_version: '0.3.1',
         source_status: 'online',
         reason_code: 'online',
         outbox_backlog: 0,
@@ -61,7 +61,7 @@ test('public onboarding shows registered online collector and package download',
       windows_username: 'synthetic-user',
       agent_type: 'codex',
       protocol_version: 'agent-observer-telemetry/v3',
-      agent_version: '0.3.0',
+      agent_version: '0.3.1',
       source_status: 'offline',
       reason_code: 'heartbeat_stale',
       sources

@@ -25,7 +25,7 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
         "collector_id": "windows-collector",
         "state_path": "agent-observer.state.json",
         "telemetry_mode": "safe_probe",
-        "collection_interval_seconds": 5,
+        "collection_interval_seconds": 10,
         "heartbeat_interval_seconds": 10,
         "sources": [
             {
@@ -76,7 +76,7 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
         archive.writestr("agent-observer.config.json", config_path.read_text(encoding="utf-8"))
         archive.writestr("README.txt", "Agent Observer Windows collector package\n")
         archive.write(APP_ROOT / "__init__.py", "app/__init__.py")
-        archive.write(APP_ROOT / "sensitivity.py", "app/sensitivity.py")
+        archive.write(APP_ROOT / "sensitive_detector.py", "app/sensitive_detector.py")
         for path in sorted((APP_ROOT / "collector_client").glob("*.py")):
             archive.write(path, f"app/collector_client/{path.name}")
         for path in sorted((APP_ROOT / "collector_client" / "sources").glob("*.py")):

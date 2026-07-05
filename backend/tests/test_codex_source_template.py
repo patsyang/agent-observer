@@ -179,15 +179,14 @@ def test_codex_source_template_extracts_structured_facts_with_raw_content_by_def
     )
 
     categories = {fact["category"] for fact in facts}
-    assert {"tool_execution_failure", "usage", "destructive_operation", "sensitive_content_exposure", "agent_response"} <= categories
+    # collector 不再做敏感检测（已下沉到 ingest 阶段的 detector），所以不再产出
+    # sensitive_content_exposure fact；敏感检测由 sensitive_detector + ingest 覆盖。
+    assert {"tool_execution_failure", "usage", "destructive_operation", "agent_response"} <= categories
     assert "uncategorized" not in categories
+    assert "sensitive_content_exposure" not in categories
     assert any(fact.get("error_signature") for fact in facts if fact["category"] == "tool_execution_failure")
     assert any(fact.get("usage", {}).get("activity_tag") == "shell_debug" for fact in facts)
     assert any(fact.get("risk", {}).get("risk_type") == "destructive_operation" for fact in facts)
-    sensitive_fact = next(fact for fact in facts if fact["category"] == "sensitive_content_exposure")
-    assert sensitive_fact["projection"]["object_type"] == "credential"
-    assert sensitive_fact["projection"]["sensitive_categories"] == ["token"]
-    assert sensitive_fact["projection"]["sensitive_matches"][0]["match_type"] == "authorization_bearer"
     message_fact = next(fact for fact in facts if fact["category"] == "agent_response")
     assert message_fact["projection"]["role"] == "unknown"
     assert message_fact["projection"]["content_length"] == 0

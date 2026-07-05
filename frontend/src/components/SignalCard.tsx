@@ -31,7 +31,12 @@ export function SignalCard({ signal, onOpen }: Props) {
       <div className="signal-card__meta" data-testid="signal-card-meta">
         <div>
           <span>会话</span>
-          <strong>{conversation?.session_title || conversation?.session_ref || conversation?.conversation_ref || '未知会话'}</strong>
+          <strong>
+            {conversation?.session_title || conversation?.session_ref || conversation?.conversation_ref || '未知会话'}
+            {signal.linked_conversations.length > 1 && (
+              <span className="badge gray" style={{ marginLeft: '0.4rem' }}>+{signal.linked_conversations.length - 1}</span>
+            )}
+          </strong>
         </div>
         <div>
           <span>命中</span>

@@ -5,7 +5,7 @@ import json
 import sqlite3
 from datetime import UTC, datetime
 
-from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
+from app.collector_client.version import COLLECTOR_PROTOCOL_VERSION
 from app.db.connection import SOURCE_STATUSES
 from app.policy import get_effective_policy, write_management_audit
 
@@ -127,10 +127,10 @@ def _collector_protocol(payload: dict) -> tuple[str, str]:
     protocol = payload.get("protocol_version")
     if protocol != COLLECTOR_PROTOCOL_VERSION:
         raise ValueError("unsupported_collector_protocol")
-    version = payload.get("agent_version")
-    if version != COLLECTOR_CLIENT_VERSION:
-        raise ValueError("unsupported_collector_version")
-    return str(protocol), str(version)
+    version = str(payload.get("agent_version") or "").strip()
+    if not version:
+        raise ValueError("agent_version_required")
+    return str(protocol), version
 
 
 def heartbeat(conn: sqlite3.Connection, collector_id: str, payload: dict) -> dict:

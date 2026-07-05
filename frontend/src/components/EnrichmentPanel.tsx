@@ -18,6 +18,12 @@ export function EnrichmentPanel({ signalId, availability, requestEnrichment, can
   const [mutationState, setMutationState] = useState<MutationState>('idle');
   const [message, setMessage] = useState<string | null>(null);
 
+  const hasAvailableCapability = availability.capabilities.some((c) => c.state !== 'unavailable');
+  const hasActiveJob = Boolean(activeJob || availability.active_job);
+  if (!hasAvailableCapability && !hasActiveJob) {
+    return null;
+  }
+
   return (
     <section aria-label="补充排查上下文" data-testid="enrichment-panel">
       <h3>补充排查上下文</h3>

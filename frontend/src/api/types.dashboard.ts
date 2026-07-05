@@ -15,6 +15,7 @@ export interface DashboardSummary {
   signals: {
     total: number;
     items: BehaviorSignal[];
+    high_priority_count?: number;
   };
   facts: {
     total: number;

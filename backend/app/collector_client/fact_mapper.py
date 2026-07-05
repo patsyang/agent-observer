@@ -5,7 +5,6 @@ import re
 from pathlib import Path
 from typing import Any
 
-from app.sensitivity import sensitive_matches_from_record
 from app.collector_client.command_context import command_error_projection, tool_failure_fact
 from app.collector_client.content_events import CONTENT_EVENTS, content_fact
 from app.collector_client.content_dedup import stamp_content_identity
@@ -67,8 +66,6 @@ def _record_fact(
         return _usage_fact(common, record)
     if _is_error(record):
         return _error_fact(common, record)
-    if _has_sensitive_marker(record):
-        return _sensitive_fact(common, record)
     if change := _file_change_fact(common, record):
         return change
     if risk := _destructive_fact(common, record):
@@ -228,27 +225,6 @@ def _destructive_fact(common: dict, record: dict) -> dict | None:
         "risk": {"risk_type": "destructive_operation", "severity": "high", "object_type": object_type},
     }
 
-def _sensitive_fact(common: dict, record: dict) -> dict:
-    matches = _sensitive_matches(record)
-    categories = sorted({match["category"] for match in matches})
-    object_type = _sensitive_object_type(categories)
-    return {
-        **common,
-        "fact_type": "risk",
-        "category": "sensitive_content_exposure",
-        "quality": "high",
-        "severity": "high",
-        "summary": f"Agent 会话暴露高置信敏感内容：{', '.join(categories) if categories else 'unknown'}。",
-        "projection": {
-            "object_type": object_type,
-            "category_count": len(categories),
-            "sensitive_categories": categories,
-            "sensitive_matches": matches,
-            "sensitivity_confidence": "high",
-        },
-        "risk": {"risk_type": "sensitive_content_exposure", "severity": "high", "object_type": object_type},
-    }
-
 def _low_evidence_fact(common: dict, record: dict) -> dict:
     payload = _payload(record)
     return {
@@ -392,18 +368,3 @@ def _is_usage(record: dict) -> bool:
         return True
     payload = _payload(record)
     return _payload_type(record) == "token_count" and isinstance(payload.get("info"), dict)
-
-def _has_sensitive_marker(record: dict) -> bool:
-    return bool(_sensitive_matches(record))
-
-def _sensitive_matches(record: dict) -> list[dict[str, str]]:
-    payload = _payload(record)
-    args = _arguments(payload)
-    return sensitive_matches_from_record(record, payload, args)
-
-def _sensitive_object_type(categories: list[str]) -> str:
-    if any(category in {"token", "secret", "credential", "cookie"} for category in categories):
-        return "credential"
-    if "auth" in categories:
-        return "auth"
-    return "sensitive_reference"

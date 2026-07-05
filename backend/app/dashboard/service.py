@@ -28,6 +28,7 @@ def get_dashboard_summary(
         # Fallback to serial execution on the caller's connection when path lookup fails.
         collectors = _filter_collectors(list_collectors(conn), agent_type)
         signals = list_signals(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+        signals["high_priority_count"] = _high_priority_signal_count(conn, window, agent_type, start_at, end_at)
         facts = query_facts(
             conn,
             window=window,
@@ -48,7 +49,9 @@ def get_dashboard_summary(
 
     def _signals_worker() -> dict:
         with connect(db_path) as worker_conn:
-            return list_signals(worker_conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+            result = list_signals(worker_conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at, page=1, page_size=5)
+            result["high_priority_count"] = _high_priority_signal_count(worker_conn, window, agent_type, start_at, end_at)
+            return result
 
     def _facts_worker() -> dict:
         with connect(db_path) as worker_conn:
@@ -99,6 +102,7 @@ def _assemble_dashboard(
         "signals": {
             "total": signals["total"],
             "items": signals["signals"],
+            "high_priority_count": signals.get("high_priority_count", 0),
         },
         "facts": {
             "total": facts["total"],
@@ -120,6 +124,40 @@ def _filter_collectors(collectors: list[dict], agent_type: str | None) -> list[d
         for collector in collectors
         if any(source.get("agent_type") == agent_type for source in collector.get("sources", []))
     ]
+
+
+def _high_priority_signal_count(
+    conn: sqlite3.Connection,
+    window: str,
+    agent_type: str | None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> int:
+    """统计 priority_score >= 80 且未处理的信号数（与 list_signals 同口径）。"""
+    clauses = ["bs.decision_state != 'handled'", "bs.priority_score >= 80"]
+    params: list[str] = []
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
+    if cutoff:
+        clauses.append("coalesce(bs.last_event_at, bs.updated_at) >= ?")
+        params.append(cutoff)
+    if range_end:
+        clauses.append("coalesce(bs.last_event_at, bs.updated_at) <= ?")
+        params.append(range_end)
+    if agent_type:
+        clauses.append("latest.agent_type = ?")
+        params.append(agent_type)
+    where = "where " + " and ".join(clauses)
+    latest_join = "left join observed_facts latest on latest.fact_id = bs.latest_fact_id"
+    row = conn.execute(
+        f"""
+        select count(*) as total
+        from behavior_signals bs
+        {latest_join}
+        {where}
+        """,
+        params,
+    ).fetchone()
+    return int(row["total"])
 
 
 def _risk_top(

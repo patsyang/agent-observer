@@ -240,11 +240,14 @@ def _looks_like_path(value: str) -> bool:
 
 
 def _human_type_counts(types: dict[str, object]) -> str:
+    # Labels describe fact_type classification (what kind of raw event was
+    # collected), NOT risk detection results. Risk signal detection is done
+    # server-side via behavior_signals. Using "事件" suffix makes this clear.
     labels = {
-        "error": "错误",
-        "risk": "风险",
-        "usage": "用量",
-        "tool": "工具",
+        "error": "错误事件",
+        "risk": "风险事件",
+        "usage": "用量事件",
+        "tool": "工具事件",
         "unknown": "未归类",
     }
     parts = [f"{label} {int(types[key])}" for key, label in labels.items() if int(types.get(key) or 0) > 0]

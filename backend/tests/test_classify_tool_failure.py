@@ -1,5 +1,4 @@
-"""Tests for classify_tool_failure — story-003."""
-
+"""工具失败分类测试：workflow gate / validation / crash / fallback / 截断边界。"""
 from __future__ import annotations
 
 import pytest
@@ -7,104 +6,48 @@ import pytest
 from app.behavior_signals.common import classify_tool_failure
 
 
-class TestWorkflowGateBlocked:
-    def test_blocked_true_returns_low_priority(self):
-        result = classify_tool_failure(
-            '{"blocked": true, "gate": "contract"}',
-            "some envelope body",
-        )
-        assert result["sub_type"] == "workflow_gate_blocked"
-        assert result["priority"] == 30
-
-    def test_blocked_false_not_matched(self):
-        result = classify_tool_failure(
-            '{"blocked": false}',
-            "ModuleNotFoundError: foo",
-        )
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
-
-    def test_non_dict_reason_falls_through(self):
-        result = classify_tool_failure("not json", "some body")
-        assert result["sub_type"] == "tool_fallback"
-
-
-class TestValidationFailure:
-    def test_pytest_pattern(self):
-        result = classify_tool_failure("reason", "pytest tests failed with exit 1")
-        assert result["sub_type"] == "validation_failure"
-        assert result["priority"] == 60
-
-    def test_vitest_pattern(self):
-        result = classify_tool_failure("reason", "npm run test — vitest failed")
-        assert result["sub_type"] == "validation_failure"
-        assert result["priority"] == 60
-
-    def test_eslint_pattern(self):
-        result = classify_tool_failure("reason", "eslint found 3 errors")
-        assert result["sub_type"] == "validation_failure"
-        assert result["priority"] == 60
-
-    def test_npm_build_pattern(self):
-        result = classify_tool_failure("reason", "npm run build failed")
-        assert result["sub_type"] == "validation_failure"
-        assert result["priority"] == 60
-
-    def test_tsc_pattern(self):
-        result = classify_tool_failure("reason", "tsc returned errors")
-        assert result["sub_type"] == "validation_failure"
-        assert result["priority"] == 60
+@pytest.mark.parametrize(
+    "reason,body,expected_sub_type,expected_priority",
+    [
+        # workflow gate 阻断
+        ('{"blocked": true, "gate": "contract"}', "some envelope body", "workflow_gate_blocked", 30),
+        # blocked=false 时落入 tool_crash
+        ('{"blocked": false}', "ModuleNotFoundError: foo", "tool_crash", 95),
+        # 非 dict reason 落入 fallback
+        ("not json", "some body", "tool_fallback", 70),
+        # 验证失败：pytest/vitest/eslint/npm build/tsc
+        ("reason", "pytest tests failed with exit 1", "validation_failure", 60),
+        ("reason", "npm run test — vitest failed", "validation_failure", 60),
+        ("reason", "eslint found 3 errors", "validation_failure", 60),
+        ("reason", "npm run build failed", "validation_failure", 60),
+        ("reason", "tsc returned errors", "validation_failure", 60),
+        # 工具崩溃：各类异常
+        ("reason", "ModuleNotFoundError: No module named 'foo'", "tool_crash", 95),
+        ("reason", "Traceback (most recent call last):\n  raise ValueError", "tool_crash", 95),
+        ("reason", "FileNotFoundError: [Errno 2] No such file", "tool_crash", 95),
+        ("reason", "PermissionError: [Errno 13] Permission denied", "tool_crash", 95),
+        ("reason", "Exception: something broke", "tool_crash", 95),
+        # 兜底
+        ("reason", "some generic error message", "tool_fallback", 70),
+        ("reason", "", "tool_fallback", 70),
+        ("reason", None, "tool_fallback", 70),
+    ],
+)
+def test_classify_tool_failure(reason, body, expected_sub_type, expected_priority):
+    """分类器应正确识别 workflow gate / validation / crash / fallback 各类失败模式。"""
+    result = classify_tool_failure(reason, body)
+    assert result["sub_type"] == expected_sub_type
+    assert result["priority"] == expected_priority
 
 
-class TestToolCrash:
-    def test_import_error(self):
-        result = classify_tool_failure("reason", "ModuleNotFoundError: No module named 'foo'")
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
-
-    def test_traceback(self):
-        result = classify_tool_failure("reason", "Traceback (most recent call last):\n  raise ValueError")
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
-
-    def test_file_not_found(self):
-        result = classify_tool_failure("reason", "FileNotFoundError: [Errno 2] No such file")
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
-
-    def test_permission_denied(self):
-        result = classify_tool_failure("reason", "PermissionError: [Errno 13] Permission denied")
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
-
-    def test_case_insensitive_exception(self):
-        result = classify_tool_failure("reason", "Exception: something broke")
-        assert result["sub_type"] == "tool_crash"
-        assert result["priority"] == 95
+def test_snippet_beyond_2000_chars_falls_through():
+    """错误模式出现在 2000 字符之后时应落入 fallback（截断保护）。"""
+    long_prefix = "x" * 2100
+    result = classify_tool_failure("reason", long_prefix + "ModuleNotFoundError: foo")
+    assert result["sub_type"] == "tool_fallback"
 
 
-class TestFallback:
-    def test_unmatched_pattern(self):
-        result = classify_tool_failure("reason", "some generic error message")
-        assert result["sub_type"] == "tool_fallback"
-        assert result["priority"] == 70
-
-    def test_empty_body(self):
-        result = classify_tool_failure("reason", "")
-        assert result["sub_type"] == "tool_fallback"
-
-    def test_none_body(self):
-        result = classify_tool_failure("reason", None)
-        assert result["sub_type"] == "tool_fallback"
-
-
-class TestEnvelopeBodyLimit:
-    def test_snippet_limited_to_2000_chars(self):
-        # Long body where error pattern is beyond 2000 chars should fall through
-        long_prefix = "x" * 2100
-        result = classify_tool_failure("reason", long_prefix + "ModuleNotFoundError: foo")
-        assert result["sub_type"] == "tool_fallback"
-
-    def test_pattern_within_2000_chars(self):
-        result = classify_tool_failure("reason", "a" * 1000 + "ModuleNotFoundError: foo")
-        assert result["sub_type"] == "tool_crash"
+def test_pattern_within_2000_chars_still_matched():
+    """错误模式出现在 2000 字符之内时应正常匹配。"""
+    result = classify_tool_failure("reason", "a" * 1000 + "ModuleNotFoundError: foo")
+    assert result["sub_type"] == "tool_crash"

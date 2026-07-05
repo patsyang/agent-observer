@@ -4,7 +4,7 @@ import type { ClientPackageConfig, EffectivePolicy, RecentAuditSummary } from '.
 import { formatNumber } from '../utils/numberFormat';
 
 const DEFAULT_PERFORMANCE = {
-  collection_interval_seconds: 5,
+  collection_interval_seconds: 10,
   max_events_per_cycle: 500,
   upload_batch_size: 100,
   worker_poll_interval_seconds: 10
@@ -199,6 +199,16 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
               </label>
             </div>
             <p>保存后后端 worker 会在下一次空闲轮询前读取最新策略。</p>
+          </section>
+
+          <section className="drawer-section" aria-label="参数关系" data-testid="access-param-relations">
+            <h3>参数关系</h3>
+            <p>
+              采集间隔 × 单轮采集上限 = 每个 Agent 的理论吞吐上限（条/分钟）；单轮采集上限 ÷ 上传批量 = 单轮需要发起的 HTTP 请求数。
+            </p>
+            <p>
+              Worker 轮询间隔建议不超过采集间隔的 2 倍，否则 processing_jobs 队列会积压。采集间隔建议保持在 5–60 秒之间，过小会浪费 CPU/IO，过大会延迟看到数据；Worker 轮询间隔大于 30 秒会延迟看到风险信号。
+            </p>
           </section>
 
           <section className="drawer-section" aria-label="采集内容">

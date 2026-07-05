@@ -9,7 +9,7 @@ const packageConfig = {
   path: 'data/packages/agent-observer-windows.zip',
   sha256: 'abcdef1234567890',
   server_url: 'http://127.0.0.1:8765',
-  agent_version: '0.3.0',
+  agent_version: '0.3.1',
   protocol_version: 'agent-observer-telemetry/v3'
 };
 
@@ -17,7 +17,7 @@ const policy = {
   policy_version: 1,
   raw_upload_mode: 'always_on' as const,
   enrichment_mode: 'enabled' as const,
-  collection_interval_seconds: 5,
+  collection_interval_seconds: 10,
   max_events_per_cycle: 500,
   upload_batch_size: 100,
   worker_poll_interval_seconds: 10
@@ -62,7 +62,7 @@ describe('AccessConfigDrawer', () => {
     );
 
     expect(screen.getByText(/仅下载客户端时不需要保存全局配置/)).toBeInTheDocument();
-    expect(screen.getByText('0.3.0')).toBeInTheDocument();
+    expect(screen.getByText('0.3.1')).toBeInTheDocument();
     expect(screen.getByText('agent-observer-telemetry/v3')).toBeInTheDocument();
     expect(screen.queryByRole('checkbox', { name: '默认上传原始输入输出' })).not.toBeInTheDocument();
     expect(screen.getByText(/当前版本固定上传完整 Prompt 和响应内容/)).toBeInTheDocument();
@@ -112,7 +112,7 @@ describe('AccessConfigDrawer', () => {
     expect(await screen.findByLabelText('采集间隔')).toHaveValue(30);
     await user.click(screen.getByRole('button', { name: '恢复默认值' }));
 
-    expect(screen.getByLabelText('采集间隔')).toHaveValue(5);
+    expect(screen.getByLabelText('采集间隔')).toHaveValue(10);
     expect(screen.getByLabelText('单轮采集上限')).toHaveValue(500);
     expect(screen.getByLabelText('上传批量')).toHaveValue(100);
     expect(screen.getByLabelText('Worker 轮询间隔')).toHaveValue(10);
