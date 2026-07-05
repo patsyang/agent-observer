@@ -9,6 +9,7 @@ const detail: BehaviorSignalDetail = {
   signal_id: 'signal-001',
   signal_key: 'change_volume_anomaly:conversation-1',
   signal_kind: 'change_volume_anomaly',
+  risk_family: 'behavior_anomaly',
   title: '单会话变更量异常：22 个文件',
   why_it_matters: '单个会话里产生大范围文件修改。',
   severity: 'medium',

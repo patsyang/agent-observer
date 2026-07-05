@@ -9,6 +9,7 @@ const signal: BehaviorSignal = {
   signal_id: 'signal-001',
   signal_key: 'tool_execution_failure:exec_command:1',
   signal_kind: 'tool_execution_failure',
+  risk_family: 'execution_error',
   title: '工具执行失败：exec / exit_code 1',
   why_it_matters: '同类工具失败在多个会话中出现。',
   severity: 'high',

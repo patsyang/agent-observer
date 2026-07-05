@@ -18,6 +18,7 @@ import {
   fetchRiskSummary,
   fetchSignals,
   fetchSignalDetail,
+  fetchSignalsSummary,
   fetchUsageSummary,
   handleSignal,
   markSignalRead,
@@ -103,6 +104,7 @@ export function App() {
           <DashboardPage
             loadDashboardSummary={fetchDashboardSummary}
             loadSignals={fetchSignals}
+            loadSignalSummary={fetchSignalsSummary}
             loadUsageSummary={fetchUsageSummary}
             loadRiskSummary={fetchRiskSummary}
             loadProcessingStatus={fetchProcessingStatus}

@@ -58,6 +58,17 @@ export function signalKindLabel(value: string): string {
   return labels[value] ?? '未知信号';
 }
 
+export function riskFamilyLabel(value: string): string {
+  const labels: Record<string, string> = {
+    data_exposure: '数据泄露',
+    behavior_anomaly: '行为异常',
+    execution_error: '执行错误',
+    usage_cost: '用量成本',
+    uncategorized: '未归类'
+  };
+  return labels[value] ?? value;
+}
+
 export function usageSummaryText(summary: {
   effective_units: number;
   cached_units?: number;

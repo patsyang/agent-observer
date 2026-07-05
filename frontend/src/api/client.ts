@@ -14,6 +14,8 @@ import type {
   ProcessingStatus,
   RecentAuditSummary,
   RiskSummary,
+  RiskTaxonomy,
+  SignalSummary,
   SignalsResponse,
   TimeWindow,
   TimeWindowParam,
@@ -190,6 +192,7 @@ export function fetchSignals(
     end_at?: string;
     workspace_query?: string;
     agent_type?: AgentTypeFilter | string;
+    family?: string;
     page?: number;
     page_size?: number;
   } = {}
@@ -198,10 +201,27 @@ export function fetchSignals(
   addTimeRange(params, options.window ?? '1h', options.start_at, options.end_at);
   if (options.workspace_query) params.set('workspace_query', options.workspace_query);
   addAgentFilter(params, options.agent_type);
+  if (options.family) params.set('family', options.family);
   params.set('page', String(options.page ?? 1));
   params.set('page_size', String(options.page_size ?? 20));
   const suffix = params.toString() ? `?${params.toString()}` : '';
   return readJson<SignalsResponse>(`/api/signals${suffix}`);
+}
+
+export function fetchSignalsSummary(
+  window: TimeWindowParam = '1h',
+  agentType: AgentTypeFilter = '',
+  startAt = '',
+  endAt = ''
+): Promise<SignalSummary> {
+  const params = new URLSearchParams();
+  addTimeRange(params, window, startAt, endAt);
+  addAgentFilter(params, agentType);
+  return readJson<SignalSummary>(`/api/signals/summary?${params.toString()}`);
+}
+
+export function fetchRiskTaxonomy(): Promise<RiskTaxonomy> {
+  return readJson<RiskTaxonomy>('/api/risk-taxonomy');
 }
 
 export function fetchSignalDetail(signalId: string): Promise<BehaviorSignalDetail> {

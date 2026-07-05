@@ -46,3 +46,35 @@ def test_dev_server_forwards_summary_custom_range_filters():
         "start_at": "2026-06-21T01:00:00Z",
         "end_at": "2026-06-21T03:00:00Z",
     }
+
+
+def test_dev_server_forwards_signal_family_filter():
+    options = _signals_query_options("/api/signals?window=24h&family=behavior_anomaly")
+    assert options["family"] == "behavior_anomaly"
+
+
+def test_dev_server_routes_summary_before_signal_id_catchall(tmp_path, monkeypatch):
+    """`/api/signals/summary` must hit signal_summary, not be swallowed as a signal_id."""
+    monkeypatch.setenv("AGENT_OBSERVER_DB", str(tmp_path / "observer.sqlite"))
+    from app.dev_server_handlers import handle_get
+
+    class _Stub:
+        def __init__(self, path: str) -> None:
+            self.path = path
+            self.status = None
+            self.payload = None
+
+        def _json(self, status: int, payload: dict) -> None:
+            self.status = status
+            self.payload = payload
+
+    summary = _Stub("/api/signals/summary?window=all")
+    handle_get(summary)
+    assert summary.status == 200
+    assert "families" in summary.payload
+
+    taxonomy = _Stub("/api/risk-taxonomy")
+    handle_get(taxonomy)
+    assert taxonomy.status == 200
+    assert "kind_to_family" in taxonomy.payload
+

@@ -27,7 +27,8 @@ from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
 from app.risks.service import get_risk_summary
-from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, signal_summary
+from app.behavior_signals.taxonomy import taxonomy_payload
 from app.telemetry_batches.service import get_batch_status
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
@@ -67,6 +68,8 @@ def _signals_query_options(raw_path: str) -> dict:
         options["workspace_query"] = _query_one(query, "workspace_query")
     if _query_one(query, "agent_type"):
         options["agent_type"] = _query_one(query, "agent_type")
+    if _query_one(query, "family"):
+        options["family"] = _query_one(query, "family")
     return options
 
 
@@ -144,6 +147,10 @@ def handle_get(handler) -> None:
                 return handler._json(200, get_batch_status(conn, _path_part(path, 4)))
             if path == "/api/signals":
                 return handler._json(200, list_signals(conn, **_signals_query_options(handler.path)))
+            if path == "/api/signals/summary":
+                return handler._json(200, signal_summary(conn, **_summary_query_options(handler.path, "all")))
+            if path == "/api/risk-taxonomy":
+                return handler._json(200, taxonomy_payload())
             if path.startswith("/api/signals/") and path.endswith("/enrichments/availability"):
                 try:
                     return handler._json(200, get_enrichment_availability(conn, path.split("/")[3]))

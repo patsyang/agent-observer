@@ -121,6 +121,7 @@ export interface BehaviorSignal {
   signal_id: string;
   signal_key: string;
   signal_kind: string;
+  risk_family: string;
   title: string;
   why_it_matters: string;
   severity: string;
@@ -152,6 +153,35 @@ export interface SignalsResponse {
   page?: number;
   page_size?: number;
   has_more?: boolean;
+}
+
+export type SeverityCounts = { high: number; medium: number; low: number } & Record<string, number>;
+
+export interface RiskFamilySummary {
+  id: string;
+  label: string;
+  total: number;
+  by_severity: SeverityCounts;
+}
+
+export interface SignalSummary {
+  total: number;
+  high_severity_total: number;
+  families: RiskFamilySummary[];
+}
+
+export interface RiskTaxonomyFamily {
+  id: string;
+  label: string;
+  description: string;
+  order: number;
+  severity_anchor: string | null;
+}
+
+export interface RiskTaxonomy {
+  families: RiskTaxonomyFamily[];
+  kind_to_family: Record<string, string>;
+  uncategorized: string;
 }
 
 export type BehaviorSignalDetail = BehaviorSignal;

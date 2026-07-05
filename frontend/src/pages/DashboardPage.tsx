@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { RefreshCw } from 'lucide-react';
 
-import type { CollectorsResponse, DashboardSummary, FactsResponse, ProcessingStatus, RiskSummary, SignalsResponse, TimeWindowParam, UsageSummary } from '../api/types';
+import type { CollectorsResponse, DashboardSummary, FactsResponse, ProcessingStatus, RiskSummary, SignalSummary, SignalsResponse, TimeWindowParam, UsageSummary } from '../api/types';
 import { Metric } from '../components/Metric';
+import { RiskHeadlineMetric } from '../components/RiskHeadlineMetric';
 import { SignalCard } from '../components/SignalCard';
+import { riskFamilyLabel } from '../components/signalLabels';
 import { quickTimeOptions } from '../components/timeRangeOptions';
 import { formatNumber } from '../utils/numberFormat';
 import { emptyUsage, formatDateTime } from './dashboardLabels';
@@ -15,7 +17,8 @@ import { ProcessingStatusBanner } from './ProcessingStatusBanner';
 import { useProcessingStatusPolling } from './useProcessingStatusPolling';
 interface Props {
   loadDashboardSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<DashboardSummary>;
-  loadSignals: (options: { window: TimeWindowParam; start_at?: string; end_at?: string; workspace_query?: string; agent_type?: AgentType; page?: number; page_size?: number }) => Promise<SignalsResponse>;
+  loadSignals: (options: { window: TimeWindowParam; start_at?: string; end_at?: string; workspace_query?: string; agent_type?: AgentType; family?: string; page?: number; page_size?: number }) => Promise<SignalsResponse>;
+  loadSignalSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<SignalSummary>;
   loadUsageSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<UsageSummary>;
   loadRiskSummary: (window: TimeWindowParam, agentType?: AgentType, startAt?: string, endAt?: string) => Promise<RiskSummary>;
   loadProcessingStatus: () => Promise<ProcessingStatus>;
@@ -32,6 +35,7 @@ type LoadState =
       collectorCounts: DashboardSummary['collectors'];
       facts: FactsResponse;
       signals: SignalsResponse;
+      signalSummary: SignalSummary | null;
       usage: UsageSummary;
       risks: RiskSummary;
       processing: ProcessingStatus;
@@ -52,11 +56,14 @@ export function DashboardPage({
   loadDashboardSummary,
   loadProcessingStatus,
   loadRiskSummary,
+  loadSignalSummary,
   loadSignals,
   loadUsageSummary,
   onOpenSignal
 }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [familyFilter, setFamilyFilter] = useState<string | null>(null);
+  const skipFamilyEffect = useRef(true);
   const [submittedFilters, setSubmittedFilters] = useState({
     window: '1h' as TimeWindowParam | '',
     start_at: '',
@@ -100,6 +107,7 @@ export function DashboardPage({
               has_more: summary.signals.total > summary.signals.items.length
             },
             usage: emptyUsage(requestWindow),
+            signalSummary: null,
             risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top },
             processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
             highPriorityCount: summary.signals.high_priority_count ?? 0,
@@ -107,7 +115,8 @@ export function DashboardPage({
           setLastRefresh(new Date().toISOString());
         }
         return Promise.allSettled([
-          loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, page: 1, page_size: 20 }),
+          loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, family: familyFilter ?? undefined, page: 1, page_size: 20 }),
+          loadSignalSummary(requestWindow, agentType, start_at, end_at),
           loadUsageSummary(requestWindow, agentType, start_at, end_at),
           loadRiskSummary(requestWindow, agentType, start_at, end_at),
           loadProcessingStatus()
@@ -117,13 +126,14 @@ export function DashboardPage({
         if (cancelled) return;
         setState((current) => {
           if (current.status !== 'ready') return current;
-          const [signals, usage, risks, processing] = results;
+          const [signals, signalSummaryResult, usage, risks, processing] = results;
           const emptySignals: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
           const emptyRisks: RiskSummary = { mode: 'summary', window: requestWindow, signals: [] };
           return {
             ...current,
             detailsLoading: false,
             signals: signals.status === 'fulfilled' ? signals.value : emptySignals,
+            signalSummary: signalSummaryResult.status === 'fulfilled' ? signalSummaryResult.value : current.signalSummary,
             usage: usage.status === 'fulfilled' ? usage.value : emptyUsage(requestWindow),
             risks: risks.status === 'fulfilled' ? risks.value : emptyRisks,
             processing: processing.status === 'fulfilled' ? processing.value : current.processing
@@ -136,7 +146,37 @@ export function DashboardPage({
     return () => {
       cancelled = true;
     };
-  }, [loadDashboardSummary, loadProcessingStatus, loadRiskSummary, loadSignals, loadUsageSummary, refreshToken, submittedFilters]);
+    // familyFilter is intentionally excluded — family-only changes are handled by the effect below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loadDashboardSummary, loadProcessingStatus, loadRiskSummary, loadSignalSummary, loadSignals, loadUsageSummary, refreshToken, submittedFilters]);
+
+  // Family-only filter: re-fetch just the signal list without disturbing metrics/summary.
+  useEffect(() => {
+    if (skipFamilyEffect.current) {
+      skipFamilyEffect.current = false;
+      return;
+    }
+    if (state.status !== 'ready') return;
+    let cancelled = false;
+    const { agentType, end_at, start_at, window, workspaceQuery } = submittedFilters;
+    const requestWindow: TimeWindowParam = window || 'custom';
+    loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, family: familyFilter ?? undefined, page: 1, page_size: 20 })
+      .then((signals) => {
+        if (!cancelled) {
+          setState((current) => (current.status === 'ready' ? { ...current, signals } : current));
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          const emptySignals: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
+          setState((current) => (current.status === 'ready' ? { ...current, signals: emptySignals } : current));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [familyFilter]);
   if (state.status === 'loading') {
     return (
       <section className="panel">
@@ -158,7 +198,6 @@ export function DashboardPage({
 
   const onlineCollectors = state.collectors.collectors.filter((collector) => collector.source_status === 'online');
   const activeSignals = state.signals.signals.filter((signal) => signal.decision_state !== 'handled');
-  const highRiskCount = state.risks.signals.reduce((total, item) => total + item.count, 0);
   const isLoading = state.detailsLoading;
   const submitFilters = () => {
     setSubmittedFilters({ ...draftFilters, workspaceQuery: draftFilters.workspaceQuery.trim() });
@@ -234,9 +273,12 @@ export function DashboardPage({
         <Metric label="会话内容" value={formatNumber(state.facts.total ?? state.facts.facts.length)} note="当前窗口可追溯内容" />
         <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
-        <Metric label="敏感命中" value={formatNumber(highRiskCount)} note="敏感内容暴露事件" />
-        <Metric label="高优先级" value={formatNumber(state.highPriorityCount)} note="priority≥80 待审核" />
-        <Metric label="待审核信号" value={formatNumber(state.signals.total ?? activeSignals.length)} note="未完成判断" />
+        <RiskHeadlineMetric
+          summary={state.signalSummary}
+          loading={isLoading}
+          activeFamily={familyFilter}
+          onSelectFamily={setFamilyFilter}
+        />
       </section>
 
       <div className="usage-row" data-testid="usage-row">
@@ -247,7 +289,9 @@ export function DashboardPage({
         <section className="panel flush signal-workbench" aria-label="行为风险信号" data-testid="signal-queue">
           <div className="panel-header">
             <h2>行为风险信号</h2>
-            <span className="badge violet">{formatNumber(state.signals.total ?? activeSignals.length)} 条待看</span>
+            <span className="badge violet">
+              {familyFilter ? `${riskFamilyLabel(familyFilter)} · ` : ''}{formatNumber(state.signals.total ?? activeSignals.length)} 条待看
+            </span>
           </div>
           <p className="panel-intro">每条信号都对应一个可判断的风险模式，并按会话、对象或失败类型组织证据。</p>
           <div className="panel-body">

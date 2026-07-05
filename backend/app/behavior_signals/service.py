@@ -8,6 +8,14 @@ from app.time_ranges import range_bounds_iso
 from app.behavior_signals.evidence import enrichment_status_summary, usage_summary, usage_facts_for_signals
 from app.behavior_signals.execution import build_execution_timeouts, build_tool_execution_failures
 from app.behavior_signals.presentation import row_to_signal
+from app.behavior_signals.taxonomy import (
+    ALL_SIGNAL_KINDS,
+    FAMILIES,
+    UNCATEGORIZED,
+    family_label,
+    family_of,
+    kinds_for_family,
+)
 from app.behavior_signals.workspace import signal_workspace_matches, workspace_summary, workspaces_from_facts
 from app.behavior_signals.helpers import (
     conversation_groups as _conversation_groups,
@@ -95,6 +103,7 @@ def list_signals(
     agent_type: str | None = None,
     start_at: str | None = None,
     end_at: str | None = None,
+    family: str | None = None,
     page: int = 1,
     page_size: int = 20,
 ) -> dict:
@@ -113,6 +122,8 @@ def list_signals(
     if agent_type:
         clauses.append("latest.agent_type = ?")
         params.append(agent_type)
+    if family:
+        _apply_family_filter(clauses, params, family)
     where = f"where {' and '.join(clauses)}"
     latest_join = "left join observed_facts latest on latest.fact_id = bs.latest_fact_id"
     if not workspace_query:
@@ -171,6 +182,89 @@ def list_signals(
         "page": current_page,
         "page_size": limit,
         "has_more": offset + len(page_items) < len(signals),
+    }
+
+
+def _apply_family_filter(clauses: list[str], params: list[str], family: str) -> None:
+    """Append a signal_kind IN/NOT IN clause for the given risk_family."""
+    if family == UNCATEGORIZED:
+        known = list(ALL_SIGNAL_KINDS)
+        clauses.append(f"bs.signal_kind not in ({','.join('?' for _ in known)})")
+        params.extend(known)
+        return
+    family_kinds = kinds_for_family(family)
+    if not family_kinds:
+        # family has no mapped kinds → no rows match
+        clauses.append("0")
+        return
+    clauses.append(f"bs.signal_kind in ({','.join('?' for _ in family_kinds)})")
+    params.extend(family_kinds)
+
+
+def signal_summary(
+    conn: sqlite3.Connection,
+    window: str = "all",
+    agent_type: str | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
+) -> dict:
+    """Aggregate unhandled behavior_signals by risk_family × severity.
+
+    Uses the same window/agent filter as ``list_signals``; groups by
+    ``signal_kind`` + ``severity`` in SQL, then rolls up to family via the
+    taxonomy registry (single source of truth).
+    """
+    clauses = ["bs.decision_state != 'handled'"]
+    params: list[str] = []
+    cutoff, range_end = range_bounds_iso(window, start_at, end_at)
+    if cutoff:
+        clauses.append("coalesce(bs.last_event_at, bs.updated_at) >= ?")
+        params.append(cutoff)
+    if range_end:
+        clauses.append("coalesce(bs.last_event_at, bs.updated_at) <= ?")
+        params.append(range_end)
+    if agent_type:
+        clauses.append("latest.agent_type = ?")
+        params.append(agent_type)
+    where = f"where {' and '.join(clauses)}"
+    latest_join = "left join observed_facts latest on latest.fact_id = bs.latest_fact_id"
+    rows = conn.execute(
+        f"""
+        select bs.signal_kind as signal_kind, bs.severity as severity, count(*) as cnt
+        from behavior_signals bs
+        {latest_join}
+        {where}
+        group by bs.signal_kind, bs.severity
+        """,
+        params,
+    ).fetchall()
+
+    bucket: dict[tuple[str, str], int] = defaultdict(int)
+    for row in rows:
+        severity = (row["severity"] or "").lower()
+        bucket[(family_of(row["signal_kind"]), severity)] += int(row["cnt"])
+
+    severity_keys = ("high", "medium", "low")
+
+    def _family_view(family_id: str, label: str) -> dict:
+        by_severity = {key: 0 for key in severity_keys}
+        total = 0
+        for (fid, sev), count in bucket.items():
+            if fid != family_id:
+                continue
+            by_severity[sev] = by_severity.get(sev, 0) + count
+            total += count
+        return {"id": family_id, "label": label, "total": total, "by_severity": by_severity}
+
+    families_out = [_family_view(family["id"], family["label"]) for family in FAMILIES]
+    # surface uncategorized only when present — it signals taxonomy drift
+    if any(fid == UNCATEGORIZED for (fid, _) in bucket):
+        families_out.append(_family_view(UNCATEGORIZED, family_label(UNCATEGORIZED)))
+
+    return {
+        "total": sum(item["total"] for item in families_out),
+        "high_severity_total": sum(item["by_severity"].get("high", 0) for item in families_out),
+        "families": families_out,
     }
 
 

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-import type { DashboardSummary, RiskSummary, SignalsResponse, UsageSummary } from '../api/types';
+import type { DashboardSummary, RiskSummary, SignalSummary, SignalsResponse, UsageSummary } from '../api/types';
 import { DashboardPage } from './DashboardPage';
 
 const usage: UsageSummary = {
@@ -161,6 +161,16 @@ const summary: DashboardSummary = {
 };
 
 const signalPage: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
+const emptySignalSummary: SignalSummary = {
+  total: 0,
+  high_severity_total: 0,
+  families: [
+    { id: 'data_exposure', label: '数据泄露', total: 0, by_severity: { high: 0, medium: 0, low: 0 } },
+    { id: 'behavior_anomaly', label: '行为异常', total: 0, by_severity: { high: 0, medium: 0, low: 0 } },
+    { id: 'execution_error', label: '执行错误', total: 0, by_severity: { high: 0, medium: 0, low: 0 } },
+    { id: 'usage_cost', label: '用量成本', total: 0, by_severity: { high: 0, medium: 0, low: 0 } }
+  ]
+};
 const processingStatus = {
   state: 'pending' as const,
   counts: { pending: 2, running: 0, succeeded: 1, failed: 0 },
@@ -180,6 +190,7 @@ describe('DashboardPage', () => {
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadSignalSummary = vi.fn(async () => emptySignalSummary);
     const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
@@ -187,6 +198,7 @@ describe('DashboardPage', () => {
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadSignalSummary={loadSignalSummary}
         loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
@@ -212,12 +224,9 @@ describe('DashboardPage', () => {
     expect(screen.getByText(/当前没有需要人工处理的信号/)).toBeInTheDocument();
     expect(within(coreMetrics).getByText('实际计算Token')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('缓存命中 (30.0%)')).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('敏感命中')).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('高优先级')).toBeInTheDocument();
-    expect(within(coreMetrics).getByText('待审核信号')).toBeInTheDocument();
+    expect(within(coreMetrics).getByText('待研判风险')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('3,175')).toBeInTheDocument();
     expect(within(coreMetrics).getByText('900')).toBeInTheDocument();
-    expect(within(coreMetrics).getAllByText('0')).toHaveLength(2);
     expect(screen.getByText(/实际计算Token 3,175/)).toBeInTheDocument();
     expect(screen.queryByText('未知活动')).not.toBeInTheDocument();
     expect(screen.queryByText('模型调用实际计算 token')).not.toBeInTheDocument();
@@ -254,6 +263,7 @@ describe('DashboardPage', () => {
       agentType === 'workbuddy' ? usageWithTotal(222) : usageWithTotal(111)
     ));
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadSignalSummary = vi.fn(async () => emptySignalSummary);
     const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
@@ -261,6 +271,7 @@ describe('DashboardPage', () => {
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadSignalSummary={loadSignalSummary}
         loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
@@ -289,6 +300,7 @@ describe('DashboardPage', () => {
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadSignalSummary = vi.fn(async () => emptySignalSummary);
     const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
@@ -296,6 +308,7 @@ describe('DashboardPage', () => {
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadSignalSummary={loadSignalSummary}
         loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
@@ -332,6 +345,7 @@ describe('DashboardPage', () => {
     const loadSignals = vi.fn(async () => signalPage);
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadSignalSummary = vi.fn(async () => emptySignalSummary);
     const loadProcessingStatus = vi
       .fn()
       .mockResolvedValueOnce(processingStatus)
@@ -342,6 +356,7 @@ describe('DashboardPage', () => {
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadSignalSummary={loadSignalSummary}
         loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />
@@ -358,6 +373,7 @@ describe('DashboardPage', () => {
       signal_id: 'sig-stale-001',
       signal_key: 'tool_execution_failure:stale',
       signal_kind: 'tool_execution_failure',
+      risk_family: 'execution_error',
       title: '过期的工具失败信号',
       why_it_matters: '此信号已过期',
       severity: 'high',
@@ -388,6 +404,7 @@ describe('DashboardPage', () => {
       .mockRejectedValueOnce(new Error('network error'));
     const loadUsageSummary = vi.fn(async () => usage);
     const loadRiskSummary = vi.fn(async () => risks);
+    const loadSignalSummary = vi.fn(async () => emptySignalSummary);
     const loadProcessingStatus = vi.fn(async () => processingStatus);
     render(
       <DashboardPage
@@ -395,6 +412,7 @@ describe('DashboardPage', () => {
         loadSignals={loadSignals}
         loadUsageSummary={loadUsageSummary}
         loadRiskSummary={loadRiskSummary}
+        loadSignalSummary={loadSignalSummary}
         loadProcessingStatus={loadProcessingStatus}
         onOpenSignal={() => {}}
       />

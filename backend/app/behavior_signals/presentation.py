@@ -4,14 +4,17 @@ import json
 import sqlite3
 
 from app.behavior_signals.common import loads
+from app.behavior_signals.taxonomy import family_of
 
 
 def row_to_signal(row: sqlite3.Row, include_groups: bool) -> dict:
     scope = loads(row["affected_scope_json"])
+    signal_kind = row["signal_kind"]
     payload = {
         "signal_id": row["signal_id"],
         "signal_key": row["signal_key"],
-        "signal_kind": row["signal_kind"],
+        "signal_kind": signal_kind,
+        "risk_family": family_of(signal_kind),
         "title": row["title"],
         "why_it_matters": row["why_it_matters"],
         "severity": row["severity"],

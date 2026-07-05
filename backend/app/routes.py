@@ -23,7 +23,8 @@ from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
 from app.risks.service import get_risk_summary
-from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read
+from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, signal_summary
+from app.behavior_signals.taxonomy import taxonomy_payload
 from app.telemetry_batches.service import get_batch_status
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
@@ -182,6 +183,7 @@ def register_signal_routes(app, http_exception) -> None:
         agent_type: str | None = None,
         start_at: str | None = None,
         end_at: str | None = None,
+        family: str | None = None,
         page: int = 1,
         page_size: int = 20,
     ):
@@ -193,9 +195,24 @@ def register_signal_routes(app, http_exception) -> None:
                 agent_type=agent_type,
                 start_at=start_at,
                 end_at=end_at,
+                family=family,
                 page=page,
                 page_size=page_size,
             )
+
+    @app.get("/api/signals/summary")
+    def api_signal_summary(
+        window: str = "all",
+        agent_type: str | None = None,
+        start_at: str | None = None,
+        end_at: str | None = None,
+    ):
+        with connect() as conn:
+            return signal_summary(conn, window=window, agent_type=agent_type, start_at=start_at, end_at=end_at)
+
+    @app.get("/api/risk-taxonomy")
+    def api_risk_taxonomy():
+        return taxonomy_payload()
 
     @app.get("/api/signals/{signal_id}")
     def api_signal_detail(signal_id: str):
