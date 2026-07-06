@@ -105,13 +105,15 @@ RULES: list[dict[str, Any]] = [
     _rule("credit_card_luhn", r"\b(?:4[0-9]{15}|5[1-5][0-9]{14}|3[47][0-9]{13})\b", "bank_card", validator=_luhn_check),
     _rule("unionpay_card", rf"{_NB}62\d{{14,17}}{_NE}", "bank_card", reason="unionpay"),  # [F13] 不挂 Luhn
     _rule("bank_account", r"(?i)bank[_\-]?account\s*[:=]\s*\d{8,17}", "bank_card"),
-    _rule("swift_code", r"\b[A-Z]{4}[A-Z]{2}\d{2}[A-Z]{0,3}\b", "bank_card"),
+    # swift_code 移除：SWIFT/BIC 是公开银行路由码（如 URFKYK85X），非敏感，归类 bank_card 是误报。
     # --- Credentials / tokens (sensitivity.py 独有 + sensitivity_rules) ---
     _rule("authorization", r"Authorization\s*:\s*(Bearer|Basic|token)\s+([A-Za-z0-9._~+/=-]{16,})", "token", match_type="authorization"),
     _rule("token_assignment", r"(?i)\b(?:access_token|api_key|api_token|openai_api_key|refresh_token|session_token|token)\b[\"'\s]*[:=][\"'\s]*([A-Za-z0-9._~+/=-]{16,})", "token"),
     _rule("secret_assignment", r"(?i)\b(?:client_secret|secret|password|credential)\b[\"'\s]*[:=][\"'\s]*([A-Za-z0-9._~+/=-]{8,})", "secret"),
     _rule("cookie_assignment", r"(?i)\b(?:Set-Cookie|Cookie)\s*:\s*([^=;\s]{2,})=([^;\s]{8,})", "cookie"),
-    _rule("openai_api_key", r"sk-[a-zA-Z0-9_-]{30,}", "token"),
+    # openai_api_key 收紧：要求 sk- 后是连续字母数字（允许 proj- 前缀），不再吞
+    # sk-result-... / sk-monitoring-... 这类带连字符的内部 ID（曾单条命中 2398 次）。
+    _rule("openai_api_key", r"sk-(?:proj-)?[A-Za-z0-9]{40,}", "token"),
     _rule("github_token", r"gh[pousr]_[A-Za-z0-9_]{30,}", "token"),
     _rule("azure_sas_token", r"SharedAccessSignature=[a-zA-Z0-9+%/=]+", "token"),
     _rule("huggingface_token", r"hf_[A-Za-z0-9]{34,}", "token"),
@@ -144,6 +146,19 @@ EXCLUSION_PATTERNS: list[re.Pattern] = [
     re.compile(r"<[^>]*?-?key[^>]*?>", re.IGNORECASE),  # <your-api-key>
     re.compile(r"(?:placeholder|sample|dummy)", re.IGNORECASE),
     re.compile(r"@(?:[a-z0-9.-]+\.)?example\.(?:com|org|net|edu|gov|cn|invalid|test|local)$", re.IGNORECASE),  # RFC 2606 占位域（含子域）
+    # 已知测试/占位值（国标测试号、公开测试卡、占位字母串、占位赋值）—— 命中即降级为 low
+    re.compile(r"^13800138000$"),   # 中国移动标准测试号
+    re.compile(r"^13900139000$"),   # 标准测试号
+    re.compile(r"^13812345678$"),   # 顺序测试号
+    re.compile(r"^11010519491231002X$", re.IGNORECASE),  # 国标测试身份证号
+    re.compile(r"^6222020202020202\d?$"),  # 银联公开测试卡
+    re.compile(r"^4(?:532015112830366|111111111111111)$"),  # Visa 公开测试卡
+    re.compile(r"^5500000000000004$"),     # Mastercard 公开测试卡
+    re.compile(r"abcdefghijklmnop"),       # 占位字母序列（如 Bearer abcdefghijklmnop）
+    re.compile(r"password\s*=\s*password$", re.IGNORECASE),  # 占位 password=password
+    re.compile(r"\b(?:undefined|null|none|nil|getenv|getToken|getString)\b", re.IGNORECASE),  # 空值/代码，非真实凭据
+    re.compile(r"(?:Utils|Helper|Manager|Factory)\.[A-Za-z_]\w*\s*\("),  # 代码方法调用（JwtTokenUtils.getToken()）
+    re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\s*\([^)]*\)$"),  # 形如 obj.method(...) 的代码调用
 ]
 
 
