@@ -80,6 +80,11 @@ def build_windows_package(conn, output_dir: str | Path = "data/packages") -> dic
             archive.write(path, f"app/sensitive/{path.name}")
         for path in sorted((APP_ROOT / "collector_client").glob("*.py")):
             archive.write(path, f"app/collector_client/{path.name}")
+        # 烘焙构建时版本号：客户端机器无 git，运行时 version.py 读这个而非实时算
+        archive.writestr(
+            "app/collector_client/_build_version.py",
+            f"BUILD_VERSION = {COLLECTOR_CLIENT_VERSION!r}\n",
+        )
         for path in sorted((APP_ROOT / "collector_client" / "sources").glob("*.py")):
             archive.write(path, f"app/collector_client/sources/{path.name}")
     checksum = hashlib.sha256(package_path.read_bytes()).hexdigest()
