@@ -508,8 +508,9 @@ def _signal_jobs_for_item(item: dict, source: str) -> list[dict]:
     if risk_type == "destructive_operation":
         jobs.append(_job("risk", "destructive_operation", 90))
     if risk_type == "sensitive_content_exposure":
-        object_type = str(risk.get("object_type") or "sensitive_object")
-        jobs.append(_job("risk", f"sensitive_content_exposure:{object_type}", 95))
+        conversation_ref = str((item.get("source_refs") or {}).get("conversation_ref") or "")
+        if conversation_ref:
+            jobs.append(_job("risk", f"sensitive_content_exposure:{conversation_ref}", 95))
     return jobs
 
 

@@ -87,7 +87,7 @@ def update_signal_scope(
         ],
         "risk": lambda: _build_destructive_operations(conn, reason)
         if scope_id == "destructive_operation"
-        else _build_sensitive_content_exposures(conn, reason, object_type=scope_id.removeprefix("sensitive_content_exposure:")),
+        else _build_sensitive_content_exposures(conn, reason, conversation_ref=scope_id.removeprefix("sensitive_content_exposure:")),
     }
     if scope_type not in builders:
         raise ValueError("unsupported_processing_scope")
@@ -565,7 +565,13 @@ def _key_file_labels_for_conversation(conn: sqlite3.Connection, conversation_ref
     return labels
 
 
-def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, object_type: str | None = None) -> list[dict]:
+def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, conversation_ref: str | None = None) -> list[dict]:
+    """按任务（会话）聚合敏感内容暴露——每个任务的敏感触碰是一条可结案信号。
+
+    不再按全局 object_type 聚合（那是永远敞口的大类，无法处理）。
+    每个会话里 agent 触碰的所有敏感类型（邮箱+手机+凭据…）合成一条信号，
+    任务结束 → 不再进新事件 → 稳定 → 可处理。
+    """
     rows = conn.execute(
         """
         select rs.object_type, of.*
@@ -575,8 +581,6 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
         order by of.occurred_at, of.fact_id
         """
     ).fetchall()
-    # [F2] 防御性去重：同一 fact 若有多条 sensitive risk_signal（detector + 过渡期残留），
-    # 按 fact_id 去重，避免 occurrence_count / object_count 翻倍。
     seen: set[str] = set()
     deduped: list[sqlite3.Row] = []
     for row in rows:
@@ -587,27 +591,41 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, ob
     rows = deduped
     groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
-        if object_type and str(row["object_type"] or "sensitive_object") != object_type:
+        conv = row["conversation_ref"] or ""
+        if conversation_ref and conv != conversation_ref:
+            continue
+        if not conv:
             continue
         if _high_confidence_sensitive(conn, row["fact_id"]):
-            groups[str(row["object_type"] or "sensitive_object")].append(row)
+            groups[conv].append(row)
     signals = []
-    for obj_type, facts in groups.items():
-        title = f"敏感内容暴露：{_object_type_label(obj_type)}"
+    for conv, facts in groups.items():
+        object_types = sorted({str(r["object_type"] or "sensitive_object") for r in facts})
+        type_labels = "、".join(_object_type_label(ot) for ot in object_types)
+        evidence = []
+        for ot in object_types:
+            ot_facts = [f for f in facts if str(f["object_type"] or "sensitive_object") == ot]
+            if ot_facts:
+                evidence.append(_object_group(conn, "object", _object_type_label(ot), ot_facts))
         signals.append(
             _upsert_signal(
                 conn,
-                signal_key=f"sensitive_content_exposure:{obj_type}",
+                signal_key=f"sensitive_content_exposure:{conv}",
                 signal_kind="sensitive_content_exposure",
-                title=title,
-                why_it_matters="高可信敏感内容进入会话上下文后，需确认是否符合最小暴露原则。",
+                title=f"任务中触达敏感内容：{type_labels}",
+                why_it_matters="Agent 在执行此任务时触碰了敏感内容，需确认该数据访问是否符合预期。",
                 severity="high",
                 confidence="high",
                 priority_score=100,
                 facts=facts,
-                affected_scope={"object_count": len(facts), "object_types": [obj_type], "conversation_count": len(_conversation_refs(facts))},
-                evidence_groups=[_object_group(conn, "object", _object_type_label(obj_type), facts)],
-                suggested_actions=["进入命中会话确认敏感内容是否必要、是否已脱敏、是否需要清理本地记录。"],
+                affected_scope={
+                    "object_count": len(facts),
+                    "object_types": object_types,
+                    "conversation_count": 1,
+                    "conversation_ref": conv,
+                },
+                evidence_groups=evidence,
+                suggested_actions=["查看命中任务，确认敏感内容的访问是否必要、是否有安全风险。"],
                 reason=reason,
             )
         )
