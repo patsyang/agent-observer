@@ -151,7 +151,7 @@ EXCLUSION_PATTERNS: list[re.Pattern] = [
     re.compile(r"^13900139000$"),   # 标准测试号
     re.compile(r"^13812345678$"),   # 顺序测试号
     re.compile(r"^11010519491231002X$", re.IGNORECASE),  # 国标测试身份证号
-    re.compile(r"^6222020202020202\d?$"),  # 银联公开测试卡
+    re.compile(r"^6222020202020202\d{0,3}$"),  # 银联公开测试卡（16/19 位变体）
     re.compile(r"^4(?:532015112830366|111111111111111)$"),  # Visa 公开测试卡
     re.compile(r"^5500000000000004$"),     # Mastercard 公开测试卡
     re.compile(r"abcdefghijklmnop"),       # 占位字母序列（如 Bearer abcdefghijklmnop）
