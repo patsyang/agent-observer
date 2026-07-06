@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db.connection import connect  # noqa: E402
-from app.sensitive_detector import detect_for_fact, object_type_from_matches  # noqa: E402
+from app.sensitive import detect_for_fact, object_type_from_matches  # noqa: E402
 
 BATCH_DEFAULT = 100
 SLEEP_DEFAULT = 0.5

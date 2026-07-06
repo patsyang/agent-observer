@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from app import sensitive_detector as det
+from app.sensitive import engine as det
 
 
 def _cats(matches):

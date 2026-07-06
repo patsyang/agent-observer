@@ -14,7 +14,7 @@ from app.conversations.materialize import (
 )
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
 from app.processing.jobs import JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
-from app.sensitive_detector import detect_for_fact, object_type_from_matches
+from app.sensitive import detect_for_fact, object_type_from_matches
 
 
 def _now() -> str:

@@ -180,7 +180,7 @@ def test_codex_source_template_extracts_structured_facts_with_raw_content_by_def
 
     categories = {fact["category"] for fact in facts}
     # collector 不再做敏感检测（已下沉到 ingest 阶段的 detector），所以不再产出
-    # sensitive_content_exposure fact；敏感检测由 sensitive_detector + ingest 覆盖。
+    # sensitive_content_exposure fact；敏感检测由 app.sensitive + ingest 覆盖。
     assert {"tool_execution_failure", "usage", "destructive_operation", "agent_response"} <= categories
     assert "uncategorized" not in categories
     assert "sensitive_content_exposure" not in categories
