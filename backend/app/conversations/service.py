@@ -226,11 +226,20 @@ def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> d
             start_line,
             end_line,
         )
-    return {
+    result = {
         **_summary_row(row),
         "messages": [_message_dict(m) for m in messages if m["content"]],
         "hits": [_hit_dict(h) for h in hits],
     }
+    # session_title 兜底：物化表里为空时，从 observed_facts 取首条用户提问摘要
+    if not result.get("session_title"):
+        prompt = conn.execute(
+            "select summary from observed_facts where conversation_ref = ? and category = 'agent_prompt' order by occurred_at limit 1",
+            (row["conversation_ref"],),
+        ).fetchone()
+        if prompt and prompt["summary"]:
+            result["session_title"] = str(prompt["summary"])[:60]
+    return result
 
 
 def get_conversation_for_fact(conn: sqlite3.Connection, fact_id: str) -> dict:
