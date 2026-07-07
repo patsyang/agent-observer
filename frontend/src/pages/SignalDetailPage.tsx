@@ -11,6 +11,7 @@ import { SignalDetailSummary } from './SignalDetailSummary';
 import { SignalLinkedConversations } from './SignalLinkedConversations';
 import { SignalWorkspaceChips } from './SignalWorkspaceChips';
 import { ToolContextBlock } from '../components/ToolContextBlock';
+import { formatFullDateTime } from './dashboardLabels';
 import type { SignalEvidenceItem } from '../api/types';
 
 interface Props {
@@ -151,7 +152,7 @@ export function SignalDetailPage({
               <ul>
                 {group.items.map((item) => (
                   <li key={item.evidence_ref}>
-                    <span>{item.occurred_at ?? '无时间'}</span>
+                    <span>{formatFullDateTime(item.occurred_at)}</span>
                     <div className="signal-event-main">
                       <strong>{item.summary}</strong>
                       <small>{item.content_preview}</small>
