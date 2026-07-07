@@ -19,7 +19,9 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
   const remainingHits = detail.hits.filter((hit) => !highlighted.has(hit.fact_id));
   const actionableHits = remainingHits.filter(isActionableHit);
   const technicalHits = remainingHits.filter((hit) => !isActionableHit(hit));
-  const conversationName = detail.session_title || detail.session_ref || detail.conversation_ref;
+  const conversationName = detail.session_title
+    || firstUserPrompt(detail)
+    || detail.conversation_ref;
   const highlightTerms = [
     ...highlightedHits.flatMap((hit) => [
       hit.tool_context?.command,
@@ -38,7 +40,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
             <span>会话</span>
             <h2>{conversationName}</h2>
             <p>{formatDateTime(detail.started_at)} - {formatDateTime(detail.last_event_at)}</p>
-            {conversationName !== detail.conversation_ref && <small>{detail.conversation_ref}</small>}
+            <small className="muted-inline" title="会话标识（排障用）">{detail.conversation_ref}</small>
           </div>
           <button className="ghost-button" onClick={onClose} type="button" aria-label="关闭会话详情">
             <X aria-hidden="true" size={16} />
@@ -179,6 +181,13 @@ function agentLabel(agentType: string): string {
   if (agentType === 'codex') return 'Codex';
   if (agentType === 'workbuddy') return 'WorkBuddy';
   return 'Agent';
+}
+
+function firstUserPrompt(detail: ConversationDetail): string {
+  const msg = detail.messages.find((m) => m.role === 'user');
+  if (!msg?.content) return '';
+  const snippet = msg.content.slice(0, 60).trim();
+  return snippet ? snippet + (msg.content.length > 60 ? '…' : '') : '';
 }
 
 function basename(path: string): string {
