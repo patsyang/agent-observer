@@ -468,7 +468,7 @@ def test_query_conversations_searches_full_multiturn_content_and_browser_time_fo
     assert [row["conversation_ref"] for row in result["conversations"]] == ["conv-long"]
 
 
-def test_query_conversations_splits_codex_thread_by_prompt_lines(tmp_path):
+def test_query_conversations_aggregates_multi_turn_thread_as_single_session(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:
         ingest_telemetry(
@@ -493,15 +493,22 @@ def test_query_conversations_splits_codex_thread_by_prompt_lines(tmp_path):
             },
         )
         result = query_conversations(conn, window="1h")
-        latest_ref = result["conversations"][0]["conversation_ref"]
-        detail = get_conversation_query(conn, latest_ref)
+        ref = result["conversations"][0]["conversation_ref"]
+        detail = get_conversation_query(conn, ref)
 
-    assert result["total"] == 2
-    assert [row["prompt_preview"] for row in result["conversations"]] == ["第二轮输入", "第一轮输入"]
-    assert [row["response_preview"] for row in result["conversations"]] == ["第二轮输出", "第一轮输出"]
-    assert [row["token_usage"]["effective_units"] for row in result["conversations"]] == [20, 10]
-    assert detail["messages"][0]["content"] == "第二轮输入"
-    assert detail["messages"][1]["content"] == "第二轮输出"
+    # 多轮 turn 归并为单个会话（conversation_ref = base_ref）
+    assert result["total"] == 1
+    assert ref == "conv-thread"
+    row = result["conversations"][0]
+    # 首条 prompt/response 按 occurred_at 取最早
+    assert row["prompt_preview"] == "第一轮输入"
+    assert row["response_preview"] == "第一轮输出"
+    # token 聚合：两轮 usage 总和
+    assert row["token_usage"]["effective_units"] == 30
+    # 详情包含全部 4 条消息（2 prompt + 2 response），按 occurred_at 排序
+    assert [m["content"] for m in detail["messages"]] == [
+        "第一轮输入", "第一轮输出", "第二轮输入", "第二轮输出"
+    ]
 
 
 def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):

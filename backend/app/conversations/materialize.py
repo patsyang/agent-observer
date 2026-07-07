@@ -100,83 +100,6 @@ def _float(value: Any) -> float:
         return 0.0
 
 
-def _turn_start_line(conversation_ref: str) -> int | None:
-    """turn|base|path|line → line；base_ref → None。"""
-    parts = conversation_ref.split("|")
-    if len(parts) == 4 and parts[0] == "turn":
-        try:
-            return int(parts[3])
-        except ValueError:
-            return None
-    return None
-
-
-# ---------------------------------------------------------------------------
-# turn 归属解析（复刻 service._group_by_conversation / _turn_ref_for_fact）
-# ---------------------------------------------------------------------------
-
-_TURN_CACHE: dict | None = None
-
-
-def enable_turn_cache(enable: bool = True) -> None:
-    """启用/关闭 turn 解析缓存。离线 rebuild 全量数据下同桶 prompt 会被反复查询，
-    缓存可消除重复；在线 ingest 不启用（每条 fact 只来一次）。"""
-    global _TURN_CACHE
-    _TURN_CACHE = {} if enable else None
-
-
-def resolve_turn_ref(
-    conn: sqlite3.Connection,
-    base_ref: str,
-    path_hash: str,
-    line: int | None,
-    category: str,
-) -> str:
-    """决定一条 fact 的会话 ref。
-
-    - 无 path_hash 或无 line → base_ref（不切 turn）；
-    - 自身是 prompt 且有 line → ``turn|base|path|line``；
-    - 否则 → 同桶内 line ≤ 自身 line 的最大 prompt line；无则 base_ref。
-
-    在线 ingest 时只能看到已入库的 prompt（罕见乱序偏差），离线 rebuild 时
-    observed_facts 全量，归属按 line 解析正确。
-    """
-    if not path_hash or line is None:
-        return base_ref
-    if category in PROMPT_CATEGORIES:
-        return f"turn|{base_ref}|{path_hash}|{line}"
-    prompt_lines = _bucket_prompt_lines(conn, base_ref, path_hash)
-    eligible = [candidate for candidate in prompt_lines if candidate <= line]
-    return f"turn|{base_ref}|{path_hash}|{eligible[-1]}" if eligible else base_ref
-
-
-def _bucket_prompt_lines(conn: sqlite3.Connection, base_ref: str, path_hash: str) -> list[int]:
-    """同桶所有 prompt 的 source_line（升序）；启用缓存时按 (base_ref, path_hash) 复用。"""
-    if _TURN_CACHE is not None:
-        key = (base_ref, path_hash)
-        cached = _TURN_CACHE.get(key)
-        if cached is not None:
-            return cached
-        lines = _query_bucket_prompt_lines(conn, base_ref, path_hash)
-        _TURN_CACHE[key] = lines
-        return lines
-    return _query_bucket_prompt_lines(conn, base_ref, path_hash)
-
-
-def _query_bucket_prompt_lines(conn: sqlite3.Connection, base_ref: str, path_hash: str) -> list[int]:
-    rows = conn.execute(
-        "select source_refs_json from observed_facts "
-        "where coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id) = ? "
-        "  and source_path_hash = ? and category = 'agent_prompt'",
-        (base_ref, path_hash),
-    ).fetchall()
-    return sorted(
-        candidate
-        for row in rows
-        if (candidate := _extract_line_json(row["source_refs_json"])) is not None
-    )
-
-
 def _primary_projection_and_raw(item: dict) -> tuple[dict, str | None]:
     """从 ingest item 取主 projection dict 与 raw_content。"""
     projections = item.get("evidence_projections")
@@ -200,7 +123,7 @@ def _primary_projection_and_raw(item: dict) -> tuple[dict, str | None]:
 @dataclass
 class FactProjection:
     fact_id: str
-    conversation_ref: str           # 解析后的 turn|... 或 base_ref
+    conversation_ref: str           # 会话级 ref（= base_ref，与 observed_facts.conversation_ref 同口径）
     base_ref: str
     source_path_hash: str
     source_line: int | None
@@ -301,9 +224,8 @@ class FactProjection:
         base_ref = str(refs.get("conversation_ref") or refs.get("session_ref") or fact_id)
         source_path_hash = str(refs.get("source_path_hash") or "")
         line = _extract_line_from_refs(refs)
-        conversation_ref = resolve_turn_ref(
-            conn, base_ref, source_path_hash, line, str(item.get("category") or "")
-        )
+        # 会话级 conversation_ref = base_ref（observed_facts.conversation_ref 同口径）
+        conversation_ref = base_ref
         projection, raw_content = _primary_projection_and_raw(item)
         usage = item.get("usage") if isinstance(item.get("usage"), dict) else None
         return cls(
@@ -350,9 +272,8 @@ class FactProjection:
         base_ref = fact_row["conversation_ref"] or fact_row["session_ref"] or fact_row["fact_id"]
         source_path_hash = fact_row["source_path_hash"] or ""
         line = _extract_line_from_refs(refs)
-        conversation_ref = resolve_turn_ref(
-            conn, base_ref, source_path_hash, line, fact_row["category"]
-        )
+        # 会话级 conversation_ref = base_ref（observed_facts.conversation_ref 同口径）
+        conversation_ref = base_ref
         projection: dict = {}
         raw_content = None
         if proj_row is not None:
@@ -432,7 +353,7 @@ def _usage_contribution(fp: FactProjection) -> dict:
 
 _UPSERT_SQL = """
 insert into conversations (
-  conversation_ref, base_ref, source_path_hash, start_line,
+  conversation_ref, base_ref, source_path_hash,
   session_ref, session_title, agent_type, source_id, source_kind,
   ws_agent_type, ws_workspace_id, ws_workspace_path, ws_workspace_label,
   ws_workspace_alias_source, ws_workspace_confidence,
@@ -444,7 +365,7 @@ insert into conversations (
   cache_write_input_units, reasoning_output_units, credit_total,
   cache_observed_input_units, cache_hit_rate
 ) values (
-  :conversation_ref, :base_ref, :source_path_hash, :start_line,
+  :conversation_ref, :base_ref, :source_path_hash,
   :session_ref, :session_title, :agent_type, :source_id, :source_kind,
   :ws_agent_type, :ws_workspace_id, :ws_workspace_path, :ws_workspace_label,
   :ws_workspace_alias_source, :ws_workspace_confidence,
@@ -504,7 +425,6 @@ def _upsert_conversation(conn: sqlite3.Connection, fp: FactProjection, *, is_hit
             "conversation_ref": fp.conversation_ref,
             "base_ref": fp.base_ref,
             "source_path_hash": fp.source_path_hash,
-            "start_line": _turn_start_line(fp.conversation_ref),
             "session_ref": fp.session_ref,
             "session_title": fp.session_title,
             "agent_type": fp.agent_type,

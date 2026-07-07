@@ -271,7 +271,6 @@ SCHEMA_SQL = """
           conversation_ref text primary key,
           base_ref text not null,
           source_path_hash text not null default '',
-          start_line integer,
           session_ref text not null default '',
           session_title text not null default '',
           agent_type text not null default '',

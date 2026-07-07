@@ -23,7 +23,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from app.conversations.materialize import (  # noqa: E402
     FactProjection,
     apply,
-    enable_turn_cache,
     rebuild_secondary_indexes,
 )
 from app.db.connection import connect  # noqa: E402
@@ -61,7 +60,6 @@ def _clear_materialization(conn) -> None:
 
 def rebuild(conn, *, batch_size: int = 500, sleep_seconds: float = 0.1, dry_run: bool = False) -> dict:
     stats = {"processed": 0, "errors": 0, "conversations": 0, "last_fact_id": "", "last_occurred_at": ""}
-    enable_turn_cache(True)
     if not dry_run:
         _clear_materialization(conn)
     wm_occurred, wm_fact_id = "", ""
@@ -101,7 +99,6 @@ def rebuild(conn, *, batch_size: int = 500, sleep_seconds: float = 0.1, dry_run:
     if not dry_run:
         rebuild_secondary_indexes(conn)
         stats["conversations"] = conn.execute("select count(*) from conversations").fetchone()[0]
-    enable_turn_cache(False)
     return stats
 
 

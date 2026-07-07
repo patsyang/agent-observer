@@ -12,11 +12,9 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from typing import Any
 
 from app.conversations.time_window import normalize_iso_param, window_cutoff
 
-_PROMPT_CATEGORY = "agent_prompt"
 _HIT_COLUMNS = (
     "fact_id, category, fact_type, severity, occurred_at, summary, content_preview, "
     "tool_context_json, sensitive_matches_json, source_line"
@@ -206,39 +204,30 @@ def _empty_response(
 # ---------------------------------------------------------------------------
 
 def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> dict:
-    """单个会话详情：conversations 行 + messages + hits（支持 turn|... 截取）。"""
+    """单个会话详情：conversations 行 + messages + hits。"""
     row = conn.execute(
         "select * from conversations where conversation_ref = ?", (conversation_ref,)
     ).fetchone()
     if row is None:
         raise LookupError(conversation_ref)
-    turn = _parse_turn_ref(conversation_ref)
-    if turn is None:
-        messages = _fetch_all_messages(conn, row["conversation_ref"])
-        hits = _fetch_all_hits(conn, row["conversation_ref"])
-    else:
-        start_line = turn["start_line"]
-        message_bucket = _fetch_message_bucket(conn, row["base_ref"], row["source_path_hash"])
-        end_line = _next_prompt_line(message_bucket, start_line)
-        messages = _slice_rows(message_bucket, start_line, end_line)
-        hits = _slice_rows(
-            _fetch_hit_bucket(conn, row["base_ref"], row["source_path_hash"]),
-            start_line,
-            end_line,
-        )
+    messages = _fetch_all_messages(conn, conversation_ref)
+    hits = _fetch_all_hits(conn, conversation_ref)
     result = {
         **_summary_row(row),
         "messages": [_message_dict(m) for m in messages if m["content"]],
         "hits": [_hit_dict(h) for h in hits],
     }
     # session_title 兜底：物化表里为空时，从 observed_facts 的 source_refs_json
-    # 取 session_title（和 linked_conversations / SignalLinkedConversations 同口径）
+    # 取 session_title（和 linked_conversations / SignalLinkedConversations 同口径）。
+    # 用 effective conversation 匹配（与 helpers._conversation_context 同口径），
+    # 兼容 refs.conversation_ref 为空时 conversations 主键 = session_ref/fact_id 的场景。
     if not result.get("session_title"):
         fact = conn.execute(
             "select source_refs_json from observed_facts "
-            "where conversation_ref = ? and source_refs_json like '%session_title%' "
-            "order by occurred_at limit 1",
-            (row["conversation_ref"],),
+            "where coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id) = ? "
+            "  and source_refs_json like '%session_title%' "
+            "order by occurred_at, fact_id limit 1",
+            (conversation_ref,),
         ).fetchone()
         if fact:
             try:
@@ -252,13 +241,13 @@ def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> d
 
 
 def get_conversation_for_fact(conn: sqlite3.Connection, fact_id: str) -> dict:
-    """从一个 fact 定位其会话（优先取物化行的 conversation_ref，退化回 observed_facts 算 turn）。"""
+    """从一个 fact 定位其会话（优先取物化行的 conversation_ref，退化回 observed_facts 的 base_ref）。"""
     fact = conn.execute(
         "select * from observed_facts where fact_id = ?", (fact_id,)
     ).fetchone()
     if fact is None:
         raise LookupError(fact_id)
-    ref = _conversation_ref_for_fact(conn, fact_id) or _fallback_turn_ref(conn, fact)
+    ref = _conversation_ref_for_fact(conn, fact_id) or _fallback_conversation_ref(fact)
     return get_conversation_query(conn, ref)
 
 
@@ -272,91 +261,25 @@ def _conversation_ref_for_fact(conn: sqlite3.Connection, fact_id: str) -> str | 
     return row["conversation_ref"] if row else None
 
 
-def _fallback_turn_ref(conn: sqlite3.Connection, fact: sqlite3.Row) -> str:
-    """fact 未进物化 messages/hits（如 usage/reasoning）时，回 observed_facts 算 turn 归属。"""
-    base_ref = fact["conversation_ref"] or fact["session_ref"] or fact["fact_id"]
-    path_hash = fact["source_path_hash"] or ""
-    line = _source_line(fact["source_refs_json"])
-    if not path_hash or line is None:
-        return base_ref
-    rows = conn.execute(
-        "select source_refs_json, category from observed_facts "
-        "where coalesce(nullif(conversation_ref, ''), nullif(session_ref, ''), fact_id) = ? "
-        "  and source_path_hash = ? and fact_type != 'collector_health' "
-        "order by occurred_at, fact_id",
-        (base_ref, path_hash),
-    ).fetchall()
-    prompt_lines = sorted(
-        candidate
-        for r in rows
-        if r["category"] == _PROMPT_CATEGORY
-        and (candidate := _source_line(r["source_refs_json"])) is not None
-        and candidate <= line
-    )
-    return _turn_ref(base_ref, path_hash, prompt_lines[-1]) if prompt_lines else base_ref
+def _fallback_conversation_ref(fact: sqlite3.Row) -> str:
+    """fact 未进物化 messages/hits（如 usage/reasoning）时，返回会话级 base_ref。"""
+    return fact["conversation_ref"] or fact["session_ref"] or fact["fact_id"]
 
 
 def _fetch_all_messages(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
-    # 用 base_ref 查（含 turn-scoped 消息），不只精确匹配 conversation_ref
-    return conn.execute(
-        f"select distinct {_MESSAGE_COLUMNS} from conversation_messages "
-        "where base_ref = ? order by occurred_at, fact_id",
-        (conversation_ref,),
-    ).fetchall()
-
-
-def _fetch_message_bucket(
-    conn: sqlite3.Connection, base_ref: str, source_path_hash: str
-) -> list[sqlite3.Row]:
     return conn.execute(
         f"select {_MESSAGE_COLUMNS} from conversation_messages "
-        "where base_ref = ? and source_path_hash = ? order by source_line, occurred_at, fact_id",
-        (base_ref, source_path_hash),
+        "where conversation_ref = ? order by occurred_at, fact_id",
+        (conversation_ref,),
     ).fetchall()
 
 
 def _fetch_all_hits(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
-    # 用 base_ref 查（含 turn-scoped hits），不只精确匹配 conversation_ref
-    return conn.execute(
-        f"select distinct {_HIT_COLUMNS} from conversation_hits "
-        "where base_ref = ? order by occurred_at, fact_id",
-        (conversation_ref,),
-    ).fetchall()
-
-
-def _fetch_hit_bucket(
-    conn: sqlite3.Connection, base_ref: str, source_path_hash: str
-) -> list[sqlite3.Row]:
     return conn.execute(
         f"select {_HIT_COLUMNS} from conversation_hits "
-        "where base_ref = ? and source_path_hash = ? order by occurred_at, fact_id",
-        (base_ref, source_path_hash),
+        "where conversation_ref = ? order by occurred_at, fact_id",
+        (conversation_ref,),
     ).fetchall()
-
-
-def _next_prompt_line(message_bucket: list[sqlite3.Row], start_line: int) -> int | None:
-    """桶内下一个 prompt（role=user）的 source_line；无则 None（截到桶尾）。"""
-    candidates = sorted(
-        item["source_line"]
-        for item in message_bucket
-        if item["role"] == "user"
-        and item["source_line"] is not None
-        and item["source_line"] > start_line
-    )
-    return candidates[0] if candidates else None
-
-
-def _slice_rows(
-    rows: list[sqlite3.Row], start_line: int, end_line: int | None
-) -> list[sqlite3.Row]:
-    """保留 source_line ∈ [start_line, end_line) 的行（line 为 None 不入选，复刻 _turn_rows）。"""
-    return [
-        item
-        for item in rows
-        if item["source_line"] is not None
-        and item["source_line"] >= start_line
-        and (end_line is None or item["source_line"] < end_line)
-    ]
 
 
 # ---------------------------------------------------------------------------
@@ -448,33 +371,3 @@ def _loads_dict(value: str | None) -> dict | None:
     except json.JSONDecodeError:
         return None
     return parsed if isinstance(parsed, dict) else None
-
-
-# ---------------------------------------------------------------------------
-# turn ref 解析（保留：详情 by-fact 定位用）
-# ---------------------------------------------------------------------------
-
-def _parse_turn_ref(value: str) -> dict[str, Any] | None:
-    parts = value.split("|")
-    if len(parts) != 4 or parts[0] != "turn":
-        return None
-    try:
-        start_line = int(parts[3])
-    except ValueError:
-        return None
-    return {"base_ref": parts[1], "source_path_hash": parts[2], "start_line": start_line}
-
-
-def _turn_ref(base_ref: str, source_path_hash: str, start_line: int) -> str:
-    return f"turn|{base_ref}|{source_path_hash}|{start_line}"
-
-
-def _source_line(source_refs_json: str | None) -> int | None:
-    try:
-        refs = json.loads(source_refs_json or "{}")
-    except json.JSONDecodeError:
-        return None
-    try:
-        return int(refs["line"])
-    except (KeyError, TypeError, ValueError):
-        return None
