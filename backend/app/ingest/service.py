@@ -592,26 +592,30 @@ def _stamp_sensitive_into_item(item: dict, matches: list[dict]) -> None:
         target["sensitive_categories"] = sorted({m["category"] for m in matches})
 
 
-def _enqueue_sensitive_job(pending_jobs: dict[str, dict], object_type: str) -> None:
-    job_id = f"{JOB_TYPE_SIGNAL_UPDATE}:risk:{_SENSITIVE_JOB_SCOPE}:{object_type}"
+def _enqueue_sensitive_job(pending_jobs: dict[str, dict], conversation_ref: str) -> None:
+    """按会话(conversation_ref)入队敏感信号处理 job（配合按任务聚合）。"""
+    job_id = f"{JOB_TYPE_SIGNAL_UPDATE}:risk:{_SENSITIVE_JOB_SCOPE}:{conversation_ref}"
     pending_jobs[job_id] = {
         "job_id": job_id,
         "job_type": JOB_TYPE_SIGNAL_UPDATE,
         "scope_type": "risk",
-        "scope_id": f"{_SENSITIVE_JOB_SCOPE}:{object_type}",
+        "scope_id": f"{_SENSITIVE_JOB_SCOPE}:{conversation_ref}",
         "priority": 95,
     }
 
 
 def _write_sensitive_risk(conn: sqlite3.Connection, fact_id: str, object_type: str, pending_jobs: dict[str, dict]) -> None:
-    """UPSERT sensitive risk_signal。signal_id 是 PK，新 fact 插入；duplicate 时更新 object_type [F3]。"""
+    """UPSERT sensitive risk_signal + 按会话入队信号处理 job。"""
     conn.execute(
         "insert into risk_signals (signal_id, fact_id, risk_type, severity, object_type) "
         "values (?, ?, 'sensitive_content_exposure', 'high', ?) "
         "on conflict(signal_id) do update set object_type=excluded.object_type, severity='high'",
         (f"risk:sensitive:{fact_id}", fact_id, object_type),
     )
-    _enqueue_sensitive_job(pending_jobs, object_type)
+    row = conn.execute("select conversation_ref from observed_facts where fact_id = ?", (fact_id,)).fetchone()
+    conversation_ref = row["conversation_ref"] if row else ""
+    if conversation_ref:
+        _enqueue_sensitive_job(pending_jobs, conversation_ref)
 
 
 def _timeout_scope_key(item: dict, source: str) -> str:
