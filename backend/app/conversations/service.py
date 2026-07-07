@@ -297,9 +297,10 @@ def _fallback_turn_ref(conn: sqlite3.Connection, fact: sqlite3.Row) -> str:
 
 
 def _fetch_all_messages(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
+    # 用 base_ref 查（含 turn-scoped 消息），不只精确匹配 conversation_ref
     return conn.execute(
-        f"select {_MESSAGE_COLUMNS} from conversation_messages "
-        "where conversation_ref = ? order by occurred_at, fact_id",
+        f"select distinct {_MESSAGE_COLUMNS} from conversation_messages "
+        "where base_ref = ? order by occurred_at, fact_id",
         (conversation_ref,),
     ).fetchall()
 
@@ -315,9 +316,10 @@ def _fetch_message_bucket(
 
 
 def _fetch_all_hits(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
+    # 用 base_ref 查（含 turn-scoped hits），不只精确匹配 conversation_ref
     return conn.execute(
-        f"select {_HIT_COLUMNS} from conversation_hits "
-        "where conversation_ref = ? order by occurred_at, fact_id",
+        f"select distinct {_HIT_COLUMNS} from conversation_hits "
+        "where base_ref = ? order by occurred_at, fact_id",
         (conversation_ref,),
     ).fetchall()
 
