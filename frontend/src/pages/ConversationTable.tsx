@@ -1,6 +1,6 @@
 import type { ConversationSummary } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
-import { formatDateTime } from './dashboardLabels';
+import { formatFullDateTime } from './dashboardLabels';
 
 export function ConversationTable({
   meta,
@@ -55,7 +55,7 @@ export function ConversationTable({
               tabIndex={0}
             >
               <td data-label="序号">{formatNumber((meta.page - 1) * meta.page_size + index + 1)}</td>
-              <td data-label="时间戳">{formatDateTime(row.last_event_at)}</td>
+              <td data-label="时间戳">{formatFullDateTime(row.last_event_at)}</td>
               <td data-label="工作区">
                 <span className="content-preview" title={row.workspace.workspace_path}>
                   {workspaceLabel(row)}

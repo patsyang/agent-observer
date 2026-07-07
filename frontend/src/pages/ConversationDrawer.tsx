@@ -4,7 +4,7 @@ import type { ConversationDetail, ConversationHit } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 import { ToolContextBlock } from '../components/ToolContextBlock';
 import { SensitiveEvidence } from '../components/SensitiveEvidence';
-import { factTypeLabel, formatDateTime, severityLabel } from './dashboardLabels';
+import { factTypeLabel, formatDateTime, formatFullDateTime, severityLabel } from './dashboardLabels';
 
 interface Props {
   detail: ConversationDetail;
@@ -99,7 +99,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                   <ToolContextBlock context={hit.tool_context} />
                   <SensitiveEvidence matches={hit.sensitive_matches} />
                   <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>
-                  <small>{formatDateTime(hit.occurred_at)}</small>
+                  <small>{formatFullDateTime(hit.occurred_at)}</small>
                 </article>
               ))}
             </div>
@@ -129,7 +129,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                       <details>
                         <summary>
                           <strong>{roleLabel(message.role)}</strong>
-                          <small>{formatDateTime(message.occurred_at)}</small>
+                          <small>{formatFullDateTime(message.occurred_at)}</small>
                         </summary>
                         <p>{rendered}</p>
                       </details>
@@ -140,7 +140,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                   <article className="conversation-message" key={message.fact_id}>
                     <header>
                       <strong>{roleLabel(message.role)}</strong>
-                      <small>{formatDateTime(message.occurred_at)}</small>
+                      <small>{formatFullDateTime(message.occurred_at)}</small>
                     </header>
                     <p>{rendered}</p>
                   </article>
@@ -167,7 +167,7 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
                       <ToolContextBlock context={hit.tool_context} />
                       <SensitiveEvidence matches={hit.sensitive_matches} />
                       <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>
-                      <small>{formatDateTime(hit.occurred_at)}</small>
+                      <small>{formatFullDateTime(hit.occurred_at)}</small>
                     </article>
                   ))}
                 </div>
