@@ -120,15 +120,32 @@ export function ConversationDrawer({ detail, highlightFactIds = [], highlightTit
             <p>该会话暂无可展示的输入输出原文。</p>
           ) : (
             <div className="conversation-message-list">
-              {detail.messages.map((message) => (
-                <article className="conversation-message" key={message.fact_id}>
-                  <header>
-                    <strong>{roleLabel(message.role)}</strong>
-                    <small>{formatDateTime(message.occurred_at)}</small>
-                  </header>
-                  <p>{renderHighlightedText(message.content, highlightTerms)}</p>
-                </article>
-              ))}
+              {detail.messages.map((message) => {
+                const isSystem = message.role === 'system';
+                const rendered = renderHighlightedText(message.content, highlightTerms);
+                if (isSystem) {
+                  return (
+                    <article className="conversation-message system-message" key={message.fact_id}>
+                      <details>
+                        <summary>
+                          <strong>{roleLabel(message.role)}</strong>
+                          <small>{formatDateTime(message.occurred_at)}</small>
+                        </summary>
+                        <p>{rendered}</p>
+                      </details>
+                    </article>
+                  );
+                }
+                return (
+                  <article className="conversation-message" key={message.fact_id}>
+                    <header>
+                      <strong>{roleLabel(message.role)}</strong>
+                      <small>{formatDateTime(message.occurred_at)}</small>
+                    </header>
+                    <p>{rendered}</p>
+                  </article>
+                );
+              })}
             </div>
           )}
         </section>
@@ -199,7 +216,7 @@ function roleLabel(role: string): string {
   return {
     user: '提交 Prompt',
     assistant: '响应内容',
-    system: '系统',
+    system: '运行环境',
     tool: '工具',
     event: '事件',
   }[role] ?? role;

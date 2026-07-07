@@ -234,6 +234,8 @@ class FactProjection:
     def role(self) -> str | None:
         if self.is_prompt:
             return "user"
+        if self.category == "system_context":
+            return "system"
         if self.is_response:
             return "assistant"
         role = str(self.projection.get("role") or "")
@@ -251,7 +253,7 @@ class FactProjection:
         raw = _raw_text(self.raw_content).strip()
         if raw:
             return raw
-        label = "提交 Prompt" if self.role == "user" else "响应内容"
+        label = "提交 Prompt" if self.role == "user" else ("运行环境" if self.role == "system" else "响应内容")
         try:
             length = int(self.projection.get("content_length") or 0)
         except (TypeError, ValueError):
