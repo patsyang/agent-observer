@@ -387,9 +387,10 @@ class TestNeedsReviewTriggers:
             "select * from signal_decisions where signal_id = ?", (sid,)
         ).fetchone()
 
-        # Snapshot changed + occurrence >= 2 → needs_review
+        # Snapshot changed + occurrence >= 2 → 不再自动复活，保持 handled
+        # （配合按任务聚合，任务结束后无新事件，处理即终态）
         result = _decision_state(existing, decision, "different-hash", conn, sid)
-        assert result == "needs_review"
+        assert result == "handled"
 
     def test_read_state_with_high_occurrence_triggers_review(self):
         """Previously 'read' state + high occurrence → needs_review."""

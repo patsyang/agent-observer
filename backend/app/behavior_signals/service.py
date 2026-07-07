@@ -419,21 +419,9 @@ def _decision_state(
 ) -> str:
     if decision is None:
         return "unread"
-    if decision["decision_state"] == "handled" and existing and existing["snapshot_hash"] != next_hash:
-        # Check occurrence_count growth trigger for needs_review
-        if conn is not None and signal_id_value is not None:
-            row = conn.execute(
-                "select occurrence_count, decision_state from behavior_signals where signal_id = ?",
-                (signal_id_value,),
-            ).fetchone()
-            if row is not None:
-                prev_state = row["decision_state"]
-                occ = row["occurrence_count"] or 0
-                # If previously 'read'/'handled' and occurrence grew >= 50%,
-                # escalate to needs_review
-                if prev_state in ("read", "handled") and occ >= 2:
-                    return "needs_review"
-        return "needs_review"
+    # 不自动复活：已处理(handled)/已读(read)的信号即使有新事件（snapshot_hash 变）
+    # 也保持原状态。新事件通过 occurrence_count 增长在详情页可见，但状态不回退。
+    # 配合"按任务聚合"，任务结束后不再有新事件，处理就是终态。
     return str(decision["decision_state"] or "unread")
 
 
