@@ -231,14 +231,23 @@ def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> d
         "messages": [_message_dict(m) for m in messages if m["content"]],
         "hits": [_hit_dict(h) for h in hits],
     }
-    # session_title 兜底：物化表里为空时，从 observed_facts 取首条用户提问摘要
+    # session_title 兜底：物化表里为空时，从 observed_facts 的 source_refs_json
+    # 取 session_title（和 linked_conversations / SignalLinkedConversations 同口径）
     if not result.get("session_title"):
-        prompt = conn.execute(
-            "select summary from observed_facts where conversation_ref = ? and category = 'agent_prompt' order by occurred_at limit 1",
+        fact = conn.execute(
+            "select source_refs_json from observed_facts "
+            "where conversation_ref = ? and source_refs_json like '%session_title%' "
+            "order by occurred_at limit 1",
             (row["conversation_ref"],),
         ).fetchone()
-        if prompt and prompt["summary"]:
-            result["session_title"] = str(prompt["summary"])[:60]
+        if fact:
+            try:
+                refs = json.loads(fact["source_refs_json"] or "{}")
+                title = str(refs.get("session_title") or "").strip()
+                if title:
+                    result["session_title"] = title
+            except (json.JSONDecodeError, TypeError):
+                pass
     return result
 
 
