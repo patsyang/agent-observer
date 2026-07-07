@@ -30,6 +30,7 @@ export function SignalLinkedConversations({ conversations, onOpen }: Props) {
               <small>
                 {formatNumber(conversation.hit_count)} 条命中 / {formatDateTime(conversation.last_seen_at)}
               </small>
+              <small className="muted-inline" title="会话标识（排障用）">{conversation.conversation_ref}</small>
             </button>
           ))}
         </div>

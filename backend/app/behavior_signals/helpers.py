@@ -150,6 +150,8 @@ def _first_row_value(rows: list[sqlite3.Row], key: str) -> str:
 
 
 def _session_title(rows: list[sqlite3.Row]) -> str:
+    """提取会话名称：优先 session_title（客户端采集的 thread_name），
+    缺失时用第一条用户提问的摘要作为可读会话名。"""
     for row in rows:
         try:
             refs = json.loads(row["source_refs_json"] or "{}")
@@ -158,6 +160,12 @@ def _session_title(rows: list[sqlite3.Row]) -> str:
         title = str(refs.get("session_title") or "").strip()
         if title:
             return title
+    # 兜底：用第一条用户提问摘要作会话名（比不可读的 ref 好得多）
+    for row in rows:
+        if (row["category"] or "") == "agent_prompt":
+            summary = str(row["summary"] or "").strip()
+            if summary:
+                return summary[:60] + ("…" if len(summary) > 60 else "")
     return ""
 
 
