@@ -2,7 +2,15 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
-from app.conversations.service import get_conversation_for_fact, get_conversation_query, query_conversations
+from app.conversations.service import (
+    get_conversation_for_fact,
+    get_conversation_query,
+    locate_conversation_message,
+    query_conversation_hits,
+    query_conversation_hits_by_fact_ids,
+    query_conversation_messages,
+    query_conversations,
+)
 from app.db.connection import connect
 from app.ingest.service import ingest_telemetry
 from source_payloads import default_versions
@@ -505,10 +513,15 @@ def test_query_conversations_aggregates_multi_turn_thread_as_single_session(tmp_
     assert row["response_preview"] == "第一轮输出"
     # token 聚合：两轮 usage 总和
     assert row["token_usage"]["effective_units"] == 30
-    # 详情包含全部 4 条消息（2 prompt + 2 response），按 occurred_at 排序
-    assert [m["content"] for m in detail["messages"]] == [
-        "第一轮输入", "第一轮输出", "第二轮输入", "第二轮输出"
-    ]
+    # 详情概要返回总数（内容按需加载）
+    assert detail["messages_total"] == 4
+    # 倒序分页：最新两条在第一页
+    page1 = query_conversation_messages(conn, ref, page=1, page_size=2)
+    assert [m["content"] for m in page1["messages"]] == ["第二轮输出", "第二轮输入"]
+    assert page1["has_more"] is True
+    page2 = query_conversation_messages(conn, ref, page=2, page_size=2)
+    assert [m["content"] for m in page2["messages"]] == ["第一轮输出", "第一轮输入"]
+    assert page2["has_more"] is False
 
 
 def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):
@@ -535,13 +548,19 @@ def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):
         )
         detail = get_conversation_query(conn, "conv-detail")
         by_fact = get_conversation_for_fact(conn, "detail-response")
+        msgs = query_conversation_messages(conn, "conv-detail")
+        hits = query_conversation_hits(conn, "conv-detail")
 
     assert detail["conversation_ref"] == "conv-detail"
-    assert [message["role"] for message in detail["messages"]] == ["user", "assistant"]
-    assert detail["messages"][0]["content"] == "打开完整输入"
-    assert [hit["fact_id"] for hit in detail["hits"]] == ["detail-tool"]
+    assert detail["messages_total"] == 2
+    assert detail["hits_total"] == 1
+    # 倒序：assistant（最新）在前
+    assert [message["role"] for message in msgs["messages"]] == ["assistant", "user"]
+    assert msgs["messages"][1]["content"] == "打开完整输入"
+    assert [hit["fact_id"] for hit in hits["hits"]] == ["detail-tool"]
     assert detail["token_usage"]["effective_units"] == 64
     assert by_fact["conversation_ref"] == "conv-detail"
+    assert by_fact["focus_fact_id"] == "detail-response"
 
 
 def test_conversation_detail_hits_expose_tool_context(tmp_path):
@@ -566,9 +585,11 @@ def test_conversation_detail_hits_expose_tool_context(tmp_path):
             },
         )
         detail = get_conversation_query(conn, "conv-tool-context")
+        hits = query_conversation_hits(conn, "conv-tool-context")
 
-    assert detail["hits"][0]["content_preview"].startswith("命令 cmd /c apps\\agent-observer")
-    assert detail["hits"][0]["tool_context"] == {
+    assert detail["hits_total"] == 1
+    assert hits["hits"][0]["content_preview"].startswith("命令 cmd /c apps\\agent-observer")
+    assert hits["hits"][0]["tool_context"] == {
         "tool_name": "exec_command",
         "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
         "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
@@ -653,8 +674,10 @@ def test_conversation_detail_exposes_sensitive_matches_for_pii(tmp_path):
         # detector 在 ingest 时自动给两条含手机号的 content fact 都写 risk_signal，
         # 二者都应出现在 hits 中并暴露完整手机号（无需手动插 signal）。
         detail = get_conversation_query(conn, "conv-sensitive")
+        msgs = query_conversation_messages(conn, "conv-sensitive")
+        hits = query_conversation_hits(conn, "conv-sensitive")
 
-    msg_with_matches = [m for m in detail["messages"] if m.get("sensitive_matches")]
+    msg_with_matches = [m for m in msgs["messages"] if m.get("sensitive_matches")]
     assert len(msg_with_matches) >= 1
     phone_values = [
         m["matched_value"]
@@ -664,11 +687,11 @@ def test_conversation_detail_exposes_sensitive_matches_for_pii(tmp_path):
     ]
     assert "13521661669" in phone_values
 
-    hit_fact_ids = {h["fact_id"] for h in detail["hits"]}
+    hit_fact_ids = {h["fact_id"] for h in hits["hits"]}
     assert prompt_row["fact_id"] in hit_fact_ids
     assert response_row["fact_id"] in hit_fact_ids
 
-    sensitive_hits = [h for h in detail["hits"] if h.get("sensitive_matches")]
+    sensitive_hits = [h for h in hits["hits"] if h.get("sensitive_matches")]
     assert len(sensitive_hits) >= 1
     hit_phones = [
         m["matched_value"]
@@ -679,3 +702,355 @@ def test_conversation_detail_exposes_sensitive_matches_for_pii(tmp_path):
     assert "13521661669" in hit_phones
     # [F8] hit_count 必须计入有 risk_signal 的 content fact，不能只按 fact_type 统计
     assert detail["hit_count"] >= len(sensitive_hits)
+
+
+# ---------------------------------------------------------------------------
+# 分页 / 筛选 / 定位 / 批量查询
+# ---------------------------------------------------------------------------
+
+
+def test_query_conversation_messages_paginated_desc(tmp_path):
+    """消息倒序分页：最新在前，page_size 控制每页条数，has_more 正确。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        items = [
+            _item(f"msg-{i}", "agent_prompt", f"消息{i}", (now - timedelta(minutes=10 - i)).isoformat(), "conv-page")
+            for i in range(1, 6)
+        ]
+        ingest_telemetry(conn, {
+            "batch_id": "b-page", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": items,
+        })
+        page1 = query_conversation_messages(conn, "conv-page", page=1, page_size=2)
+        page2 = query_conversation_messages(conn, "conv-page", page=2, page_size=2)
+        page3 = query_conversation_messages(conn, "conv-page", page=3, page_size=2)
+
+    assert page1["total"] == 5
+    assert [m["content"] for m in page1["messages"]] == ["消息5", "消息4"]
+    assert page1["has_more"] is True
+    assert [m["content"] for m in page2["messages"]] == ["消息3", "消息2"]
+    assert page2["has_more"] is True
+    assert [m["content"] for m in page3["messages"]] == ["消息1"]
+    assert page3["has_more"] is False
+
+
+def test_query_conversation_messages_role_filter(tmp_path):
+    """role 筛选：只返回 user 或 assistant。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-role", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "输入1", (now - timedelta(minutes=2)).isoformat(), "conv-role"),
+                _item("r1", "agent_response", "输出1", (now - timedelta(minutes=1)).isoformat(), "conv-role"),
+            ],
+        })
+        user_only = query_conversation_messages(conn, "conv-role", role="user")
+        assistant_only = query_conversation_messages(conn, "conv-role", role="assistant")
+
+    assert user_only["total"] == 1
+    assert [m["content"] for m in user_only["messages"]] == ["输入1"]
+    assert assistant_only["total"] == 1
+    assert [m["content"] for m in assistant_only["messages"]] == ["输出1"]
+
+
+def test_query_conversation_messages_invalid_role_ignored(tmp_path):
+    """非法 role 值忽略筛选，返回全部。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-bad-role", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "输入", (now - timedelta(minutes=2)).isoformat(), "conv-bad-role"),
+                _item("r1", "agent_response", "输出", (now - timedelta(minutes=1)).isoformat(), "conv-bad-role"),
+            ],
+        })
+        result = query_conversation_messages(conn, "conv-bad-role", role="system")
+
+    assert result["total"] == 2
+
+
+def test_query_conversation_messages_page_zero_defaults_to_one(tmp_path):
+    """page=0 兜底为第 1 页；page_size=0 兜底为默认值 50。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-zero", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [_item("p1", "agent_prompt", "输入", now.isoformat(), "conv-zero")],
+        })
+        result = query_conversation_messages(conn, "conv-zero", page=0, page_size=0)
+
+    assert result["page"] == 1
+    assert result["page_size"] == 50  # page_size=0 触发 `or 50` 兜底为默认值
+    assert len(result["messages"]) == 1
+
+
+def test_query_conversation_messages_page_size_capped_at_200(tmp_path):
+    """page_size 上限 200。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-cap", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [_item("p1", "agent_prompt", "输入", now.isoformat(), "conv-cap")],
+        })
+        result = query_conversation_messages(conn, "conv-cap", page_size=100000)
+
+    assert result["page_size"] == 200
+
+
+def test_query_conversation_messages_empty_conversation(tmp_path):
+    """空会话返回空列表 + total=0。"""
+    with connect(tmp_path / "observer.sqlite") as conn:
+        # 仅写一条 usage（不进 conversation_messages）
+        ingest_telemetry(conn, {
+            "batch_id": "b-empty", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [_usage("u1", 10, datetime.now(UTC).isoformat(), "conv-empty")],
+        })
+        result = query_conversation_messages(conn, "conv-empty")
+
+    assert result["total"] == 0
+    assert result["messages"] == []
+    assert result["has_more"] is False
+
+
+def test_query_conversation_messages_page_out_of_range(tmp_path):
+    """超出范围的页返回空列表 + has_more=false。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-oor", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [_item("p1", "agent_prompt", "输入", now.isoformat(), "conv-oor")],
+        })
+        result = query_conversation_messages(conn, "conv-oor", page=999, page_size=50)
+
+    assert result["total"] == 1
+    assert result["messages"] == []
+    assert result["has_more"] is False
+
+
+def test_query_conversation_hits_paginated_desc(tmp_path):
+    """hits 倒序分页。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        items = []
+        for i in range(1, 4):
+            item = _tool_failure(f"fail-{i}", (now - timedelta(minutes=4 - i)).isoformat(), "conv-hits-page")
+            items.append(item)
+        ingest_telemetry(conn, {
+            "batch_id": "b-hits-page", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": items,
+        })
+        page1 = query_conversation_hits(conn, "conv-hits-page", page=1, page_size=2)
+        page2 = query_conversation_hits(conn, "conv-hits-page", page=2, page_size=2)
+
+    assert page1["total"] == 3
+    assert len(page1["hits"]) == 2
+    assert page1["has_more"] is True
+    assert len(page2["hits"]) == 1
+    assert page2["has_more"] is False
+
+
+def test_query_conversation_hits_category_filter(tmp_path):
+    """category 筛选。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-cat", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _tool_failure("fail-1", (now - timedelta(minutes=2)).isoformat(), "conv-cat"),
+                _event("evt-1", "tool_call", (now - timedelta(minutes=1)).isoformat(), "conv-cat"),
+            ],
+        })
+        # category='tool_execution_failure' 只匹配 _tool_failure
+        filtered = query_conversation_hits(conn, "conv-cat", category="tool_execution_failure")
+        all_hits = query_conversation_hits(conn, "conv-cat")
+
+    assert filtered["total"] == 1
+    assert filtered["hits"][0]["fact_id"] == "fail-1"
+    assert all_hits["total"] == 2
+
+
+def test_locate_conversation_message_returns_correct_page(tmp_path):
+    """定位 fact_id 所在页号（倒序）。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        items = [
+            _item(f"loc-{i}", "agent_prompt", f"消息{i}", (now - timedelta(minutes=10 - i)).isoformat(), "conv-loc")
+            for i in range(1, 6)
+        ]
+        ingest_telemetry(conn, {
+            "batch_id": "b-loc", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": items,
+        })
+        # loc-5 是最新 → 倒序 rank=0 → page=1
+        # loc-1 是最旧 → 倒序 rank=4 → page=3（page_size=2）
+        latest = locate_conversation_message(conn, "conv-loc", "loc-5", page_size=2)
+        oldest = locate_conversation_message(conn, "conv-loc", "loc-1", page_size=2)
+
+    assert latest["page"] == 1
+    assert oldest["page"] == 3
+
+
+def test_locate_conversation_message_fact_not_found(tmp_path):
+    """fact_id 不存在抛 LookupError。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-loc-404", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [_item("p1", "agent_prompt", "输入", now.isoformat(), "conv-loc-404")],
+        })
+        try:
+            locate_conversation_message(conn, "conv-loc-404", "nonexistent-fact")
+            raised = False
+        except LookupError:
+            raised = True
+
+    assert raised is True
+
+
+def test_query_conversation_hits_by_fact_ids(tmp_path):
+    """按 fact_id 列表批量查询 hits。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-batch", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _tool_failure("fail-1", (now - timedelta(minutes=2)).isoformat(), "conv-batch"),
+                _tool_failure("fail-2", (now - timedelta(minutes=1)).isoformat(), "conv-batch"),
+                _event("evt-1", "tool_call", now.isoformat(), "conv-batch"),
+            ],
+        })
+        result = query_conversation_hits_by_fact_ids(conn, "conv-batch", ["fail-1", "evt-1"])
+
+    assert len(result["hits"]) == 2
+    assert {h["fact_id"] for h in result["hits"]} == {"fail-1", "evt-1"}
+
+
+def test_query_conversation_hits_by_fact_ids_empty_list(tmp_path):
+    """空 fact_ids 列表返回空。"""
+    with connect(tmp_path / "observer.sqlite") as conn:
+        result = query_conversation_hits_by_fact_ids(conn, "conv-any", [])
+
+    assert result["hits"] == []
+
+
+def test_get_conversation_query_returns_totals_not_messages(tmp_path):
+    """get_conversation_query 返回概要（无 messages/hits，有 totals）。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-summary", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "输入", (now - timedelta(minutes=2)).isoformat(), "conv-summary"),
+                _item("r1", "agent_response", "输出", (now - timedelta(minutes=1)).isoformat(), "conv-summary"),
+                _tool_failure("fail-1", now.isoformat(), "conv-summary"),
+            ],
+        })
+        detail = get_conversation_query(conn, "conv-summary")
+
+    assert "messages" not in detail
+    assert "hits" not in detail
+    assert detail["messages_total"] == 2
+    assert detail["hits_total"] == 1
+
+
+def test_get_conversation_for_fact_includes_focus_fact_id(tmp_path):
+    """get_conversation_for_fact 返回 focus_fact_id。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-focus", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "输入", (now - timedelta(minutes=1)).isoformat(), "conv-focus"),
+                _item("r1", "agent_response", "输出", now.isoformat(), "conv-focus"),
+            ],
+        })
+        detail = get_conversation_for_fact(conn, "r1")
+
+    assert detail["focus_fact_id"] == "r1"
+    assert detail["conversation_ref"] == "conv-focus"
+
+
+def test_query_conversation_messages_excludes_empty_content(tmp_path):
+    """空 content 的消息行不在分页结果中，total 也排除空 content 行。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-empty-content", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "有内容的消息", (now - timedelta(minutes=1)).isoformat(), "conv-empty-content"),
+            ],
+        })
+        # 直接插入一条空 content 行（模拟 materialize 边缘场景）
+        conn.execute(
+            "insert into conversation_messages "
+            "(fact_id, conversation_ref, base_ref, role, category, occurred_at, content) "
+            "values (?, ?, ?, 'assistant', 'agent_response', ?, '')",
+            ("empty-fact-1", "conv-empty-content", "conv-empty-content", now.isoformat()),
+        )
+        conn.commit()
+        detail = get_conversation_query(conn, "conv-empty-content")
+        msgs = query_conversation_messages(conn, "conv-empty-content")
+
+    assert detail["messages_total"] == 1
+    assert msgs["total"] == 1
+    assert len(msgs["messages"]) == 1
+    assert msgs["messages"][0]["content"] == "有内容的消息"
+
+
+def test_locate_conversation_message_rejects_empty_content_fact(tmp_path):
+    """空 content 的 fact_id 不在分页中，locate 抛 LookupError。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(conn, {
+            "batch_id": "b-loc-empty", **default_versions(),
+            "collector_id": "c1", "source": "codex", "source_id": "codex-local",
+            "agent_type": "codex", "source_kind": "codex_local", "cursor": "cur",
+            "items": [
+                _item("p1", "agent_prompt", "有内容", now.isoformat(), "conv-loc-empty"),
+            ],
+        })
+        conn.execute(
+            "insert into conversation_messages "
+            "(fact_id, conversation_ref, base_ref, role, category, occurred_at, content) "
+            "values (?, ?, ?, 'assistant', 'agent_response', ?, '')",
+            ("empty-loc-fact", "conv-loc-empty", "conv-loc-empty", now.isoformat()),
+        )
+        conn.commit()
+        try:
+            locate_conversation_message(conn, "conv-loc-empty", "empty-loc-fact")
+            raised = False
+        except LookupError:
+            raised = True
+
+    assert raised is True

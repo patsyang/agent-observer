@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { ConversationDetail, ConversationsResponse } from '../api/types';
+import type { ConversationDetail, ConversationHitsResponse, ConversationMessagesResponse, ConversationsResponse } from '../api/types';
 import { ConversationQueryPage } from './ConversationQueryPage';
 
 const detail: ConversationDetail = {
@@ -32,45 +32,49 @@ const detail: ConversationDetail = {
     input_token_units: 800,
     cache_hit_rate: 0.6,
   },
-  messages: [
-    {
-      fact_id: 'prompt-alpha',
-      role: 'user',
-      category: 'agent_prompt',
-      occurred_at: '2026-06-21T01:00:00+00:00',
-      content: '请检查观测总览',
-      raw_available: true,
-    },
-    {
-      fact_id: 'response-alpha',
-      role: 'assistant',
-      category: 'agent_response',
-      occurred_at: '2026-06-21T01:04:00+00:00',
-      content: '已经定位信号聚合过宽',
-      raw_available: true,
-    },
-  ],
-  hits: [
-    {
-      fact_id: 'risk-alpha',
-      category: 'destructive_operation',
-      fact_type: 'risk',
-      severity: 'high',
-      occurred_at: '2026-06-21T01:03:00+00:00',
-      summary: '命中破坏性操作',
-      content_preview: '破坏性操作: 工作区文件',
-    },
-    {
-      fact_id: 'tool-alpha',
-      category: 'tool_call',
-      fact_type: 'tool',
-      severity: 'low',
-      occurred_at: '2026-06-21T01:03:10+00:00',
-      summary: 'Codex 调用工具 exec_command，类别 function_call，已提取工具调用摘要。',
-      content_preview: '工具 exec_command',
-    },
-  ],
+  messages_total: 2,
+  hits_total: 2,
 };
+
+const messages = [
+  {
+    fact_id: 'prompt-alpha',
+    role: 'user',
+    category: 'agent_prompt',
+    occurred_at: '2026-06-21T01:00:00+00:00',
+    content: '请检查观测总览',
+    raw_available: true,
+  },
+  {
+    fact_id: 'response-alpha',
+    role: 'assistant',
+    category: 'agent_response',
+    occurred_at: '2026-06-21T01:04:00+00:00',
+    content: '已经定位信号聚合过宽',
+    raw_available: true,
+  },
+];
+
+const hits = [
+  {
+    fact_id: 'risk-alpha',
+    category: 'destructive_operation',
+    fact_type: 'risk',
+    severity: 'high',
+    occurred_at: '2026-06-21T01:03:00+00:00',
+    summary: '命中破坏性操作',
+    content_preview: '破坏性操作: 工作区文件',
+  },
+  {
+    fact_id: 'tool-alpha',
+    category: 'tool_call',
+    fact_type: 'tool',
+    severity: 'low',
+    occurred_at: '2026-06-21T01:03:10+00:00',
+    summary: 'Codex 调用工具 exec_command，类别 function_call，已提取工具调用摘要。',
+    content_preview: '工具 exec_command',
+  },
+];
 
 const response: ConversationsResponse = {
   conversations: [detail],
@@ -81,6 +85,22 @@ const response: ConversationsResponse = {
   window: '1h',
 };
 
+function makeLoaders(overrides: {
+  messages?: () => Promise<ConversationMessagesResponse>;
+  hits?: () => Promise<ConversationHitsResponse>;
+} = {}) {
+  return {
+    loadConversationMessages: vi.fn(overrides.messages ?? (() => Promise.resolve({
+      messages, total: 2, page: 1, page_size: 50, has_more: false,
+    }))),
+    loadConversationHits: vi.fn(overrides.hits ?? (() => Promise.resolve({
+      hits, total: 2, page: 1, page_size: 50, has_more: false,
+    }))),
+    locateConversationMessage: vi.fn(() => Promise.resolve({ page: 1, page_size: 50, fact_id: '' })),
+    loadConversationHitsByFactIds: vi.fn(() => Promise.resolve({ hits: [] })),
+  };
+}
+
 describe('ConversationQueryPage', () => {
   it('renders conversations and searches prompt and response keywords on submit', async () => {
     const user = userEvent.setup();
@@ -90,6 +110,7 @@ describe('ConversationQueryPage', () => {
         loadConversationDetail={async () => detail}
         loadConversationForFact={async () => detail}
         loadConversations={loadConversations}
+        {...makeLoaders()}
       />
     );
 
@@ -162,6 +183,7 @@ describe('ConversationQueryPage', () => {
         loadConversationDetail={async () => detail}
         loadConversationForFact={async () => detail}
         loadConversations={loadConversations}
+        {...makeLoaders()}
       />
     );
 
@@ -185,12 +207,14 @@ describe('ConversationQueryPage', () => {
   it('opens the conversation drawer from a row and from an initial fact', async () => {
     const user = userEvent.setup();
     const loadConversationForFact = vi.fn(async () => detail);
+    const loaders = makeLoaders();
     render(
       <ConversationQueryPage
         initialFactId="risk-alpha"
         loadConversationDetail={async () => detail}
         loadConversationForFact={loadConversationForFact}
         loadConversations={async () => response}
+        {...loaders}
       />
     );
 
@@ -204,9 +228,17 @@ describe('ConversationQueryPage', () => {
     expect(screen.getByText('单次实际计算Token峰值')).toBeInTheDocument();
     expect(screen.getByText('缓存命中 token')).toBeInTheDocument();
     expect(screen.getByText('60.0%')).toBeInTheDocument();
-    expect(screen.getByText('检测到破坏性操作：工作区文件')).toBeInTheDocument();
-    expect(screen.getByText('其他技术活动已折叠')).toBeInTheDocument();
-    expect(screen.queryByText('工具 exec_command')).not.toBeInTheDocument();
+    // drawer 默认显示 messages tab，messages 已加载
+    await waitFor(() => {
+      expect(loaders.loadConversationMessages).toHaveBeenCalled();
+    });
+    // 切到 hits tab 才加载 hits
+    await user.click(within(drawer).getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(within(drawer).getByText(/检测到破坏性操作/)).toBeInTheDocument();
+    });
+    expect(within(drawer).getByText('本页已折叠技术活动')).toBeInTheDocument();
+    expect(within(drawer).queryByText('工具 exec_command')).not.toBeInTheDocument();
     await user.click(screen.getByLabelText('关闭会话详情'));
     await user.click(screen.getByRole('row', { name: /请检查观测总览/ }));
     expect((await screen.findAllByText('已经定位信号聚合过宽')).length).toBeGreaterThan(0);
@@ -222,6 +254,7 @@ describe('ConversationQueryPage', () => {
         loadConversationForFact={async () => detail}
         loadConversations={async () => response}
         onBack={onBack}
+        {...makeLoaders()}
       />
     );
 

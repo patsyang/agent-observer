@@ -1927,6 +1927,78 @@ textarea {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.drawer-header-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.drawer-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid #e4e4e7;
+  margin: 0 0 12px;
+}
+
+.tab-button {
+  background: transparent;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 8px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #71717a;
+}
+
+.tab-button.active {
+  color: #18181b;
+  border-bottom-color: #2563eb;
+  font-weight: 600;
+}
+
+.tab-filter {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.tab-filter button {
+  background: transparent;
+  border: 1px solid #e4e4e7;
+  border-radius: 12px;
+  padding: 3px 12px;
+  font-size: 12px;
+  cursor: pointer;
+  color: #52525b;
+}
+
+.tab-filter button.active {
+  background: #2563eb;
+  color: #ffffff;
+  border-color: #2563eb;
+}
+
+.load-more-button {
+  display: block;
+  width: 100%;
+  margin-top: 12px;
+  padding: 8px;
+  background: #f4f4f5;
+  border: 1px solid #e4e4e7;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  color: #52525b;
+}
+
+.load-more-button:hover {
+  background: #e4e4e7;
+}
+
+.technical-hits-list {
+  margin-top: 8px;
+}
+
 .conversation-message-list,
 .conversation-hit-list {
   display: grid;

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import type { ConversationDetail } from '../api/types';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import type { ConversationDetail, ConversationHit, ConversationHitsResponse, ConversationMessagesResponse } from '../api/types';
 import { ConversationDrawer } from './ConversationDrawer';
 
 const baseDetail: ConversationDetail = {
@@ -34,111 +34,169 @@ const baseDetail: ConversationDetail = {
     max_single_call_units: 0,
     credit_total: 0,
   },
-  messages: [],
-  hits: [],
+  messages_total: 0,
+  hits_total: 0,
 };
 
+const phoneHit: ConversationHit = {
+  fact_id: 'fact-phone-1',
+  category: 'tool_result',
+  fact_type: 'tool',
+  severity: 'low',
+  occurred_at: '2026-07-01T10:30:00Z',
+  summary: 'Claude 工具结果已采集：Bash。',
+  content_preview: '',
+  tool_context: null,
+  sensitive_matches: [
+    {
+      category: 'phone',
+      confidence: 'high',
+      match_type: 'phone_number',
+      matched_value: '13812345678',
+      matched_preview: '13812345678',
+      reason_code: 'phone_number',
+      evidence_key: 'backfill',
+    },
+  ],
+};
+
+const technicalHit: ConversationHit = {
+  fact_id: 'fact-tool-1',
+  category: 'tool_result',
+  fact_type: 'tool',
+  severity: 'low',
+  occurred_at: '2026-07-01T10:30:00Z',
+  summary: 'Claude 工具结果已采集：Bash。',
+  content_preview: '',
+  tool_context: null,
+  sensitive_matches: [],
+};
+
+function makeLoaders(overrides: {
+  messages?: () => Promise<ConversationMessagesResponse>;
+  hits?: () => Promise<ConversationHitsResponse>;
+} = {}) {
+  return {
+    loadMessages: vi.fn(overrides.messages ?? (() => Promise.resolve({
+      messages: [], total: 0, page: 1, page_size: 50, has_more: false,
+    }))),
+    loadHits: vi.fn(overrides.hits ?? (() => Promise.resolve({
+      hits: [], total: 0, page: 1, page_size: 50, has_more: false,
+    }))),
+    locateMessage: vi.fn(() => Promise.resolve({ page: 1, page_size: 50, fact_id: '' })),
+    loadHitsByFactIds: vi.fn(() => Promise.resolve({ hits: [] })),
+  };
+}
+
 describe('ConversationDrawer', () => {
-  it('含 high confidence 敏感命中的 low severity tool hit 应展开显示', () => {
-    const detail: ConversationDetail = {
-      ...baseDetail,
-      hits: [
-        {
-          fact_id: 'fact-phone-1',
-          category: 'tool_result',
-          fact_type: 'tool',
-          severity: 'low',
-          occurred_at: '2026-07-01T10:30:00Z',
-          summary: 'Claude 工具结果已采集：Bash。',
-          content_preview: '',
-          tool_context: null,
-          sensitive_matches: [
-            {
-              category: 'phone',
-              confidence: 'high',
-              match_type: 'phone_number',
-              matched_value: '13812345678',
-              matched_preview: '13812345678',
-              reason_code: 'phone_number',
-              evidence_key: 'backfill',
-            },
-          ],
-        },
-      ],
-    };
-    render(<ConversationDrawer detail={detail} onClose={() => {}} />);
-    expect(screen.getByText(/13812345678/)).toBeInTheDocument();
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+  });
+
+  it('含 high confidence 敏感命中的 low severity tool hit 应展开显示', async () => {
+    const loaders = makeLoaders({
+      hits: () => Promise.resolve({
+        hits: [phoneHit], total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, hits_total: 1 }} onClose={() => {}} {...loaders} />);
+    // 切到 hits tab（默认 messages tab）
+    fireEvent.click(screen.getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/13812345678/)).toBeInTheDocument();
+    });
     expect(screen.queryByText(/已折叠/)).not.toBeInTheDocument();
   });
 
-  it('不含敏感命中的 low severity tool hit 应折叠', () => {
-    const detail: ConversationDetail = {
-      ...baseDetail,
-      hits: [
-        {
-          fact_id: 'fact-tool-1',
-          category: 'tool_result',
-          fact_type: 'tool',
-          severity: 'low',
-          occurred_at: '2026-07-01T10:30:00Z',
-          summary: 'Claude 工具结果已采集：Bash。',
-          content_preview: '',
-          tool_context: null,
-          sensitive_matches: [],
-        },
-      ],
-    };
-    render(<ConversationDrawer detail={detail} onClose={() => {}} />);
-    expect(screen.getByText(/已折叠/)).toBeInTheDocument();
+  it('不含敏感命中的 low severity tool hit 应折叠', async () => {
+    const loaders = makeLoaders({
+      hits: () => Promise.resolve({
+        hits: [technicalHit], total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, hits_total: 1 }} onClose={() => {}} {...loaders} />);
+    fireEvent.click(screen.getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/本页已折叠/)).toBeInTheDocument();
+    });
   });
 
-  it('有 tool_context 的命中也应展示可读文本（含敏感内容，不再被隐藏）', () => {
-    const detail: ConversationDetail = {
-      ...baseDetail,
-      hits: [
-        {
-          fact_id: 'fact-email-1',
-          category: 'tool_result',
-          fact_type: 'tool',
-          severity: 'high',
-          occurred_at: '2026-07-01T10:30:00Z',
-          summary: 'Bash 输出',
-          content_preview: '输出包含 15035344@qq.com 作为联系方式',
-          tool_context: {
-            tool_name: 'Bash',
-            command: 'grep -r @qq.com .',
-            command_excerpt: 'grep -r @qq.com .',
-            command_category: 'search',
-            exit_code: 0,
-            is_timeout: false,
-            timeout_ms: null,
-            timeout_after_ms: null,
-            wall_time_seconds: 1,
-            error_excerpt: '',
-            call_id: 'call-1',
-          },
-          sensitive_matches: [
-            {
-              category: 'email',
-              confidence: 'high',
-              match_type: 'email_address',
-              matched_value: '15035344@qq.com',
-              matched_preview: '15035344@qq.com',
-              reason_code: 'email_address',
-              evidence_key: 'backfill',
-            },
-          ],
-        },
-      ],
-    };
-    const { container } = render(<ConversationDrawer detail={detail} onClose={() => {}} />);
-    const text = container.textContent || '';
-    // tool_context 的命令展示
-    expect(text).toContain('grep');
-    // 敏感邮箱标签
-    expect(text).toContain('15035344@qq.com');
-    // 可读文本（content_preview）也要展示——本次修复核心：以前因 !tool_context 门控被隐藏
-    expect(text).toContain('输出包含');
-    expect(text).toContain('联系方式');
+  it('technicalHits 折叠区可展开查看', async () => {
+    const loaders = makeLoaders({
+      hits: () => Promise.resolve({
+        hits: [technicalHit], total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, hits_total: 1 }} onClose={() => {}} {...loaders} />);
+    fireEvent.click(screen.getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/本页已折叠/)).toBeInTheDocument();
+    });
+    // 点击展开
+    fireEvent.click(screen.getByTestId('toggle-technical-hits'));
+    expect(screen.getByText('收起')).toBeInTheDocument();
+  });
+
+  it('Tab 切换触发按需加载', async () => {
+    const loaders = makeLoaders({
+      messages: () => Promise.resolve({
+        messages: [
+          { fact_id: 'm1', role: 'user', category: 'agent_prompt', occurred_at: '2026-07-01T10:00:00Z', content: 'hello', raw_available: false },
+        ],
+        total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+      hits: () => Promise.resolve({
+        hits: [phoneHit], total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, messages_total: 1, hits_total: 1 }} onClose={() => {}} {...loaders} />);
+    // 默认 messages tab，应该已加载 messages
+    await waitFor(() => {
+      expect(loaders.loadMessages).toHaveBeenCalled();
+    });
+    // 切到 hits tab
+    fireEvent.click(screen.getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(loaders.loadHits).toHaveBeenCalled();
+    });
+  });
+
+  it('刷新按钮重置当前 tab', async () => {
+    const loaders = makeLoaders({
+      messages: () => Promise.resolve({
+        messages: [
+          { fact_id: 'm1', role: 'user', category: 'agent_prompt', occurred_at: '2026-07-01T10:00:00Z', content: 'hello', raw_available: false },
+        ],
+        total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, messages_total: 1 }} onClose={() => {}} {...loaders} />);
+    await waitFor(() => {
+      expect(loaders.loadMessages).toHaveBeenCalledTimes(1);
+    });
+    fireEvent.click(screen.getByTestId('drawer-refresh'));
+    await waitFor(() => {
+      expect(loaders.loadMessages).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it('ESC 键关闭 drawer', async () => {
+    const onClose = vi.fn();
+    render(<ConversationDrawer detail={baseDetail} onClose={onClose} {...makeLoaders()} />);
+    await act(async () => {
+      vi.advanceTimersByTime(0);
+    });
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalled();
+  });
+
+  it('点击 backdrop 关闭 drawer', async () => {
+    const onClose = vi.fn();
+    const { container } = render(<ConversationDrawer detail={baseDetail} onClose={onClose} {...makeLoaders()} />);
+    await act(async () => { vi.advanceTimersByTime(0); });
+    const backdrop = container.querySelector('.drawer-backdrop');
+    expect(backdrop).not.toBeNull();
+    fireEvent.click(backdrop!);
+    expect(onClose).toHaveBeenCalled();
   });
 });

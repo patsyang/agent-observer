@@ -7,7 +7,15 @@ from app.collectors.service import (
     register_collector,
     update_collector_display_name,
 )
-from app.conversations.service import get_conversation_for_fact, get_conversation_query, query_conversations
+from app.conversations.service import (
+    get_conversation_for_fact,
+    get_conversation_query,
+    locate_conversation_message,
+    query_conversation_hits,
+    query_conversation_hits_by_fact_ids,
+    query_conversation_messages,
+    query_conversations,
+)
 from app.dashboard.service import get_dashboard_summary
 from app.db.connection import connect
 from app.evidence_enrichment.service import (
@@ -145,6 +153,40 @@ def register_conversation_routes(app, http_exception) -> None:
                 return get_conversation_for_fact(conn, fact_id)
             except LookupError as exc:
                 raise http_exception(status_code=404, detail="conversation not found") from exc
+
+    @app.get("/api/conversations/{conversation_ref}/messages")
+    def api_conversation_messages(
+        conversation_ref: str, role: str | None = None, page: int = 1, page_size: int = 50
+    ):
+        with connect() as conn:
+            return query_conversation_messages(
+                conn, conversation_ref, role=role, page=page, page_size=page_size
+            )
+
+    @app.get("/api/conversations/{conversation_ref}/hits")
+    def api_conversation_hits(
+        conversation_ref: str, category: str | None = None, page: int = 1, page_size: int = 50
+    ):
+        with connect() as conn:
+            return query_conversation_hits(
+                conn, conversation_ref, category=category, page=page, page_size=page_size
+            )
+
+    @app.get("/api/conversations/{conversation_ref}/messages/locate")
+    def api_locate_conversation_message(
+        conversation_ref: str, fact_id: str, page_size: int = 50
+    ):
+        with connect() as conn:
+            try:
+                return locate_conversation_message(conn, conversation_ref, fact_id, page_size)
+            except LookupError as exc:
+                raise http_exception(status_code=404, detail="fact not found") from exc
+
+    @app.get("/api/conversations/{conversation_ref}/hits/by-fact-ids")
+    def api_hits_by_fact_ids(conversation_ref: str, fact_ids: str):
+        ids = [s.strip() for s in fact_ids.split(",") if s.strip()]
+        with connect() as conn:
+            return query_conversation_hits_by_fact_ids(conn, conversation_ref, ids)
 
     @app.get("/api/conversations/{conversation_ref}")
     def api_conversation_detail(conversation_ref: str):

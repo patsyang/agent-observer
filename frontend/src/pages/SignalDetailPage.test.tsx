@@ -2,7 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 
-import type { BehaviorSignalDetail } from '../api/types';
+import type { BehaviorSignalDetail, ConversationDetail } from '../api/types';
 import { SignalDetailPage } from './SignalDetailPage';
 
 const detail: BehaviorSignalDetail = {
@@ -82,6 +82,48 @@ const detail: BehaviorSignalDetail = {
   occurrence_count: 22
 };
 
+const conversationDetail: ConversationDetail = {
+  conversation_ref: 'conversation-1',
+  session_ref: 'session-1',
+  session_title: '重构信号详情页',
+  agent_type: 'codex',
+  source_id: 'codex-local',
+  source_kind: 'codex_local',
+  workspace: detail.workspace_refs[0],
+  started_at: '2026-06-21T09:00:00Z',
+  last_event_at: '2026-06-21T10:00:00Z',
+  prompt_preview: '检查信号详情页',
+  response_preview: '已定位命中内容',
+  event_count: 2,
+  hit_count: 1,
+  token_usage: { effective_units: 120, cached_input_units: 40, input_token_units: 100, cache_hit_rate: 0.4 },
+  messages_total: 0,
+  hits_total: 1,
+};
+
+const highlightedHits = [{
+  fact_id: 'fact-1',
+  category: 'tool_execution_failure',
+  fact_type: 'error',
+  severity: 'medium',
+  occurred_at: '2026-06-21T10:00:00Z',
+  summary: '工具执行失败：cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，exit_code=1。',
+  content_preview: '命令 cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，退出码 1',
+  tool_context: {
+    tool_name: 'exec_command',
+    command: 'cmd /c apps\\agent-observer\\scripts\\start-backend.cmd',
+    command_excerpt: 'cmd /c apps\\agent-observer\\scripts\\start-backend.cmd',
+    command_category: 'shell',
+    exit_code: 1,
+    is_timeout: false,
+    timeout_ms: null,
+    timeout_after_ms: null,
+    wall_time_seconds: null,
+    error_excerpt: 'Port 8765 is already in use.',
+    call_id: ''
+  }
+}];
+
 describe('SignalDetailPage', () => {
   it('renders grouped evidence instead of a flat hit table', async () => {
     const user = userEvent.setup();
@@ -89,45 +131,12 @@ describe('SignalDetailPage', () => {
       <SignalDetailPage
         signalId="signal-001"
         loadSignalDetail={async () => detail}
-        loadConversationDetail={async () => ({
-          conversation_ref: 'conversation-1',
-          session_ref: 'session-1',
-          session_title: '重构信号详情页',
-          agent_type: 'codex',
-          source_id: 'codex-local',
-          source_kind: 'codex_local',
-          workspace: detail.workspace_refs[0],
-          started_at: '2026-06-21T09:00:00Z',
-          last_event_at: '2026-06-21T10:00:00Z',
-          prompt_preview: '检查信号详情页',
-          response_preview: '已定位命中内容',
-          event_count: 2,
-          hit_count: 1,
-          token_usage: { effective_units: 120, cached_input_units: 40, input_token_units: 100, cache_hit_rate: 0.4 },
-          messages: [],
-          hits: [{
-            fact_id: 'fact-1',
-            category: 'tool_execution_failure',
-            fact_type: 'error',
-            severity: 'medium',
-            occurred_at: '2026-06-21T10:00:00Z',
-            summary: '工具执行失败：cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，exit_code=1。',
-            content_preview: '命令 cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，退出码 1',
-            tool_context: {
-              tool_name: 'exec_command',
-              command: 'cmd /c apps\\agent-observer\\scripts\\start-backend.cmd',
-              command_excerpt: 'cmd /c apps\\agent-observer\\scripts\\start-backend.cmd',
-              command_category: 'shell',
-              exit_code: 1,
-              is_timeout: false,
-              timeout_ms: null,
-              timeout_after_ms: null,
-              wall_time_seconds: null,
-              error_excerpt: 'Port 8765 is already in use.',
-              call_id: ''
-            }
-          }]
-        })}
+        loadConversationDetail={async () => conversationDetail}
+        loadConversationForFact={async () => conversationDetail}
+        loadConversationMessages={async () => ({ messages: [], total: 0, page: 1, page_size: 50, has_more: false })}
+        loadConversationHits={async () => ({ hits: [], total: 0, page: 1, page_size: 50, has_more: false })}
+        locateConversationMessage={async () => ({ page: 1, page_size: 50, fact_id: 'fact-1' })}
+        loadConversationHitsByFactIds={async () => ({ hits: highlightedHits })}
         loadEnrichmentAvailability={async () => ({ capabilities: [] })}
         markRead={async () => detail}
         handleSignal={async () => detail}
@@ -152,7 +161,7 @@ describe('SignalDetailPage', () => {
 
     await user.click(screen.getByRole('button', { name: /重构信号详情页/ }));
     const drawer = await screen.findByLabelText('会话详情');
-    expect(within(drawer).getByText('当前信号命中')).toBeInTheDocument();
+    expect(within(drawer).getByText(/当前信号命中/)).toBeInTheDocument();
     expect(within(drawer).getByText('命令：cmd /c apps\\agent-observer\\scripts\\start-backend.cmd')).toBeInTheDocument();
     expect(within(drawer).getByText('错误摘要：Port 8765 is already in use.')).toBeInTheDocument();
   });

@@ -8,9 +8,6 @@ import {
   fetchDashboardSummary,
   fetchClientPackageConfig,
   fetchCollectors,
-  fetchConversationDetail,
-  fetchConversationForFact,
-  fetchConversations,
   fetchEnrichmentAvailability,
   fetchPolicy,
   fetchProcessingStatus,
@@ -25,6 +22,15 @@ import {
   requestEnrichment,
   updatePolicy
 } from './api/client';
+import {
+  fetchConversationDetail,
+  fetchConversationForFact,
+  fetchConversationHits,
+  fetchConversationHitsByFactIds,
+  fetchConversationMessages,
+  fetchConversations,
+  locateConversationMessage,
+} from './api/conversations';
 import { AccessConfigDrawer } from './components/AccessConfigDrawer';
 import { CollectorsPage } from './pages/CollectorsPage';
 import { ConversationQueryPage } from './pages/ConversationQueryPage';
@@ -116,6 +122,11 @@ export function App() {
             signalId={selectedSignalId}
             loadSignalDetail={fetchSignalDetail}
             loadConversationDetail={fetchConversationDetail}
+            loadConversationForFact={fetchConversationForFact}
+            loadConversationMessages={fetchConversationMessages}
+            loadConversationHits={fetchConversationHits}
+            locateConversationMessage={locateConversationMessage}
+            loadConversationHitsByFactIds={fetchConversationHitsByFactIds}
             loadEnrichmentAvailability={fetchEnrichmentAvailability}
             markRead={markSignalRead}
             handleSignal={handleSignal}
@@ -136,6 +147,10 @@ export function App() {
             loadConversationDetail={fetchConversationDetail}
             loadConversationForFact={fetchConversationForFact}
             loadConversations={fetchConversations}
+            loadConversationMessages={fetchConversationMessages}
+            loadConversationHits={fetchConversationHits}
+            locateConversationMessage={locateConversationMessage}
+            loadConversationHitsByFactIds={fetchConversationHitsByFactIds}
             onBack={returnSignalId ? () => {
               setSelectedFactId(null);
               setSelectedSignalId(returnSignalId);

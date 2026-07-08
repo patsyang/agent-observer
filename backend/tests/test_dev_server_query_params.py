@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from app.dev_server_handlers import _conversations_query_options, _path_part, _signals_query_options, _summary_query_options
+from app.dev_server_handlers import _conversations_query_options, _path_part, _query_int, _signals_query_options, _summary_query_options
 
 
 def test_dev_server_forwards_signal_window_filters():
@@ -77,4 +77,24 @@ def test_dev_server_routes_summary_before_signal_id_catchall(tmp_path, monkeypat
     handle_get(taxonomy)
     assert taxonomy.status == 200
     assert "kind_to_family" in taxonomy.payload
+
+
+def test_query_int_returns_default_for_non_numeric():
+    """非数字 page/page_size 输入回退为默认值，不抛异常。"""
+    from urllib.parse import parse_qs, urlparse
+
+    query = parse_qs(urlparse("/api/conversations?page=abc&page_size=xyz").query)
+    assert _query_int(query, "page", 1) == 1
+    assert _query_int(query, "page_size", 50) == 50
+
+    query_valid = parse_qs(urlparse("/api/conversations?page=3&page_size=25").query)
+    assert _query_int(query_valid, "page", 1) == 3
+    assert _query_int(query_valid, "page_size", 50) == 25
+
+
+def test_conversations_query_options_non_numeric_page_uses_default():
+    """_conversations_query_options 在 page/page_size 非数字时使用默认值。"""
+    options = _conversations_query_options("/api/conversations?page=abc&page_size=xyz")
+    assert options["page"] == 1
+    assert options["page_size"] == 20
 

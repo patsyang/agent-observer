@@ -11,7 +11,15 @@ from app.collectors.service import (
     register_collector,
     update_collector_display_name,
 )
-from app.conversations.service import get_conversation_for_fact, get_conversation_query, query_conversations
+from app.conversations.service import (
+    get_conversation_for_fact,
+    get_conversation_query,
+    locate_conversation_message,
+    query_conversation_hits,
+    query_conversation_hits_by_fact_ids,
+    query_conversation_messages,
+    query_conversations,
+)
 from app.dashboard.service import get_dashboard_summary
 from app.db.connection import connect
 from app.evidence_enrichment.service import (
@@ -125,6 +133,47 @@ def handle_get(handler) -> None:
                     return handler._json(200, get_conversation_for_fact(conn, _path_part(path, 4)))
                 except LookupError:
                     return handler._json(404, {"error": "conversation not found"})
+            if path.startswith("/api/conversations/") and path.endswith("/messages/locate"):
+                # /api/conversations/{ref}/messages/locate?fact_id=xxx&page_size=50
+                ref = _path_part(path, 3)
+                query = parse_qs(urlparse(handler.path).query)
+                fact_id = _query_one(query, "fact_id", "") or ""
+                page_size = _query_int(query, "page_size", 50)
+                try:
+                    return handler._json(200, locate_conversation_message(conn, ref, fact_id, page_size))
+                except LookupError:
+                    return handler._json(404, {"error": "fact not found"})
+            if path.startswith("/api/conversations/") and path.endswith("/hits/by-fact-ids"):
+                # /api/conversations/{ref}/hits/by-fact-ids?fact_ids=f1,f2
+                ref = _path_part(path, 3)
+                query = parse_qs(urlparse(handler.path).query)
+                fact_ids_str = _query_one(query, "fact_ids", "") or ""
+                ids = [s.strip() for s in fact_ids_str.split(",") if s.strip()]
+                return handler._json(200, query_conversation_hits_by_fact_ids(conn, ref, ids))
+            if path.startswith("/api/conversations/") and path.endswith("/messages"):
+                # /api/conversations/{ref}/messages?role=&page=&page_size=
+                ref = _path_part(path, 3)
+                query = parse_qs(urlparse(handler.path).query)
+                role = _query_one(query, "role", None)
+                if role == "":
+                    role = None
+                page = _query_int(query, "page", 1)
+                page_size = _query_int(query, "page_size", 50)
+                return handler._json(200, query_conversation_messages(
+                    conn, ref, role=role, page=page, page_size=page_size,
+                ))
+            if path.startswith("/api/conversations/") and path.endswith("/hits"):
+                # /api/conversations/{ref}/hits?category=&page=&page_size=
+                ref = _path_part(path, 3)
+                query = parse_qs(urlparse(handler.path).query)
+                category = _query_one(query, "category", None)
+                if category == "":
+                    category = None
+                page = _query_int(query, "page", 1)
+                page_size = _query_int(query, "page_size", 50)
+                return handler._json(200, query_conversation_hits(
+                    conn, ref, category=category, page=page, page_size=page_size,
+                ))
             if path.startswith("/api/conversations/"):
                 try:
                     return handler._json(200, get_conversation_query(conn, _path_part(path, 3)))

@@ -67,7 +67,34 @@ export interface ConversationHit {
 }
 
 export interface ConversationDetail extends ConversationSummary {
+  messages_total: number;
+  hits_total: number;
+  focus_fact_id?: string;
+}
+
+export interface ConversationMessagesResponse {
   messages: ConversationMessage[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+export interface ConversationHitsResponse {
+  hits: ConversationHit[];
+  total: number;
+  page: number;
+  page_size: number;
+  has_more: boolean;
+}
+
+export interface MessageLocateResponse {
+  page: number;
+  page_size: number;
+  fact_id: string;
+}
+
+export interface HitsByFactIdsResponse {
   hits: ConversationHit[];
 }
 

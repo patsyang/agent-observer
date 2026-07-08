@@ -6,7 +6,18 @@ import { EnrichmentPanel } from '../components/EnrichmentPanel';
 import { HandleSignalDialog } from '../components/HandleSignalDialog';
 import { SensitiveEvidence } from '../components/SensitiveEvidence';
 import { signalKindLabel } from '../components/signalLabels';
-import type { BehaviorSignalDetail, ConversationDetail, EnrichmentAvailability, EnrichmentJob, HandleSignalPayload, LinkedConversation } from '../api/types';
+import type {
+  BehaviorSignalDetail,
+  ConversationDetail,
+  ConversationHitsResponse,
+  ConversationMessagesResponse,
+  EnrichmentAvailability,
+  EnrichmentJob,
+  HandleSignalPayload,
+  HitsByFactIdsResponse,
+  LinkedConversation,
+  MessageLocateResponse,
+} from '../api/types';
 import { SignalDetailSummary } from './SignalDetailSummary';
 import { SignalLinkedConversations } from './SignalLinkedConversations';
 import { SignalWorkspaceChips } from './SignalWorkspaceChips';
@@ -18,6 +29,11 @@ interface Props {
   signalId: string;
   loadSignalDetail: (signalId: string) => Promise<BehaviorSignalDetail>;
   loadConversationDetail: (conversationRef: string) => Promise<ConversationDetail>;
+  loadConversationForFact: (factId: string) => Promise<ConversationDetail>;
+  loadConversationMessages: (ref: string, role?: string, page?: number) => Promise<ConversationMessagesResponse>;
+  loadConversationHits: (ref: string, category?: string, page?: number) => Promise<ConversationHitsResponse>;
+  locateConversationMessage: (ref: string, factId: string) => Promise<MessageLocateResponse>;
+  loadConversationHitsByFactIds: (ref: string, factIds: string[]) => Promise<HitsByFactIdsResponse>;
   loadEnrichmentAvailability: (signalId: string) => Promise<EnrichmentAvailability>;
   markRead: (signalId: string) => Promise<BehaviorSignalDetail>;
   handleSignal: (signalId: string, payload: HandleSignalPayload) => Promise<BehaviorSignalDetail>;
@@ -35,6 +51,11 @@ type LoadState =
 export function SignalDetailPage({
   signalId,
   loadConversationDetail,
+  loadConversationForFact,
+  loadConversationMessages,
+  loadConversationHits,
+  locateConversationMessage,
+  loadConversationHitsByFactIds,
   loadSignalDetail,
   loadEnrichmentAvailability,
   markRead,
@@ -177,6 +198,10 @@ export function SignalDetailPage({
           highlightFactIds={drawer.hitIds}
           highlightTitle="当前信号命中"
           onClose={() => setDrawer(null)}
+          loadMessages={loadConversationMessages}
+          loadHits={loadConversationHits}
+          locateMessage={locateConversationMessage}
+          loadHitsByFactIds={loadConversationHitsByFactIds}
         />
       )}
     </section>
@@ -199,7 +224,10 @@ export function SignalDetailPage({
     }
     setDrawerError(null);
     try {
-      const detail = await loadConversationDetail(item.conversation_ref);
+      // 优先用 loadConversationForFact 携带 focus_fact_id，drawer 内自动定位目标页
+      const detail = item.fact_id
+        ? await loadConversationForFact(item.fact_id)
+        : await loadConversationDetail(item.conversation_ref);
       setDrawer({ detail, hitIds: item.fact_id ? [item.fact_id] : [] });
     } catch {
       setDrawerError('会话详情加载失败。请稍后重试。');

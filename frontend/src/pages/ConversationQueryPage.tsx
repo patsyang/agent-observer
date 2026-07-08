@@ -1,7 +1,16 @@
 import { useCallback, useEffect, useState } from 'react';
 import { ArrowLeft, Search } from 'lucide-react';
 
-import type { ConversationDetail, ConversationSummary, ConversationsResponse, TimeWindowParam } from '../api/types';
+import type {
+  ConversationDetail,
+  ConversationHitsResponse,
+  ConversationMessagesResponse,
+  ConversationSummary,
+  ConversationsResponse,
+  HitsByFactIdsResponse,
+  MessageLocateResponse,
+  TimeWindowParam,
+} from '../api/types';
 import { quickTimeOptions } from '../components/timeRangeOptions';
 import { ConversationDrawer } from './ConversationDrawer';
 import { ConversationTable } from './ConversationTable';
@@ -29,6 +38,10 @@ export function ConversationQueryPage({
   loadConversationDetail,
   loadConversationForFact,
   loadConversations,
+  loadConversationMessages,
+  loadConversationHits,
+  locateConversationMessage,
+  loadConversationHitsByFactIds,
   onBack,
   backLabel = '返回',
 }: {
@@ -36,6 +49,10 @@ export function ConversationQueryPage({
   loadConversationDetail: (conversationRef: string) => Promise<ConversationDetail>;
   loadConversationForFact: (factId: string) => Promise<ConversationDetail>;
   loadConversations: (filters: Filters) => Promise<ConversationsResponse>;
+  loadConversationMessages: (ref: string, role?: string, page?: number) => Promise<ConversationMessagesResponse>;
+  loadConversationHits: (ref: string, category?: string, page?: number) => Promise<ConversationHitsResponse>;
+  locateConversationMessage: (ref: string, factId: string) => Promise<MessageLocateResponse>;
+  loadConversationHitsByFactIds: (ref: string, factIds: string[]) => Promise<HitsByFactIdsResponse>;
   onBack?: () => void;
   backLabel?: string;
 }) {
@@ -185,7 +202,16 @@ export function ConversationQueryPage({
       )}
       {detailState === 'loading' && <p className="result-note">正在加载会话详情</p>}
       {detailState === 'error' && <p className="result-note">会话详情不可用。</p>}
-      {detail && <ConversationDrawer detail={detail} onClose={() => setDetail(null)} />}
+      {detail && (
+        <ConversationDrawer
+          detail={detail}
+          onClose={() => setDetail(null)}
+          loadMessages={loadConversationMessages}
+          loadHits={loadConversationHits}
+          locateMessage={locateConversationMessage}
+          loadHitsByFactIds={loadConversationHitsByFactIds}
+        />
+      )}
     </section>
   );
 }

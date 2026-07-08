@@ -1,11 +1,13 @@
 """会话查询：只读物化层（conversations / conversation_messages / conversation_hits / FTS）。
 
 写入侧见 ``app.conversations.materialize``（ingest 事务内同步维护）。本模块不再做任何
-读时聚合、N+1 关联或运行时 JSON 解析——列表是物化表的索引分页，详情是三条索引扫描，
-文本搜索走 FTS5 倒排。
+读时聚合、N+1 关联或运行时 JSON 解析——列表是物化表的索引分页，详情概要 + 内容分页
+按需加载，文本搜索走 FTS5 倒排。
 
-对外三个函数签名不变（routes.py / dev_server_handlers.py 依赖）：
-``query_conversations`` / ``get_conversation_query`` / ``get_conversation_for_fact``。
+对外函数（routes.py / dev_server_handlers.py 依赖）：
+``query_conversations`` / ``get_conversation_query`` / ``get_conversation_for_fact``
+``query_conversation_messages`` / ``query_conversation_hits``
+``locate_conversation_message`` / ``query_conversation_hits_by_fact_ids``
 """
 
 from __future__ import annotations
@@ -204,18 +206,26 @@ def _empty_response(
 # ---------------------------------------------------------------------------
 
 def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> dict:
-    """单个会话详情：conversations 行 + messages + hits。"""
+    """单个会话概要：conversations 行 + messages/hits 总数。内容按需加载（见
+    ``query_conversation_messages`` / ``query_conversation_hits``）。"""
     row = conn.execute(
         "select * from conversations where conversation_ref = ?", (conversation_ref,)
     ).fetchone()
     if row is None:
         raise LookupError(conversation_ref)
-    messages = _fetch_all_messages(conn, conversation_ref)
-    hits = _fetch_all_hits(conn, conversation_ref)
+    messages_total = conn.execute(
+        "select count(*) from conversation_messages "
+        "where conversation_ref = ? and coalesce(content, '') != ''",
+        (conversation_ref,),
+    ).fetchone()[0]
+    hits_total = conn.execute(
+        "select count(*) from conversation_hits where conversation_ref = ?",
+        (conversation_ref,),
+    ).fetchone()[0]
     result = {
         **_summary_row(row),
-        "messages": [_message_dict(m) for m in messages if m["content"]],
-        "hits": [_hit_dict(h) for h in hits],
+        "messages_total": messages_total,
+        "hits_total": hits_total,
     }
     # session_title 兜底：物化表里为空时，从 observed_facts 的 source_refs_json
     # 取 session_title（和 linked_conversations / SignalLinkedConversations 同口径）。
@@ -241,14 +251,16 @@ def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> d
 
 
 def get_conversation_for_fact(conn: sqlite3.Connection, fact_id: str) -> dict:
-    """从一个 fact 定位其会话（优先取物化行的 conversation_ref，退化回 observed_facts 的 base_ref）。"""
+    """从一个 fact 定位其会话概要 + focus_fact_id（前端用于定位目标消息所在页）。"""
     fact = conn.execute(
         "select * from observed_facts where fact_id = ?", (fact_id,)
     ).fetchone()
     if fact is None:
         raise LookupError(fact_id)
     ref = _conversation_ref_for_fact(conn, fact_id) or _fallback_conversation_ref(fact)
-    return get_conversation_query(conn, ref)
+    detail = get_conversation_query(conn, ref)
+    detail["focus_fact_id"] = fact_id
+    return detail
 
 
 def _conversation_ref_for_fact(conn: sqlite3.Connection, fact_id: str) -> str | None:
@@ -266,20 +278,125 @@ def _fallback_conversation_ref(fact: sqlite3.Row) -> str:
     return fact["conversation_ref"] or fact["session_ref"] or fact["fact_id"]
 
 
-def _fetch_all_messages(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
-    return conn.execute(
-        f"select {_MESSAGE_COLUMNS} from conversation_messages "
-        "where conversation_ref = ? order by occurred_at, fact_id",
-        (conversation_ref,),
+# ---------------------------------------------------------------------------
+# 内容分页查询（按需加载）
+# ---------------------------------------------------------------------------
+
+def query_conversation_messages(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    *,
+    role: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """会话消息分页（倒序）。role 仅接受 'user'/'assistant'，其他值忽略筛选。
+    空 content 的行在 SQL 层过滤，保证 total 与返回条数一致。"""
+    current_page = max(1, int(page or 1))
+    limit = max(1, min(int(page_size or 50), 200))
+    where = "conversation_ref = ? and coalesce(content, '') != ''"
+    params: list = [conversation_ref]
+    if role in ("user", "assistant"):
+        where += " and role = ?"
+        params.append(role)
+    total = conn.execute(
+        f"select count(*) from conversation_messages where {where}", params
+    ).fetchone()[0]
+    offset = (current_page - 1) * limit
+    rows = conn.execute(
+        f"select {_MESSAGE_COLUMNS} from conversation_messages where {where} "
+        "order by occurred_at desc, fact_id desc limit ? offset ?",
+        (*params, limit, offset),
     ).fetchall()
+    return {
+        "messages": [_message_dict(r) for r in rows],
+        "total": total,
+        "page": current_page,
+        "page_size": limit,
+        "has_more": offset + len(rows) < total,
+    }
 
 
-def _fetch_all_hits(conn: sqlite3.Connection, conversation_ref: str) -> list[sqlite3.Row]:
-    return conn.execute(
+def query_conversation_hits(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    *,
+    category: str | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """会话命中分页（倒序）。category 为空字符串视为不筛选。"""
+    current_page = max(1, int(page or 1))
+    limit = max(1, min(int(page_size or 50), 200))
+    where = "conversation_ref = ?"
+    params: list = [conversation_ref]
+    if category and category.strip():
+        where += " and category = ?"
+        params.append(category.strip())
+    total = conn.execute(
+        f"select count(*) from conversation_hits where {where}", params
+    ).fetchone()[0]
+    offset = (current_page - 1) * limit
+    rows = conn.execute(
+        f"select {_HIT_COLUMNS} from conversation_hits where {where} "
+        "order by occurred_at desc, fact_id desc limit ? offset ?",
+        (*params, limit, offset),
+    ).fetchall()
+    return {
+        "hits": [_hit_dict(r) for r in rows],
+        "total": total,
+        "page": current_page,
+        "page_size": limit,
+        "has_more": offset + len(rows) < total,
+    }
+
+
+def locate_conversation_message(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    fact_id: str,
+    page_size: int = 50,
+) -> dict:
+    """计算 fact_id 在倒序分页中的页号，用于从信号跳转时直接定位到目标消息所在页。
+    空 content 的行不在分页结果中，因此 rank 也排除空 content。"""
+    limit = max(1, min(int(page_size or 50), 200))
+    target = conn.execute(
+        "select occurred_at, fact_id from conversation_messages "
+        "where conversation_ref = ? and fact_id = ? "
+        "  and coalesce(content, '') != ''",
+        (conversation_ref, fact_id),
+    ).fetchone()
+    if target is None:
+        raise LookupError(fact_id)
+    # 倒序：比 target 更新的消息排前面
+    rank = conn.execute(
+        "select count(*) from conversation_messages "
+        "where conversation_ref = ? "
+        "  and coalesce(content, '') != ''"
+        "  and (occurred_at > ? or (occurred_at = ? and fact_id > ?))",
+        (conversation_ref, target["occurred_at"], target["occurred_at"], target["fact_id"]),
+    ).fetchone()[0]
+    page = (rank // limit) + 1
+    return {"page": page, "page_size": limit, "fact_id": fact_id}
+
+
+def query_conversation_hits_by_fact_ids(
+    conn: sqlite3.Connection,
+    conversation_ref: str,
+    fact_ids: list[str],
+) -> dict:
+    """按 fact_id 列表批量查询 hits，用于信号跳转时高亮显示“当前信号命中”。
+    不分页，因为 hitIds 数量通常 1-10 个。"""
+    if not fact_ids:
+        return {"hits": []}
+    placeholders = ",".join("?" * len(fact_ids))
+    rows = conn.execute(
         f"select {_HIT_COLUMNS} from conversation_hits "
-        "where conversation_ref = ? order by occurred_at, fact_id",
-        (conversation_ref,),
+        f"where conversation_ref = ? and fact_id in ({placeholders}) "
+        "order by occurred_at desc, fact_id desc",
+        (conversation_ref, *fact_ids),
     ).fetchall()
+    return {"hits": [_hit_dict(r) for r in rows]}
 
 
 # ---------------------------------------------------------------------------
