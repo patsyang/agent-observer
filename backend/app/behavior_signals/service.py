@@ -32,7 +32,7 @@ from app.behavior_signals.helpers import (
     path_hint as _path_hint,
     top_directories as _top_directories,
     key_path_label as _key_path_label,
-    high_confidence_sensitive as _high_confidence_sensitive,
+    high_confidence_sensitive_batch as _high_confidence_sensitive_batch,
     object_type_label as _object_type_label,
     failure_group as _failure_group,
     first_text as _first_text,
@@ -85,15 +85,31 @@ def update_signal_scope(
             *_build_change_volume_anomalies(conn, reason, conversation_ref=scope_id),
             *_build_key_file_changes(conn, reason, conversation_ref=scope_id),
         ],
-        "risk": lambda: _build_destructive_operations(conn, reason)
-        if scope_id == "destructive_operation"
-        else _build_sensitive_content_exposures(conn, reason, conversation_ref=scope_id.removeprefix("sensitive_content_exposure:")),
+        "risk": lambda: _risk_builder(conn, reason, scope_id),
     }
     if scope_type not in builders:
         raise ValueError("unsupported_processing_scope")
     signals = [item for item in builders[scope_type]() if item]
     conn.commit()
     return {"reason": reason, "updated": len(signals), "signals": signals}
+
+
+def _risk_builder(conn: sqlite3.Connection, reason: str, scope_id: str) -> list[dict]:
+    """risk 类型任务的分发器：按 scope_id 前缀路由到对应的 builder。
+
+    支持的 scope_id 格式：
+    - "destructive_operation:{conversation_ref}" → 按会话聚合破坏性操作
+    - "sensitive_content_exposure:{conversation_ref}" → 按会话聚合敏感内容暴露
+    - "destructive_operation"（旧格式）→ 返回空列表，避免静默失败
+    """
+    if scope_id.startswith("destructive_operation:"):
+        conv = scope_id.removeprefix("destructive_operation:")
+        return _build_destructive_operations(conn, reason, conversation_ref=conv)
+    if scope_id.startswith("sensitive_content_exposure:"):
+        conv = scope_id.removeprefix("sensitive_content_exposure:")
+        return _build_sensitive_content_exposures(conn, reason, conversation_ref=conv)
+    # 旧格式 scope_id="destructive_operation"（无冒号）→ 不再处理，返回空
+    return []
 
 
 def list_signals(
@@ -425,45 +441,64 @@ def _decision_state(
     return str(decision["decision_state"] or "unread")
 
 
-def _build_destructive_operations(conn: sqlite3.Connection, reason: str) -> list[dict]:
-    facts = _risk_facts(conn, "destructive_operation", None)
+def _build_destructive_operations(
+    conn: sqlite3.Connection,
+    reason: str,
+    conversation_ref: str | None = None,
+) -> list[dict]:
+    """按会话聚合破坏性操作——每个会话一条可结案信号。
+
+    与 sensitive_content_exposure 一致：任务结束 → 不再进新事件 → 稳定 → 可处理。
+    conversation_ref 由 SQL 层过滤，避免全量查 1535 条再在 Python 层过滤。
+    """
+    facts = _risk_facts(conn, "destructive_operation", None, conversation_ref=conversation_ref)
     if not facts:
         return []
-    title = f"破坏性操作出现：{len(facts):,} 次"
-    return [
-        _upsert_signal(
-            conn,
-            signal_key="destructive_operation_attempt",
-            signal_kind="destructive_operation_attempt",
-            title=title,
-            why_it_matters="删除、权限变更、强制清理等操作可能影响工作区完整性，需要确认是否符合用户目标。",
-            severity="high",
-            confidence="high",
-            priority_score=88,
-            facts=facts,
-            affected_scope={"operation_count": len(facts), "conversation_count": len(_conversation_refs(facts))},
-            evidence_groups=[_object_group(conn, "object", "破坏性操作", facts)],
-            suggested_actions=["查看命中会话和命令摘要，确认该操作是否由用户明确要求。"],
-            reason=reason,
+    by_conversation: dict[str, list[sqlite3.Row]] = defaultdict(list)
+    for fact in facts:
+        conv = fact["conversation_ref"] or ""
+        if not conv:
+            continue
+        by_conversation[conv].append(fact)
+    signals: list[dict] = []
+    for conv, group in by_conversation.items():
+        title = f"破坏性操作出现：{len(group):,} 次"
+        signals.append(
+            _upsert_signal(
+                conn,
+                signal_key=f"destructive_operation_attempt:{conv}",
+                signal_kind="destructive_operation_attempt",
+                title=title,
+                why_it_matters="删除、权限变更、强制清理等操作可能影响工作区完整性，需要确认是否符合用户目标。",
+                severity="high",
+                confidence="high",
+                priority_score=88,
+                facts=group,
+                affected_scope={"operation_count": len(group), "conversation_count": 1, "conversation_ref": conv},
+                evidence_groups=[_object_group(conn, "object", "破坏性操作", group)],
+                suggested_actions=["查看命中会话和命令摘要，确认该操作是否由用户明确要求。"],
+                reason=reason,
+            )
         )
-    ]
+    return signals
 
 
 def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str, conversation_ref: str | None = None) -> list[dict]:
-    facts = _risk_facts(conn, "file_change", "workspace_file")
+    facts = _risk_facts(conn, "file_change", "workspace_file", conversation_ref=conversation_ref)
     by_conversation: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for fact in facts:
         if fact["conversation_ref"]:
             by_conversation[fact["conversation_ref"]].append(fact)
     signals = []
+    # 批量加载 projections，消除 N+1 查询
+    all_fact_ids = [f["fact_id"] for f in facts]
+    projection_map = _primary_projections_by_fact_id(conn, all_fact_ids) if all_fact_ids else {}
     for current_conversation_ref, group in by_conversation.items():
-        if conversation_ref is not None and current_conversation_ref != conversation_ref:
-            continue
         paths = []
         additions = 0
         deletions = 0
         for fact in group:
-            projection = _primary_projection(conn, fact["fact_id"])
+            projection = projection_map.get(fact["fact_id"], {})
             changed = projection.get("changed_paths")
             if isinstance(changed, list):
                 paths.extend(str(path).replace("\\", "/") for path in changed)
@@ -488,7 +523,7 @@ def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str, conver
                 priority_score=75,
                 facts=group,
                 affected_scope={"conversation_count": 1, "file_count": len(unique_paths), "additions": additions, "deletions": deletions, "top_directories": _top_directories(paths)},
-                evidence_groups=[_object_group(conn, "conversation", f"会话 {conversation_ref}", group), _directory_group(paths)],
+                evidence_groups=[_object_group(conn, "conversation", f"会话 {current_conversation_ref}", group), _directory_group(paths)],
                 suggested_actions=["打开命中会话，核对用户目标、变更文件 Top 和是否存在越界修改。"],
                 reason=reason,
             )
@@ -498,9 +533,12 @@ def _build_change_volume_anomalies(conn: sqlite3.Connection, reason: str, conver
 
 def _build_key_file_changes(conn: sqlite3.Connection, reason: str, conversation_ref: str | None = None) -> list[dict]:
     target_labels = _key_file_labels_for_conversation(conn, conversation_ref) if conversation_ref else None
+    all_facts = _risk_facts(conn, "file_change", None)
+    # 批量加载 projections，消除 N+1 查询（原 L503 逐条 _primary_projection 是全量慢的根因）
+    projection_map = _primary_projections_by_fact_id(conn, [f["fact_id"] for f in all_facts]) if all_facts else {}
     matched: dict[str, list[sqlite3.Row]] = defaultdict(list)
-    for fact in _risk_facts(conn, "file_change", None):
-        projection = _primary_projection(conn, fact["fact_id"])
+    for fact in all_facts:
+        projection = projection_map.get(fact["fact_id"], {})
         paths = projection.get("changed_paths")
         candidates = paths if isinstance(paths, list) else [_path_hint(conn, fact)]
         for path in candidates:
@@ -541,10 +579,11 @@ def _build_key_file_changes(conn: sqlite3.Connection, reason: str, conversation_
 
 def _key_file_labels_for_conversation(conn: sqlite3.Connection, conversation_ref: str) -> set[str]:
     labels: set[str] = set()
-    for fact in _risk_facts(conn, "file_change", None):
-        if fact["conversation_ref"] != conversation_ref:
-            continue
-        projection = _primary_projection(conn, fact["fact_id"])
+    # SQL 层按 conversation_ref 过滤，避免全量查 14637 条再在 Python 层过滤
+    facts = _risk_facts(conn, "file_change", None, conversation_ref=conversation_ref)
+    projection_map = _primary_projections_by_fact_id(conn, [f["fact_id"] for f in facts]) if facts else {}
+    for fact in facts:
+        projection = projection_map.get(fact["fact_id"], {})
         paths = projection.get("changed_paths")
         candidates = paths if isinstance(paths, list) else [_path_hint(conn, fact)]
         for path in candidates:
@@ -559,15 +598,21 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, co
     不再按全局 object_type 聚合（那是永远敞口的大类，无法处理）。
     每个会话里 agent 触碰的所有敏感类型（邮箱+手机+凭据…）合成一条信号，
     任务结束 → 不再进新事件 → 稳定 → 可处理。
+
+    conversation_ref 由 SQL 层过滤；_high_confidence_sensitive 批量加载，消除 N+1。
     """
+    conv_clause = "and of.conversation_ref = ?" if conversation_ref else ""
+    params: list[str] = [conversation_ref] if conversation_ref else []
     rows = conn.execute(
-        """
+        f"""
         select rs.object_type, of.*
         from risk_signals rs
         join observed_facts of on of.fact_id = rs.fact_id
         where rs.risk_type = 'sensitive_content_exposure' and rs.severity = 'high'
+        {conv_clause}
         order by of.occurred_at, of.fact_id
-        """
+        """,
+        params,
     ).fetchall()
     seen: set[str] = set()
     deduped: list[sqlite3.Row] = []
@@ -577,14 +622,14 @@ def _build_sensitive_content_exposures(conn: sqlite3.Connection, reason: str, co
         seen.add(row["fact_id"])
         deduped.append(row)
     rows = deduped
+    # 批量判断高置信度敏感，消除 N+1 查询
+    high_confidence_ids = _high_confidence_sensitive_batch(conn, [r["fact_id"] for r in rows]) if rows else set()
     groups: dict[str, list[sqlite3.Row]] = defaultdict(list)
     for row in rows:
         conv = row["conversation_ref"] or ""
-        if conversation_ref and conv != conversation_ref:
-            continue
         if not conv:
             continue
-        if _high_confidence_sensitive(conn, row["fact_id"]):
+        if row["fact_id"] in high_confidence_ids:
             groups[conv].append(row)
     signals = []
     for conv, facts in groups.items():

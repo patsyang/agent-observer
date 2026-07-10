@@ -8,7 +8,8 @@ from typing import Iterable
 
 from app.collector_client.config import SourceConfig
 from app.collector_client.sources.base import SourceResult, stamp_source
-from app.collector_client.telemetry_utils import clean, hash_value, ref
+from app.collector_client.telemetry_utils import clean, command_category, hash_value, ref
+from app.collector_client.tool_execution import command_excerpt, command_text
 from app.collector_client.usage_contract import normalized_usage_projection, usage_signal_from_projection
 
 SOURCE_KIND = "claude_local"
@@ -216,7 +217,15 @@ def _tool_use_fact(collector_id, sequence, source_key, path, line, record, item,
     if call_id:
         tool_use_cache[call_id] = tool_name
     tool_input = item.get("input") if isinstance(item.get("input"), dict) else {}
-    return {**base, "fact_type": "tool", "category": "tool_call", "quality": "high", "severity": "low", "summary": f"Claude 工具调用已采集：{tool_name}。", "projection": {"tool_name": tool_name, "tool_call_id": call_id, "command_excerpt": json.dumps(tool_input, ensure_ascii=False)[:240], "raw_content_uploaded": True}}
+    command = command_text(tool_input)
+    command_cat = command_category(command)
+    projection: dict = {"tool_name": tool_name, "tool_call_id": call_id, "command_category": command_cat, "raw_content_uploaded": True}
+    if command:
+        projection["command"] = command
+        projection["command_excerpt"] = command_excerpt(command)
+    else:
+        projection["command_excerpt"] = command_excerpt(json.dumps(tool_input, ensure_ascii=False))
+    return {**base, "fact_type": "tool", "category": "tool_call", "quality": "high", "severity": "low", "summary": f"Claude 工具调用已采集：{tool_name}。", "projection": projection}
 
 
 def _tool_result_fact(collector_id, sequence, source_key, path, line, record, item, session_titles, tool_use_cache) -> dict:

@@ -93,7 +93,7 @@ def test_ingest_codex_batch_writes_observed_facts_and_projections(tmp_path):
     assert result["accepted"] == 2
     assert result["duplicates"] == 0
     assert result["processing_jobs_queued"] == 1
-    assert result["processing_job_ids"] == ["behavior_signal_update:risk:destructive_operation"]
+    assert result["processing_job_ids"] == ["behavior_signal_update:risk:destructive_operation:conv-hash-001"]
     assert facts["total"] == 2
     assert facts["limit"] == 50
     assert facts["offset"] == 0

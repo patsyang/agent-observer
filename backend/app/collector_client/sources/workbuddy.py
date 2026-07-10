@@ -7,7 +7,8 @@ from typing import Iterable
 
 from app.collector_client.config import SourceConfig
 from app.collector_client.sources.base import SourceResult, stamp_source
-from app.collector_client.telemetry_utils import clean, hash_value, ref
+from app.collector_client.telemetry_utils import clean, command_category, hash_value, ref
+from app.collector_client.tool_execution import command_excerpt
 from app.collector_client.usage_contract import normalized_usage_projection, usage_signal_from_projection
 
 SOURCE_KIND = "workbuddy_local"
@@ -213,7 +214,7 @@ def _project_fact(
             "quality": "high",
             "severity": "low",
             "summary": f"WorkBuddy 工具调用已采集：{tool_name}。",
-            "projection": {"tool_name": tool_name, "command_excerpt": command[:240], "raw_content_uploaded": True},
+            "projection": {"tool_name": tool_name, "command": command, "command_excerpt": command_excerpt(command), "command_category": command_category(command), "raw_content_uploaded": True},
         }
         return _with_usage(fact, usage_projection)
     if role in {"user", "assistant"} or text:

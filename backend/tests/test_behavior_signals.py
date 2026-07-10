@@ -320,3 +320,80 @@ def test_signal_decision_and_enrichment_use_signal_id(tmp_path):
     assert availability["signal_id"] == signal["signal_id"]
     assert job["command"]["signal_id"] == signal["signal_id"]
     assert "story_id" not in json.dumps(job)
+
+
+def test_destructive_operation_groups_by_conversation(tmp_path):
+    """破坏性操作按会话聚合：不同会话生成不同信号，同一会话内多次操作合并为一条。"""
+    items_a = []
+    for index in range(3):
+        item = _base_item(f"destruct-a-{index}", "destructive_operation")
+        item["source_refs"] = {"conversation_ref": "conv-destruct-a"}
+        item.update(
+            {
+                "summary": f"rm -rf /tmp/{index}",
+                "risk": {"risk_type": "destructive_operation", "severity": "high"},
+            }
+        )
+        items_a.append(item)
+    item_b = _base_item("destruct-b-0", "destructive_operation")
+    item_b["source_refs"] = {"conversation_ref": "conv-destruct-b"}
+    item_b.update(
+        {
+            "summary": "chmod 777 /etc/passwd",
+            "risk": {"risk_type": "destructive_operation", "severity": "high"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, items_a + [item_b])
+        rebuild_signals(conn, reason="test")
+        queue = list_signals(conn, window="all")
+        destructive_signals = [s for s in queue["signals"] if s["signal_kind"] == "destructive_operation_attempt"]
+
+    assert len(destructive_signals) == 2
+    scopes = {s["affected_scope"]["conversation_ref"] for s in destructive_signals}
+    assert scopes == {"conv-destruct-a", "conv-destruct-b"}
+    conv_a_signal = next(s for s in destructive_signals if s["affected_scope"]["conversation_ref"] == "conv-destruct-a")
+    assert conv_a_signal["affected_scope"]["operation_count"] == 3
+    assert conv_a_signal["severity"] == "high"
+
+
+def test_destructive_operation_legacy_scope_id_returns_empty(tmp_path):
+    """旧格式 scope_id='destructive_operation'（无冒号）应返回空列表，不静默失败。"""
+    from app.behavior_signals.service import _risk_builder
+
+    with connect(tmp_path / "observer.sqlite") as conn:
+        result = _risk_builder(conn, "test", "destructive_operation")
+
+    assert result == []
+
+
+def test_destructive_operation_per_conversation_scope_id(tmp_path):
+    """新格式 scope_id='destructive_operation:{conv}' 应只处理指定会话。"""
+    from app.behavior_signals.service import _risk_builder
+
+    items_a = []
+    for index in range(2):
+        item = _base_item(f"destruct-scope-a-{index}", "destructive_operation")
+        item["source_refs"] = {"conversation_ref": "conv-scope-a"}
+        item.update(
+            {
+                "summary": f"rm -rf /tmp/{index}",
+                "risk": {"risk_type": "destructive_operation", "severity": "high"},
+            }
+        )
+        items_a.append(item)
+    item_b = _base_item("destruct-scope-b-0", "destructive_operation")
+    item_b["source_refs"] = {"conversation_ref": "conv-scope-b"}
+    item_b.update(
+        {
+            "summary": "rm -rf /tmp/other",
+            "risk": {"risk_type": "destructive_operation", "severity": "high"},
+        }
+    )
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, items_a + [item_b])
+        result = _risk_builder(conn, "test", "destructive_operation:conv-scope-a")
+
+    assert len(result) == 1
+    assert result[0]["affected_scope"]["conversation_ref"] == "conv-scope-a"
+    assert result[0]["affected_scope"]["operation_count"] == 2

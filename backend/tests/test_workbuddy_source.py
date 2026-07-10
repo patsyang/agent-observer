@@ -74,6 +74,10 @@ def test_workbuddy_source_collects_supported_local_logs(tmp_path):
     assert "collector_health" not in categories
     assert "collector_source_status" not in categories
     assert all(fact["source_refs"]["source_id"] == "workbuddy-local" for fact in result.facts)
+    tool_call = next(fact for fact in result.facts if fact["category"] == "tool_call")
+    assert tool_call["projection"]["command"] == "python -m pytest"
+    assert tool_call["projection"]["command_excerpt"] == "python -m pytest"
+    assert tool_call["projection"]["command_category"] == "test"
     prompt = next(fact for fact in result.facts if fact["category"] == "agent_prompt")
     assert prompt["upload_raw"] is True
     assert prompt["raw_content"]

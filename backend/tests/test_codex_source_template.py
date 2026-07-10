@@ -375,6 +375,58 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     assert any(fact.get("projection", {}).get("command_category") == "test" for fact in facts)
     assert not [fact for fact in facts if fact["category"] == "sensitive_content_exposure"]
 
+    # tool_call projection 必须包含 command 和 command_excerpt
+    tool_call_facts = [fact for fact in facts if fact["category"] == "tool_call"]
+    assert tool_call_facts, "expected at least one tool_call fact"
+    tool_call_with_command = [f for f in tool_call_facts if f["projection"].get("command")]
+    assert tool_call_with_command, "expected at least one tool_call with command"
+    assert all(f["projection"].get("command_excerpt") for f in tool_call_with_command)
+
+
+def test_codex_tool_result_inherits_command_from_call_context(tmp_path):
+    """tool_result（exit_code=0）的 projection 从 _agent_observer_call 获取 command。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True, exist_ok=True)
+    records = [
+        {
+            "timestamp": "2026-06-18T11:00:00+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call",
+                "name": "shell_command",
+                "call_id": "call-success-001",
+                "arguments": json.dumps({"cmd": "Get-Content README.md", "workdir": "D:/workspace/demo"}),
+            },
+        },
+        {
+            "timestamp": "2026-06-18T11:00:30+00:00",
+            "type": "response_item",
+            "payload": {
+                "type": "function_call_output",
+                "call_id": "call-success-001",
+                "output": "Exit code: 0\nWall time: 0.1 seconds\n# README\nhello world",
+            },
+        },
+    ]
+    (sessions / "success-session.jsonl").write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+    tool_results = [f for f in facts if f["category"] == "tool_result"]
+    assert tool_results, "expected at least one tool_result"
+    result = tool_results[0]
+    assert result["projection"]["command"] == "Get-Content README.md"
+    assert result["projection"]["command_excerpt"] == "Get-Content README.md"
+    assert result["projection"]["exit_code"] == 0
+
 
 def test_codex_source_template_attaches_latest_session_title(tmp_path):
     codex_home = tmp_path / ".codex"

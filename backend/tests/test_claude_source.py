@@ -68,6 +68,48 @@ def test_assistant_tool_use_collects_tool_call(tmp_path):
     assert fact["fact_type"] == "tool"
     assert fact["projection"]["tool_name"] == "Bash"
     assert fact["projection"]["tool_call_id"] == "tool-1"
+    assert fact["projection"]["command"] == "ls"
+    assert fact["projection"]["command_excerpt"] == "ls"
+    assert fact["projection"]["command_category"] == "shell"
+
+
+def test_assistant_tool_use_without_command_falls_back_to_json(tmp_path):
+    """无 command 字段的工具（如 Read）兜底为 JSON 串。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "tool-2", "name": "Read", "input": {"file_path": "README.md"}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-06-30T01:00:00+00:00", "model": "claude-sonnet-4"},
+    ])
+    result = _collect(root)
+    fact = next(f for f in result.facts if f["category"] == "tool_call")
+    assert fact["projection"]["command_excerpt"] == '{"file_path": "README.md"}'
+    assert "command" not in fact["projection"] or not fact["projection"]["command"]
+    assert fact["projection"]["command_category"] == ""
+
+
+def test_assistant_tool_use_with_cmd_key_extracts_command(tmp_path):
+    """工具输入用 cmd 键（非 command）时也能提取命令。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "tool-3", "name": "Bash", "input": {"cmd": "git status"}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-06-30T01:00:00+00:00", "model": "claude-sonnet-4"},
+    ])
+    result = _collect(root)
+    fact = next(f for f in result.facts if f["category"] == "tool_call")
+    assert fact["projection"]["command"] == "git status"
+    assert fact["projection"]["command_category"] == "git"
+
+
+def test_assistant_tool_use_long_command_truncated_with_ellipsis(tmp_path):
+    """超长命令截断后带 ... 后缀。"""
+    root = tmp_path / ".claude"
+    long_command = "python -m pytest " + " ".join(["test_case_%d" % i for i in range(50)])
+    _write_jsonl(_session_file(root), [
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "tool-4", "name": "Bash", "input": {"command": long_command}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-06-30T01:00:00+00:00", "model": "claude-sonnet-4"},
+    ])
+    result = _collect(root)
+    fact = next(f for f in result.facts if f["category"] == "tool_call")
+    excerpt = fact["projection"]["command_excerpt"]
+    assert excerpt.endswith("...")
+    assert len(excerpt) == 182  # text[:179] + "..."
 
 
 def test_user_tool_result_collects_tool_result(tmp_path):

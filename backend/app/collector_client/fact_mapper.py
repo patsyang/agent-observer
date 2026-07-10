@@ -255,8 +255,14 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
     }:
         return None
     args = _arguments(payload)
+    call = record.get("_agent_observer_call")
+    if isinstance(call, dict) and not args:
+        call_args = call.get("arguments")
+        if isinstance(call_args, dict):
+            args = call_args
     tool_name = _clean(payload.get("name") or payload_type)
-    command_category = _command_category(command_text(args))
+    command = command_text(args)
+    command_category = _command_category(command)
     exit_code = _exit_code(record)
     if exit_code and exit_code != 0:
         return None
@@ -270,6 +276,8 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         "projection": {
             "tool_name": tool_name,
             "payload_type": payload_type,
+            "command": command,
+            "command_excerpt": command_excerpt(command),
             "command_category": command_category,
             "argument_keys": sorted(_safe_key(key) for key in args.keys())[:12],
             "workdir_hash": _hash(str(args.get("workdir", "")))[:16] if args.get("workdir") else None,

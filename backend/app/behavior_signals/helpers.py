@@ -216,18 +216,32 @@ def exit_code_from_summary(summary: str) -> str:
     return match.group(1) if match else ""
 
 
-def risk_facts(conn: sqlite3.Connection, risk_type: str, object_type: str | None) -> list[sqlite3.Row]:
+def risk_facts(
+    conn: sqlite3.Connection,
+    risk_type: str,
+    object_type: str | None,
+    conversation_ref: str | None = None,
+) -> list[sqlite3.Row]:
+    """查询指定 risk_type 的 facts，可选按 object_type 和 conversation_ref 在 SQL 层过滤。
+
+    conversation_ref 过滤利用 idx_observed_facts_conversation_occurred 索引，
+    避免全量查回再在 Python 层过滤（N+1 性能瓶颈根因）。
+    """
     params: list[str] = [risk_type]
-    object_clause = ""
+    clauses: list[str] = []
     if object_type:
-        object_clause = "and rs.object_type = ?"
+        clauses.append("rs.object_type = ?")
         params.append(object_type)
+    if conversation_ref:
+        clauses.append("of.conversation_ref = ?")
+        params.append(conversation_ref)
+    extra_where = f" and {' and '.join(clauses)}" if clauses else ""
     return conn.execute(
         f"""
         select of.*
         from risk_signals rs
         join observed_facts of on of.fact_id = rs.fact_id
-        where rs.risk_type = ? {object_clause}
+        where rs.risk_type = ?{extra_where}
         order by of.occurred_at, of.fact_id
         """,
         params,
@@ -297,6 +311,31 @@ def high_confidence_sensitive(conn: sqlite3.Connection, fact_id: str) -> bool:
         if isinstance(matches, list) and any(isinstance(item, dict) and item.get("confidence") == "high" for item in matches):
             return True
     return False
+
+
+def high_confidence_sensitive_batch(conn: sqlite3.Connection, fact_ids: list[str]) -> set[str]:
+    """批量判断 fact_id 是否高置信度敏感，返回通过判断的 fact_id 集合。
+
+    消除 _build_sensitive_content_exposures 中逐条调 _high_confidence_sensitive 的 N+1 查询
+    （1188 条 → 74 秒的根因）。
+    """
+    if not fact_ids:
+        return set()
+    placeholders = ",".join("?" for _ in fact_ids)
+    rows = conn.execute(
+        f"select fact_id, projection_json from evidence_projections where fact_id in ({placeholders})",
+        fact_ids,
+    ).fetchall()
+    result: set[str] = set()
+    for row in rows:
+        projection = loads(row["projection_json"])
+        if projection.get("sensitivity_confidence") == "high":
+            result.add(row["fact_id"])
+            continue
+        matches = projection.get("sensitive_matches")
+        if isinstance(matches, list) and any(isinstance(item, dict) and item.get("confidence") == "high" for item in matches):
+            result.add(row["fact_id"])
+    return result
 
 
 def failure_group(conn: sqlite3.Connection, group_type: str, title: str, facts: list[sqlite3.Row], projections: list[dict]) -> dict:

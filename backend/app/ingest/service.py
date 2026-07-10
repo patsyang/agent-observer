@@ -506,7 +506,9 @@ def _signal_jobs_for_item(item: dict, source: str) -> list[dict]:
         if conversation_ref:
             jobs.append(_job("file_change", conversation_ref, 80))
     if risk_type == "destructive_operation":
-        jobs.append(_job("risk", "destructive_operation", 90))
+        conversation_ref = str((item.get("source_refs") or {}).get("conversation_ref") or "")
+        if conversation_ref:
+            jobs.append(_job("risk", f"destructive_operation:{conversation_ref}", 90))
     if risk_type == "sensitive_content_exposure":
         conversation_ref = str((item.get("source_refs") or {}).get("conversation_ref") or "")
         if conversation_ref:
