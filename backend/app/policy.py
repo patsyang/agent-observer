@@ -12,6 +12,8 @@ DEFAULT_MAX_EVENTS_PER_CYCLE = 500
 DEFAULT_UPLOAD_BATCH_SIZE = 100
 DEFAULT_WORKER_POLL_INTERVAL_SECONDS = 10
 DEFAULT_OUTBOX_SOFT_LIMIT = 5000
+DEFAULT_LOG_LEVEL = "INFO"
+VALID_LOG_LEVELS = {"DEBUG", "INFO", "WARNING", "ERROR"}
 
 
 def _now() -> str:
@@ -29,6 +31,7 @@ def get_effective_policy(conn: sqlite3.Connection) -> dict:
         "upload_batch_size": row["upload_batch_size"],
         "worker_poll_interval_seconds": row["worker_poll_interval_seconds"],
         "outbox_soft_limit": row["outbox_soft_limit"],
+        "log_level": row["log_level"] if "log_level" in row.keys() else DEFAULT_LOG_LEVEL,
     }
 
 
@@ -47,6 +50,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
         "upload_batch_size",
         "worker_poll_interval_seconds",
         "outbox_soft_limit",
+        "log_level",
     }:
         raise ValueError(f"unsupported_policy_field:{sorted(extra_fields)[0]}")
 
@@ -84,6 +88,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             500,
             50000,
         ),
+        "log_level": _log_level(payload.get("log_level", current["log_level"])),
     }
     conn.execute(
         """
@@ -94,7 +99,8 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             max_events_per_cycle = ?,
             upload_batch_size = ?,
             worker_poll_interval_seconds = ?,
-            outbox_soft_limit = ?
+            outbox_soft_limit = ?,
+            log_level = ?
         where id = 1
         """,
         (
@@ -105,6 +111,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             next_policy["upload_batch_size"],
             next_policy["worker_poll_interval_seconds"],
             next_policy["outbox_soft_limit"],
+            next_policy["log_level"],
         ),
     )
     _write_audit(
@@ -122,6 +129,7 @@ def update_effective_policy(conn: sqlite3.Connection, payload: dict) -> dict:
             "upload_batch_size": next_policy["upload_batch_size"],
             "worker_poll_interval_seconds": next_policy["worker_poll_interval_seconds"],
             "outbox_soft_limit": next_policy["outbox_soft_limit"],
+            "log_level": next_policy["log_level"],
             "reason_code": "operator_policy_update",
         },
     )
@@ -171,6 +179,13 @@ def _enrichment_mode(value: object) -> str:
     if mode not in {"disabled", "enabled"}:
         raise ValueError("unsupported_enrichment_mode")
     return mode
+
+
+def _log_level(value: object) -> str:
+    level = str(value or "").strip().upper()
+    if level not in VALID_LOG_LEVELS:
+        raise ValueError("unsupported_log_level")
+    return level
 
 
 def _bounded_int(value: object, field: str, minimum: int, maximum: int) -> int:

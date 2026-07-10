@@ -17,6 +17,7 @@ from app.collector_client.telemetry_utils import (
     event_type as _event_type,
     exit_code as _exit_code,
     hash_value as _hash,
+    is_semantic_nonzero_exit as _is_semantic_nonzero_exit,
     object_type as _object_type,
     occurred_at as _occurred_at,
     payload as _payload,
@@ -264,7 +265,7 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
     command = command_text(args)
     command_category = _command_category(command)
     exit_code = _exit_code(record)
-    if exit_code and exit_code != 0:
+    if exit_code and exit_code != 0 and not _is_semantic_nonzero_exit(command_category, exit_code):
         return None
     return {
         **common,
@@ -359,8 +360,12 @@ def _is_error(record: dict) -> bool:
     payload = _payload(record)
     if _payload_type(record) in {"function_call_output", "custom_tool_call_output"}:
         exit_code = _exit_code(record)
-        if exit_code is not None:
-            return exit_code != 0
+        if exit_code is not None and exit_code != 0:
+            if _is_semantic_exit(record, payload, exit_code):
+                return False
+            return True
+        if exit_code is not None and exit_code == 0:
+            return False
     status = str(record.get("status") or record.get("level") or payload.get("status") or "").lower()
     if status in {"error", "failed", "failure"}:
         return True
@@ -370,6 +375,21 @@ def _is_error(record: dict) -> bool:
         return int(record.get("exit_code") or 0) != 0
     except (TypeError, ValueError):
         return False
+
+
+def _is_semantic_exit(record: dict, payload: dict, exit_code: int) -> bool:
+    """Check if a non-zero exit_code is a semantic result, not an execution error."""
+    args = _arguments(payload)
+    call = record.get("_agent_observer_call")
+    if isinstance(call, dict) and not args:
+        call_args = call.get("arguments")
+        if isinstance(call_args, dict):
+            args = call_args
+    command = command_text(args)
+    if not command:
+        return False
+    cat = _command_category(command)
+    return _is_semantic_nonzero_exit(cat, exit_code)
 
 def _is_usage(record: dict) -> bool:
     if any(key in record for key in ("total_tokens", "tokens", "units", "activity_tag", "activity_tags")):

@@ -26,7 +26,8 @@ SCHEMA_SQL = """
           max_events_per_cycle integer not null default 500,
           upload_batch_size integer not null default 100,
           worker_poll_interval_seconds integer not null default 10,
-          outbox_soft_limit integer not null default 5000
+          outbox_soft_limit integer not null default 5000,
+          log_level text not null default 'INFO'
         );
 
         create table if not exists collectors (
@@ -385,8 +386,8 @@ def _seed_effective_policy(conn: sqlite3.Connection) -> None:
     conn.execute(
         """
         insert or ignore into effective_policies
-          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size, worker_poll_interval_seconds, outbox_soft_limit)
-        values (1, 1, 'enabled', 10, 500, 100, 10, 5000)
+          (id, policy_version, enrichment_mode, collection_interval_seconds, max_events_per_cycle, upload_batch_size, worker_poll_interval_seconds, outbox_soft_limit, log_level)
+        values (1, 1, 'enabled', 10, 500, 100, 10, 5000, 'INFO')
         """
     )
 
@@ -403,6 +404,8 @@ def _ensure_effective_policy_columns(conn: sqlite3.Connection) -> None:
         conn.execute("alter table effective_policies add column worker_poll_interval_seconds integer not null default 10")
     if "outbox_soft_limit" not in columns:
         conn.execute("alter table effective_policies add column outbox_soft_limit integer not null default 5000")
+    if "log_level" not in columns:
+        conn.execute("alter table effective_policies add column log_level text not null default 'INFO'")
 
 
 def _ensure_usage_signal_columns(conn: sqlite3.Connection) -> None:

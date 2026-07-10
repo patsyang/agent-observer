@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 from urllib.parse import parse_qs, unquote, urlparse
 
@@ -40,6 +41,8 @@ from app.behavior_signals.taxonomy import taxonomy_payload
 from app.telemetry_batches.service import get_batch_status
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
+
+logger = logging.getLogger("agent-observer.app.dev_server_handlers")
 
 
 def _query_one(query: dict[str, list[str]], key: str, default: str | None = None) -> str | None:
@@ -217,7 +220,9 @@ def handle_get(handler) -> None:
                 return _send_package(handler, package["path"])
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
+            logger.warning("database busy on GET %s", path)
             return handler._json(503, {"error": "database busy", "reason_code": "sqlite_busy"})
+        logger.exception("database error on GET %s", path)
         raise
     handler._json(404, {"error": "not found"})
 
@@ -260,7 +265,9 @@ def handle_post(handler) -> None:
             return _handle_post_locked(handler, conn, path, payload)
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
+            logger.warning("database busy on POST %s", path)
             return handler._json(503, {"error": "database busy", "reason_code": "sqlite_busy"})
+        logger.exception("database error on POST %s", path)
         raise
     handler._json(404, {"error": "not found"})
 

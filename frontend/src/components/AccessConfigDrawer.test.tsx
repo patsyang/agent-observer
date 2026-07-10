@@ -17,6 +17,7 @@ const policy = {
   policy_version: 1,
   raw_upload_mode: 'always_on' as const,
   enrichment_mode: 'enabled' as const,
+  log_level: 'INFO' as const,
   collection_interval_seconds: 10,
   max_events_per_cycle: 500,
   upload_batch_size: 100,
@@ -31,7 +32,7 @@ const audit = {
 describe('AccessConfigDrawer', () => {
   it('loads package, policy, saves changes and displays audit feedback', async () => {
     const user = userEvent.setup();
-    const savePolicy = vi.fn(async () => ({ ...policy, policy_version: 2, enrichment_mode: 'disabled' as const }));
+    const savePolicy = vi.fn(async () => ({ ...policy, policy_version: 2, enrichment_mode: 'disabled' as const, log_level: 'INFO' as const }));
     const loadAudit = vi
       .fn()
       .mockResolvedValueOnce(audit)
@@ -81,6 +82,7 @@ describe('AccessConfigDrawer', () => {
     expect(savePolicy).toHaveBeenCalledWith({
       expected_version: 1,
       enrichment_mode: 'disabled',
+      log_level: 'INFO',
       collection_interval_seconds: 8,
       max_events_per_cycle: 900,
       upload_batch_size: 120,

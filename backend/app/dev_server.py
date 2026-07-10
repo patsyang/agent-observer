@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from app.dashboard.service import get_dashboard_summary
-from app.db.connection import connect
+from app.db.connection import connect, default_db_path
 from app.dev_server_handlers import (
     _conversations_query_options,
     _path_part,
@@ -15,7 +16,11 @@ from app.dev_server_handlers import (
     handle_patch,
     handle_post,
 )
+from app.log import apply_log_level, is_poll_path, setup_logging
+from app.policy import get_effective_policy
 from app.processing.worker import start_processing_worker
+
+logger = logging.getLogger("agent-observer.app.dev_server")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -32,6 +37,16 @@ class Handler(BaseHTTPRequestHandler):
             self.wfile.write(body)
         except (BrokenPipeError, ConnectionAbortedError):
             return
+
+    def log_message(self, format, *args):
+        msg = format % args
+        path = msg.split()[1] if len(msg.split()) > 1 else ""
+        client_ip = self.client_address[0] if self.client_address else "-"
+        log_msg = f"{client_ip} {msg}"
+        if is_poll_path(path):
+            logger.debug(log_msg)
+        else:
+            logger.info(log_msg)
 
     def do_OPTIONS(self) -> None:
         self._json(200, {})
@@ -54,7 +69,13 @@ def get_server_port() -> int:
 
 
 if __name__ == "__main__":
+    db_path = default_db_path()
+    server_logger = setup_logging(db_path)
     with connect() as conn:
+        policy = get_effective_policy(conn)
+        apply_log_level(policy.get("log_level", "INFO"))
         get_dashboard_summary(conn, window="1h")
+    port = get_server_port()
+    server_logger.info("agent-observer server starting on :%d, db=%s, pid=%d", port, db_path, os.getpid())
     start_processing_worker()
-    ThreadingHTTPServer(("127.0.0.1", get_server_port()), Handler).serve_forever()
+    ThreadingHTTPServer(("127.0.0.1", port), Handler).serve_forever()

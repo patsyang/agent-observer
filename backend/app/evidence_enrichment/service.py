@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
+
+logger = logging.getLogger("agent-observer.app.evidence_enrichment.service")
 
 
 MANIFEST = {

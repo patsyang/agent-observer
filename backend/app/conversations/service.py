@@ -13,9 +13,12 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 
 from app.conversations.time_window import normalize_iso_param, window_cutoff
+
+logger = logging.getLogger("agent-observer.app.conversations.service")
 
 _HIT_COLUMNS = (
     "fact_id, category, fact_type, severity, occurred_at, summary, content_preview, "

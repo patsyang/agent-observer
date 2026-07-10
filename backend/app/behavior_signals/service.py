@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import sqlite3
 from collections import Counter, defaultdict
 
@@ -17,6 +18,8 @@ from app.behavior_signals.taxonomy import (
     kinds_for_family,
 )
 from app.behavior_signals.workspace import signal_workspace_matches, workspace_summary, workspaces_from_facts
+
+logger = logging.getLogger("agent-observer.app.behavior_signals.service")
 from app.behavior_signals.helpers import (
     conversation_groups as _conversation_groups,
     object_group as _object_group,

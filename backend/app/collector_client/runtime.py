@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import os
 import signal
 import socket
@@ -14,7 +15,10 @@ from typing import Any, Callable
 
 from app.collector_client.config import CollectorConfig
 from app.collector_client.enrichment import run_enrichment
+from app.log import apply_log_level
 from app.collector_client.state import load_state, patch_state, save_state
+
+logger = logging.getLogger("agent-observer.app.collector_client.runtime")
 from app.collector_client.status import (
     _already_running,
     _cursor_payload,
@@ -127,7 +131,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
         try:
             patch_state(config.state_path, {"running": False})
         except Exception:
-            pass
+            logger.debug("patch_state(running=False) failed in signal handler", exc_info=True)
         stop_heartbeat.set()
 
     try:
@@ -144,6 +148,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
             if not load_state(config.state_path)["running"]:
                 break
         except Exception:
+            logger.debug("load_state failed in cycle check", exc_info=True)
             time.sleep(5)
             continue
         cycle_no = cycles + 1
@@ -190,7 +195,7 @@ def _start(config: CollectorConfig, emit: Emit | None) -> CommandResult:
             try:
                 patch_state(config.state_path, {"last_error": str(exc)})
             except Exception:
-                pass
+                logger.debug("patch_state(last_error) failed", exc_info=True)
             consecutive_errors += 1
             backoff = _backoff_seconds(consecutive_errors)
             _emit(
@@ -374,6 +379,7 @@ def _run_pending_enrichment(config: CollectorConfig) -> int:
         result = run_enrichment(config, job)
         _post_json(config.server_url, f"/api/collectors/{config.collector_id}/enrichments/{job_id}/result", result)
     except Exception:
+        logger.exception("enrichment job %s failed", job_id)
         return 0
     return 1
 
@@ -464,6 +470,9 @@ def _refresh_policy_config(config: CollectorConfig, state: dict[str, object], ph
         save_state(config.state_path, state)
     except (OSError, ValueError, urllib.error.URLError, json.JSONDecodeError):
         pass
+    policy = state.get("effective_policy")
+    if isinstance(policy, dict) and policy.get("log_level"):
+        apply_log_level(policy["log_level"])
     return _config_with_policy(config, state)
 
 
@@ -479,6 +488,7 @@ def _remember_effective_policy(state: dict[str, object], response: dict[str, Any
         "max_events_per_cycle": _policy_int(policy, "max_events_per_cycle"),
         "upload_batch_size": _policy_int(policy, "upload_batch_size"),
         "outbox_soft_limit": _policy_int(policy, "outbox_soft_limit"),
+        "log_level": policy.get("log_level"),
     }
 
 

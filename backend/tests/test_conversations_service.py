@@ -117,14 +117,14 @@ def _tool_failure(event_id: str, occurred_at: str, conversation: str = "conv-det
         "category": "tool_execution_failure",
         "quality": "high",
         "severity": "medium",
-        "summary": "工具执行失败：cmd /c apps\\agent-observer\\scripts\\start-backend.cmd，exit_code=1。",
+        "summary": "工具执行失败：cmd /c start-server.cmd，exit_code=1。",
         "occurred_at": occurred_at,
         "span": f"event:{conversation}",
         "raw_hash": f"hash-{event_id}",
         "projection": {
             "tool_name": "exec_command",
-            "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
-            "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+            "command": "cmd /c start-server.cmd",
+            "command_excerpt": "cmd /c start-server.cmd",
             "command_category": "shell",
             "exit_code": 1,
             "error_excerpt": "Port 8765 is already in use.",
@@ -150,11 +150,11 @@ def _source_refs_with_title(conversation: str, title: str) -> dict:
     return refs
 
 
-def _source_refs_with_workspace(conversation: str, label: str, path: str = "D:/workspace/agentic_factory/apps/agent-observer") -> dict:
+def _source_refs_with_workspace(conversation: str, label: str, path: str = "D:/workspace/test-project-a") -> dict:
     refs = _source_refs(conversation)
     refs.update(
         {
-            "workspace_id": "codex:workspace-agent-observer",
+            "workspace_id": "codex:workspace-test-project-a",
             "workspace_path": path,
             "workspace_label": label,
             "workspace_alias_source": "codex_global_state",
@@ -263,9 +263,9 @@ def test_query_conversations_exposes_codex_session_title(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:
         prompt = _item("title-prompt", "agent_prompt", "查看会话标题", (now - timedelta(minutes=5)).isoformat(), "conv-title")
-        prompt["source_refs"] = _source_refs_with_title("conv-title", "分析信号定义与类型-Grill")
+        prompt["source_refs"] = _source_refs_with_title("conv-title", "signal-definition-and-types-v2")
         response = _item("title-response", "agent_response", "已展示 Codex 会话名", (now - timedelta(minutes=4)).isoformat(), "conv-title")
-        response["source_refs"] = _source_refs_with_title("conv-title", "分析信号定义与类型-Grill")
+        response["source_refs"] = _source_refs_with_title("conv-title", "signal-definition-and-types-v2")
         ingest_telemetry(
             conn,
             {
@@ -283,21 +283,21 @@ def test_query_conversations_exposes_codex_session_title(tmp_path):
         result = query_conversations(conn, window="1h")
         detail = get_conversation_query(conn, "conv-title")
 
-    assert result["conversations"][0]["session_title"] == "分析信号定义与类型-Grill"
-    assert detail["session_title"] == "分析信号定义与类型-Grill"
+    assert result["conversations"][0]["session_title"] == "signal-definition-and-types-v2"
+    assert detail["session_title"] == "signal-definition-and-types-v2"
 
 
 def test_query_conversations_exposes_and_filters_workspace(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:
         prompt = _item("workspace-prompt", "agent_prompt", "查看工作区", (now - timedelta(minutes=5)).isoformat(), "conv-workspace")
-        prompt["source_refs"] = _source_refs_with_workspace("conv-workspace", "Agent Observer")
+        prompt["source_refs"] = _source_refs_with_workspace("conv-workspace", "Test Project A")
         response = _item("workspace-response", "agent_response", "已展示工作区", (now - timedelta(minutes=4)).isoformat(), "conv-workspace")
-        response["source_refs"] = _source_refs_with_workspace("conv-workspace", "Agent Observer")
+        response["source_refs"] = _source_refs_with_workspace("conv-workspace", "Test Project A")
         other_prompt = _item("other-prompt", "agent_prompt", "其他输入", (now - timedelta(minutes=5)).isoformat(), "conv-other")
-        other_prompt["source_refs"] = _source_refs_with_workspace("conv-other", "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+        other_prompt["source_refs"] = _source_refs_with_workspace("conv-other", "Test Project B", "D:/workspace/test-project-b")
         other_response = _item("other-response", "agent_response", "其他输出", (now - timedelta(minutes=4)).isoformat(), "conv-other")
-        other_response["source_refs"] = _source_refs_with_workspace("conv-other", "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+        other_response["source_refs"] = _source_refs_with_workspace("conv-other", "Test Project B", "D:/workspace/test-project-b")
         ingest_telemetry(
             conn,
             {
@@ -312,12 +312,12 @@ def test_query_conversations_exposes_and_filters_workspace(tmp_path):
                 "items": [prompt, response, other_prompt, other_response],
             },
         )
-        result = query_conversations(conn, window="1h", workspace_query="agent observer")
+        result = query_conversations(conn, window="1h", workspace_query="project a")
         detail = get_conversation_query(conn, "conv-workspace")
 
     assert [row["conversation_ref"] for row in result["conversations"]] == ["conv-workspace"]
-    assert result["conversations"][0]["workspace"]["workspace_label"] == "Agent Observer"
-    assert detail["workspace"]["workspace_path"].endswith("agent-observer")
+    assert result["conversations"][0]["workspace"]["workspace_label"] == "Test Project A"
+    assert detail["workspace"]["workspace_path"].endswith("test-project-a")
 
 
 def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
@@ -345,9 +345,9 @@ def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
                         "occurred_at": (now - timedelta(minutes=2)).isoformat(),
                         "span": "session:conv-redacted",
                         "raw_hash": "hash-redacted-prompt",
-                        "projection": {"role": "user", "prompt_text": "真实 Prompt", "content_length": 9, "raw_content_uploaded": True},
+                        "projection": {"role": "user", "prompt_text": "real prompt", "content_length": 11, "raw_content_uploaded": True},
                         "upload_raw": True,
-                        "raw_content": "真实 Prompt",
+                        "raw_content": "real prompt",
                         "source_refs": _source_refs("conv-redacted"),
                         "source_specific": {"event_type": "message"},
                     },
@@ -361,9 +361,9 @@ def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
                         "occurred_at": (now - timedelta(minutes=1)).isoformat(),
                         "span": "session:conv-redacted",
                         "raw_hash": "hash-redacted-response",
-                        "projection": {"role": "assistant", "content_text": "真实响应", "content_length": 4, "raw_content_uploaded": True},
+                        "projection": {"role": "assistant", "content_text": "real response", "content_length": 13, "raw_content_uploaded": True},
                         "upload_raw": True,
-                        "raw_content": "真实响应",
+                        "raw_content": "real response",
                         "source_refs": _source_refs("conv-redacted"),
                         "source_specific": {"event_type": "message"},
                     },
@@ -374,8 +374,8 @@ def test_query_conversations_requires_uploaded_prompt_response_text(tmp_path):
 
     assert result["total"] == 1
     row = result["conversations"][0]
-    assert row["prompt_preview"] == "真实 Prompt"
-    assert row["response_preview"] == "真实响应"
+    assert row["prompt_preview"] == "real prompt"
+    assert row["response_preview"] == "real response"
 
 
 def test_query_conversations_excludes_groups_without_complete_input_and_output(tmp_path):
@@ -588,11 +588,12 @@ def test_conversation_detail_hits_expose_tool_context(tmp_path):
         hits = query_conversation_hits(conn, "conv-tool-context")
 
     assert detail["hits_total"] == 1
-    assert hits["hits"][0]["content_preview"].startswith("命令 cmd /c apps\\agent-observer")
+    assert hits["hits"][0]["content_preview"].startswith("命令 cmd /c start-server")
     assert hits["hits"][0]["tool_context"] == {
         "tool_name": "exec_command",
-        "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
-        "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+        "command": "cmd /c start-server.cmd",
+        "command_excerpt": "cmd /c start-server.cmd",
+
         "command_category": "shell",
         "exit_code": 1,
         "is_timeout": False,

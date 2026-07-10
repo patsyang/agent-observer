@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 
-import type { ClientPackageConfig, EffectivePolicy, RecentAuditSummary } from '../api/types';
+import type { ClientPackageConfig, EffectivePolicy, LogLevel, RecentAuditSummary } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 
 const DEFAULT_PERFORMANCE = {
@@ -22,6 +22,7 @@ interface Props {
   savePolicy: (policy: {
     expected_version: number;
     enrichment_mode: 'disabled' | 'enabled';
+    log_level: LogLevel;
     collection_interval_seconds: number;
     max_events_per_cycle: number;
     upload_batch_size: number;
@@ -34,6 +35,7 @@ interface Props {
 export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy, loadAudit, downloadUrl }: Props) {
   const [state, setState] = useState<LoadState>({ status: 'loading' });
   const [enrichmentMode, setEnrichmentMode] = useState<'disabled' | 'enabled'>('enabled');
+  const [logLevel, setLogLevel] = useState<LogLevel>('INFO');
   const [performance, setPerformance] = useState(DEFAULT_PERFORMANCE);
   const [saveState, setSaveState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
 
@@ -43,6 +45,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
       .then(([packageConfig, policy, audit]) => {
         if (cancelled) return;
         setEnrichmentMode(policy.enrichment_mode);
+        setLogLevel(policy.log_level);
         setPerformance({
           collection_interval_seconds: policy.collection_interval_seconds,
           max_events_per_cycle: policy.max_events_per_cycle,
@@ -94,6 +97,7 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
               const policy = await savePolicy({
                 expected_version: state.policy.policy_version,
                 enrichment_mode: enrichmentMode,
+                log_level: logLevel,
                 ...performance
               });
               const audit = await loadAudit();
@@ -196,6 +200,20 @@ export function AccessConfigDrawer({ onClose, loadConfig, loadPolicy, savePolicy
                   onChange={(event) => setPerformance({ ...performance, worker_poll_interval_seconds: Number(event.target.value) })}
                 />
                 <small>秒</small>
+              </label>
+              <label>
+                <span>日志级别</span>
+                <select
+                  aria-label="日志级别"
+                  value={logLevel}
+                  onChange={(event) => setLogLevel(event.target.value as LogLevel)}
+                >
+                  <option value="DEBUG">DEBUG</option>
+                  <option value="INFO">INFO</option>
+                  <option value="WARNING">WARNING</option>
+                  <option value="ERROR">ERROR</option>
+                </select>
+                <small>服务端日志过滤</small>
               </label>
             </div>
             <p>保存后后端 worker 会在下一次空闲轮询前读取最新策略。</p>

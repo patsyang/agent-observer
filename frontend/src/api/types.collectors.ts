@@ -52,10 +52,13 @@ export interface ClientPackageConfig {
   protocol_version: string;
 }
 
+export type LogLevel = 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR';
+
 export interface EffectivePolicy {
   policy_version: number;
   raw_upload_mode: 'always_on';
   enrichment_mode: 'disabled' | 'enabled';
+  log_level: LogLevel;
   collection_interval_seconds: number;
   max_events_per_cycle: number;
   upload_batch_size: number;
@@ -66,6 +69,7 @@ export interface EffectivePolicy {
 export interface PolicyUpdatePayload {
   expected_version: number;
   enrichment_mode: 'disabled' | 'enabled';
+  log_level: LogLevel;
   collection_interval_seconds: number;
   max_events_per_cycle: number;
   upload_batch_size: number;

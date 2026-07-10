@@ -111,6 +111,21 @@ def command_category(command: str) -> str:
     return "shell"
 
 
+# command_category → 该类别命令中属于语义性结果的退出码集合。
+# 语义性退出码不是执行错误，而是工具的正常语义输出（如 rg 没匹配返回 1）。
+# 扩展方式：在此映射中添加 category → 允许的退出码集合即可，无需改 _is_error 逻辑。
+SEMANTIC_NONZERO_EXIT: dict[str, set[int]] = {
+    "search": {1},  # rg/grep/findstr 没有匹配
+    "git": {1},     # git diff 无差异、git merge --dry-run 有冲突等
+}
+
+
+def is_semantic_nonzero_exit(command_category_value: str, exit_code: int) -> bool:
+    """Return True if the exit_code is a semantic (non-error) result for this command category."""
+    allowed = SEMANTIC_NONZERO_EXIT.get(command_category_value)
+    return allowed is not None and exit_code in allowed
+
+
 def change_count(value: dict) -> int:
     changes = value.get("changes")
     if isinstance(changes, dict):

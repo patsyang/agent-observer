@@ -8,7 +8,7 @@ from app.collector_client.cli import run
 from app.collector_client.version import COLLECTOR_CLIENT_VERSION, COLLECTOR_PROTOCOL_VERSION
 from app.db.connection import connect
 from app.package.builder import build_windows_package
-from backend.tests.test_collectors_policy_package import _write_codex_fixture
+from source_payloads import write_codex_fixture as _write_codex_fixture
 
 
 EFFECTIVE_POLICY = {
@@ -240,7 +240,7 @@ def test_packaged_collector_first_run_uploads_raw_content_without_config_switch(
     assert result.code == 0
     assert prompt["upload_raw"] is True
     assert prompt["raw_content"]
-    assert prompt["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
+    assert prompt["projection"]["prompt_text"] == "check dashboard prompt visibility"
 
 
 def test_packaged_collector_runs_tool_failure_enrichment_from_local_sessions(tmp_path, monkeypatch):

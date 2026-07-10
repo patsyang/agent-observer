@@ -49,6 +49,7 @@ def test_policy_update_increments_version_and_writes_fixed_account_audit(tmp_pat
         "before_version": 1,
         "collection_interval_seconds": 8,
         "enrichment_mode": "disabled",
+        "log_level": "INFO",
         "max_events_per_cycle": 900,
         "outbox_soft_limit": 5000,
         "reason_code": "operator_policy_update",

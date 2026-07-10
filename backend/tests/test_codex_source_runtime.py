@@ -4,7 +4,7 @@ import json
 import os
 
 from app.collector_client.telemetry import collect_facts
-from backend.tests.test_codex_source_template import _write_real_shape_session
+from source_payloads import write_real_shape_session as _write_real_shape_session
 
 
 def _timeout_call(call_id: str, run_id: str) -> dict:
@@ -18,7 +18,7 @@ def _timeout_call(call_id: str, run_id: str) -> dict:
             "arguments": json.dumps(
                 {
                     "command": f"python scripts/ao.py spec-driven resume --run-id {run_id}",
-                    "workdir": "D:/workspace/agentic_factory",
+                    "workdir": "D:/workspace/test-project",
                     "timeout_ms": 3600000,
                 }
             ),
@@ -394,10 +394,10 @@ def test_codex_source_template_uploads_raw_prompt_by_default(tmp_path):
 
     prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
     assert prompt_fact["summary"] == "记录到 用户 Prompt，已上传原始内容。"
-    assert "请检查 Dashboard 为什么看不到原始 Prompt" in prompt_fact["raw_content"]
-    assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
+    assert "check dashboard prompt visibility" in prompt_fact["raw_content"]
+    assert prompt_fact["projection"]["prompt_text"] == "check dashboard prompt visibility"
     reasoning_fact = next(fact for fact in facts if fact["category"] == "agent_reasoning")
-    assert reasoning_fact["projection"]["content_length"] == len("模型正在判断证据链刷新路径")
+    assert reasoning_fact["projection"]["content_length"] == len("reasoning about evidence chain refresh")
 
 
 def test_tool_execution_failure_signature_groups_same_failure_shape(tmp_path):

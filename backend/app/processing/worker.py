@@ -1,14 +1,18 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
 from app.db.connection import connect
+from app.log import apply_log_level
 from app.policy import DEFAULT_WORKER_POLL_INTERVAL_SECONDS, get_effective_policy
 from app.processing.jobs import run_next_job
 
 _WORKER_STARTED = False
 _WORKER_LOCK = threading.Lock()
+
+logger = logging.getLogger("agent-observer.app.processing.worker")
 
 
 def start_processing_worker() -> None:
@@ -28,7 +32,8 @@ def _worker_loop() -> None:
             with connect() as conn:
                 policy = get_effective_policy(conn)
                 interval = int(policy.get("worker_poll_interval_seconds") or interval)
+                apply_log_level(policy.get("log_level", "INFO"))
                 run_next_job(conn, reason="worker")
         except Exception:
-            pass
+            logger.exception("worker cycle failed")
         time.sleep(max(2, min(interval, 300)))

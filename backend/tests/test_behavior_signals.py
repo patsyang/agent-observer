@@ -26,7 +26,7 @@ def _base_item(event_id: str, category: str, fact_type: str = "risk") -> dict:
     }
 
 
-def _with_workspace(item: dict, label: str, path: str = "D:/workspace/agentic_factory/apps/agent-observer") -> dict:
+def _with_workspace(item: dict, label: str, path: str = "D:/workspace/test-project-a") -> dict:
     refs = dict(item.get("source_refs") or {})
     refs.update(
         {
@@ -63,9 +63,9 @@ def _ingest(conn, items: list[dict]) -> None:
 
 def test_tool_execution_failure_is_explainable_signal(tmp_path):
     prompt = _base_item("prompt-1", "agent_prompt", "event")
-    prompt["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "修复工具失败上下文"}
-    prompt["projection"] = {"role": "user", "prompt_text": "请修复工具失败"}
-    prompt["raw_content"] = {"text": "请修复工具失败"}
+    prompt["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "tool-failure-context"}
+    prompt["projection"] = {"role": "user", "prompt_text": "fix tool failure"}
+    prompt["raw_content"] = {"text": "fix tool failure"}
     item = _base_item("tool-failure-1", "tool_execution_failure", "error")
     item.update(
         {
@@ -73,8 +73,8 @@ def test_tool_execution_failure_is_explainable_signal(tmp_path):
             "projection": {
                 "tool_name": "exec_command",
                 "exit_code": 1,
-                "command": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
-                "command_excerpt": "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd",
+                "command": "cmd /c start-server.cmd",
+                "command_excerpt": "cmd /c start-server.cmd",
                 "command_category": "shell",
                 "error_excerpt": "Port 8765 is already in use.",
             },
@@ -92,16 +92,16 @@ def test_tool_execution_failure_is_explainable_signal(tmp_path):
     assert signal["title"] == "本会话 1 次 exec_command 执行失败，退出码 1"
     assert detail["evidence_groups"][0]["group_type"] == "failure"
     assert detail["evidence_groups"][0]["title"] == "命中事件"
-    assert detail["evidence_groups"][0]["items"][0]["tool_context"]["command"] == "cmd /c apps\\agent-observer\\scripts\\start-backend.cmd"
+    assert detail["evidence_groups"][0]["items"][0]["tool_context"]["command"] == "cmd /c start-server.cmd"
     assert detail["evidence_groups"][0]["items"][0]["tool_context"]["error_excerpt"] == "Port 8765 is already in use."
     assert detail["linked_conversations"][0]["conversation_ref"] == "conversation-1"
-    assert detail["linked_conversations"][0]["session_title"] == "修复工具失败上下文"
+    assert detail["linked_conversations"][0]["session_title"] == "tool-failure-context"
     assert detail["linked_conversations"][0]["matched_fact_ids"] == [item["source_event_id"]]
 
 
 def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tmp_path):
     first = _base_item("tool-failure-a", "tool_execution_failure", "error")
-    first["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "分析故事定义与类型"}
+    first["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "story-definition-analysis"}
     first.update(
         {
             "summary": "工具执行失败：npm test，exit_code=1。",
@@ -117,7 +117,7 @@ def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tm
         }
     )
     second = _base_item("tool-failure-b", "tool_execution_failure", "error")
-    second["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "分析故事定义与类型"}
+    second["source_refs"] = {"conversation_ref": "conversation-1", "session_title": "story-definition-analysis"}
     second["occurred_at"] = "2026-06-18T11:00:00+00:00"  # 比 first 晚 → 详情按最新在前展示
     second.update(
         {
@@ -142,7 +142,7 @@ def test_tool_execution_failures_aggregate_by_conversation_tool_and_exit_code(tm
     assert signals[0]["title"] == "本会话 2 次 exec_command 执行失败，退出码 1"
     assert signals[0]["occurrence_count"] == 2
     assert [group["group_type"] for group in detail["evidence_groups"]] == ["failure"]
-    assert detail["linked_conversations"][0]["session_title"] == "分析故事定义与类型"
+    assert detail["linked_conversations"][0]["session_title"] == "story-definition-analysis"
     # 详情命中事件按最新在前展示（second 更晚，故 python -m pytest 在前）
     assert [item["tool_context"]["command"] for item in detail["evidence_groups"][0]["items"]] == ["python -m pytest", "npm test"]
 
@@ -169,16 +169,16 @@ def test_signals_expose_and_filter_workspace_scope(tmp_path):
             "error_signature": {"signature_key": "tool_execution_failure:workspace:exit:1", "category": "tool_execution_failure"},
         }
     )
-    _with_workspace(item, "Agent Observer")
+    _with_workspace(item, "Test Project A")
     with connect(tmp_path / "observer.sqlite") as conn:
         _ingest(conn, [item])
-        queue = list_signals(conn, window="all", workspace_query="observer")
+        queue = list_signals(conn, window="all", workspace_query="test")
         detail = get_signal_detail(conn, queue["signals"][0]["signal_id"])
 
     assert queue["total"] == 1
     assert queue["signals"][0]["workspace_summary"]["mode"] == "single"
-    assert queue["signals"][0]["workspace_summary"]["label"] == "Agent Observer"
-    assert detail["workspace_refs"][0]["workspace_label"] == "Agent Observer"
+    assert queue["signals"][0]["workspace_summary"]["label"] == "Test Project A"
+    assert detail["workspace_refs"][0]["workspace_label"] == "Test Project A"
 
 
 def test_signals_summarize_multiple_workspaces_and_filter_by_any_workspace(tmp_path):
@@ -189,7 +189,7 @@ def test_signals_summarize_multiple_workspaces_and_filter_by_any_workspace(tmp_p
             "error_signature": {"signature_key": "tool_execution_failure:multi:exit:1", "category": "tool_execution_failure"},
         }
     )
-    _with_workspace(first, "Agent Observer", "D:/workspace/agentic_factory/apps/agent-observer")
+    _with_workspace(first, "Test Project A", "D:/workspace/test-project-a")
     second = _base_item("tool-failure-workspace-b", "tool_execution_failure", "error")
     second.update(
         {
@@ -197,13 +197,13 @@ def test_signals_summarize_multiple_workspaces_and_filter_by_any_workspace(tmp_p
             "error_signature": {"signature_key": "tool_execution_failure:multi:exit:1", "category": "tool_execution_failure"},
         }
     )
-    _with_workspace(second, "Knowledge Kit", "D:/workspace/work_knowledge/knowledge_kit")
+    _with_workspace(second, "Test Project B", "D:/workspace/test-project-b")
     with connect(tmp_path / "observer.sqlite") as conn:
         _ingest(conn, [first, second])
-        queue = list_signals(conn, window="all", workspace_query="knowledge")
+        queue = list_signals(conn, window="all", workspace_query="project-b")
 
     assert queue["total"] == 1
-    assert queue["signals"][0]["workspace_summary"] == {"mode": "single", "label": "Knowledge Kit", "count": 1}
+    assert queue["signals"][0]["workspace_summary"] == {"mode": "single", "label": "Test Project B", "count": 1}
 
 
 def test_usage_events_do_not_generate_behavior_signals(tmp_path):

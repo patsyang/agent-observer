@@ -13,63 +13,7 @@ from app.package.builder import build_windows_package
 from app.policy import update_effective_policy
 from app.processing.jobs import run_next_job
 from app.behavior_signals.service import list_signals
-from source_payloads import default_sources, default_versions
-
-
-def _write_codex_fixture(codex_home):
-    sessions = codex_home / "sessions"
-    sessions.mkdir(parents=True)
-    records = [
-        {
-            "timestamp": "2026-06-18T10:00:00+00:00",
-            "type": "tool_result",
-            "tool": "shell",
-            "exit_code": 1,
-            "phase": "test",
-            "conversation_id": "conversation-package",
-            "session_id": "session-package",
-            "summary": "test command failed",
-        },
-        {
-            "timestamp": "2026-06-18T10:02:00+00:00",
-            "type": "usage",
-            "total_tokens": 120,
-            "activity_tags": ["test_run"],
-            "conversation_id": "conversation-package",
-            "session_id": "session-package",
-        },
-        {
-            "timestamp": "2026-06-18T10:03:00+00:00",
-            "type": "message",
-            "role": "user",
-            "content": "请检查 Dashboard 为什么看不到原始 Prompt",
-            "conversation_id": "conversation-package",
-            "session_id": "session-package",
-        },
-    ]
-    (sessions / "session-package.jsonl").write_text("\n".join(json.dumps(item) for item in records), encoding="utf-8")
-
-
-def _write_workbuddy_fixture(workbuddy_home):
-    projects = workbuddy_home / "projects" / "demo"
-    projects.mkdir(parents=True)
-    records = [
-        {
-            "timestamp": "2026-06-18T10:04:00+00:00",
-            "type": "message",
-            "role": "user",
-            "content": "请检查 WorkBuddy 采集",
-            "sessionId": "session-workbuddy-package",
-        },
-        {
-            "timestamp": "2026-06-18T10:05:00+00:00",
-            "type": "function_call_result",
-            "name": "shell",
-            "output": "1 passed",
-            "sessionId": "session-workbuddy-package",
-        },
-    ]
-    (projects / "conversation.jsonl").write_text("\n".join(json.dumps(item) for item in records), encoding="utf-8")
+from source_payloads import default_sources, default_versions, write_codex_fixture as _write_codex_fixture, write_workbuddy_fixture as _write_workbuddy_fixture
 
 
 def test_register_reuses_collector_and_returns_policy(tmp_path):

@@ -5,7 +5,7 @@ import os
 import time
 
 from app.collector_client.telemetry import collect_facts
-
+from source_payloads import write_real_shape_session as _write_real_shape_session
 
 def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
     sessions = codex_home / "sessions"
@@ -17,7 +17,7 @@ def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
             "tool": "shell",
             "exit_code": 1,
             "phase": "run",
-            "project": "agent-observer",
+            "project": "test-project",
             "conversation_id": "conversation-001",
             "session_id": "session-001",
             "summary": "shell command failed while running tests",
@@ -29,7 +29,7 @@ def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
             "activity_tags": ["shell_debug", "test_run"],
             "conversation_id": "conversation-001",
             "session_id": "session-001",
-            "project": "agent-observer",
+            "project": "test-project",
         },
         {
             "timestamp": "2026-06-18T10:03:00+00:00",
@@ -39,7 +39,7 @@ def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
             "path": "backend/app/policy.py",
             "conversation_id": "conversation-001",
             "session_id": "session-001",
-            "project": "agent-observer",
+            "project": "test-project",
         },
         {
             "timestamp": "2026-06-18T10:04:00+00:00",
@@ -51,114 +51,14 @@ def _write_session(codex_home, name: str = "session-001.jsonl") -> None:
             },
             "conversation_id": "conversation-001",
             "session_id": "session-001",
-            "project": "agent-observer",
+            "project": "test-project",
         },
         {
             "timestamp": "2026-06-18T10:05:00+00:00",
             "type": "message",
             "conversation_id": "conversation-001",
             "session_id": "session-001",
-            "project": "agent-observer",
-        },
-    ]
-    (sessions / name).write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
-
-
-def _write_real_shape_session(codex_home, name: str = "real-shape.jsonl") -> None:
-    sessions = codex_home / "sessions"
-    sessions.mkdir(parents=True, exist_ok=True)
-    records = [
-        {
-            "timestamp": "2026-06-18T11:00:00+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "name": "shell_command",
-                "call_id": "call-real-001",
-                "arguments": json.dumps({
-                    "command": "python -m pytest backend/tests",
-                    "workdir": "D:/workspace/agentic_factory/apps/agent-observer",
-                    "timeout_ms": 120000,
-                }),
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:01:00+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call_output",
-                "call_id": "call-real-001",
-                "output": "Exit code: 1\nWall time: 1.0 seconds\nOutput omitted by fixture",
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:02:00+00:00",
-            "type": "event_msg",
-            "payload": {
-                "type": "token_count",
-                "info": {
-                    "last_token_usage": {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "total_tokens": 120},
-                    "total_token_usage": {"input_tokens": 100, "cached_input_tokens": 60, "output_tokens": 20, "total_tokens": 120},
-                    "model_context_window": 258400,
-                },
-                "rate_limits": {},
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:03:00+00:00",
-            "type": "event_msg",
-            "payload": {
-                "type": "patch_apply_end",
-                "call_id": "call-real-002",
-                "success": True,
-                "status": "completed",
-                "changes": {"backend/app/collector_client/telemetry.py": {"additions": 3, "deletions": 1}},
-                "stdout": "not uploaded",
-                "stderr": "",
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:03:10+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "name": "shell_command",
-                "call_id": "call-real-token-telemetry",
-                "arguments": json.dumps({
-                    "command": 'git commit -m "task-execution-state 与 token telemetry 契约"',
-                    "workdir": "D:/workspace/agentic_factory/apps/agent-observer",
-                }),
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:03:30+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "function_call",
-                "name": "shell_command",
-                "call_id": "call-real-003",
-                "arguments": json.dumps({
-                    "command": "Get-Content $env:USERPROFILE/.codex/auth.json",
-                    "workdir": "D:/workspace/agentic_factory/apps/agent-observer",
-                }),
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:04:00+00:00",
-            "type": "response_item",
-            "payload": {
-                "type": "message",
-                "role": "user",
-                "content": [{"type": "input_text", "text": "请检查 Dashboard 为什么看不到原始 Prompt"}],
-            },
-        },
-        {
-            "timestamp": "2026-06-18T11:05:00+00:00",
-            "type": "event_msg",
-            "payload": {
-                "type": "reasoning",
-                "summary": "模型正在判断证据链刷新路径",
-            },
+            "project": "test-project",
         },
     ]
     (sessions / name).write_text("\n".join(json.dumps(record) for record in records), encoding="utf-8")
@@ -364,9 +264,9 @@ def test_codex_source_template_understands_real_codex_jsonl_shapes(tmp_path):
     assert {"tool_call", "tool_execution_failure", "usage", "file_change", "agent_prompt", "agent_reasoning"} <= categories
     prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
     assert prompt_fact["summary"] == "记录到 用户 Prompt，已上传原始内容。"
-    assert prompt_fact["projection"]["content_length"] == len("请检查 Dashboard 为什么看不到原始 Prompt")
-    assert prompt_fact["projection"]["prompt_text"] == "请检查 Dashboard 为什么看不到原始 Prompt"
-    assert "请检查 Dashboard" in json.dumps(prompt_fact, ensure_ascii=False)
+    assert prompt_fact["projection"]["content_length"] == len("check dashboard prompt visibility")
+    assert prompt_fact["projection"]["prompt_text"] == "check dashboard prompt visibility"
+    assert "check dashboard" in json.dumps(prompt_fact, ensure_ascii=False)
     usage_fact = next(fact for fact in facts if fact["category"] == "usage")
     assert usage_fact["usage"]["units"] == 60
     assert usage_fact["projection"]["context_total_tokens"] == 120
@@ -434,8 +334,8 @@ def test_codex_source_template_attaches_latest_session_title(tmp_path):
     (codex_home / "session_index.jsonl").write_text(
         "\n".join(
             [
-                json.dumps({"id": "session-001", "thread_name": "旧会话名", "updated_at": "2026-06-18T09:00:00Z"}),
-                json.dumps({"id": "session-001", "thread_name": "分析信号定义与类型-Grill", "updated_at": "2026-06-18T10:00:00Z"}),
+                json.dumps({"id": "session-001", "thread_name": "old session title", "updated_at": "2026-06-18T09:00:00Z"}),
+                json.dumps({"id": "session-001", "thread_name": "signal-definition-and-types-v2", "updated_at": "2026-06-18T10:00:00Z"}),
             ]
         ),
         encoding="utf-8",
@@ -453,19 +353,19 @@ def test_codex_source_template_attaches_latest_session_title(tmp_path):
 
     business_facts = [fact for fact in facts if fact["category"] != "collector_health"]
     assert business_facts
-    assert {fact["source_refs"]["session_title"] for fact in business_facts} == {"分析信号定义与类型-Grill"}
+    assert {fact["source_refs"]["session_title"] for fact in business_facts} == {"signal-definition-and-types-v2"}
 
 
 def test_codex_source_template_attaches_workspace_label_from_global_state(tmp_path):
     codex_home = tmp_path / ".codex"
     sessions = codex_home / "sessions"
     sessions.mkdir(parents=True)
-    workspace_path = "D:/workspace/agentic_factory/apps/agent-observer"
+    workspace_path = "D:/workspace/test-project"
     (codex_home / ".codex-global-state.json").write_text(
         json.dumps(
             {
                 "electron-workspace-root-labels": {
-                    "D:\\workspace\\agentic_factory\\apps\\agent-observer": "Agent Observer"
+                    "D:\\workspace\\test-project": "Test Project"
                 }
             }
         ),
@@ -501,7 +401,7 @@ def test_codex_source_template_attaches_workspace_label_from_global_state(tmp_pa
 
     prompt_fact = next(fact for fact in facts if fact["category"] == "agent_prompt")
     refs = prompt_fact["source_refs"]
-    assert refs["workspace_label"] == "Agent Observer"
-    assert refs["workspace_path"].endswith("agent-observer")
+    assert refs["workspace_label"] == "Test Project"
+    assert refs["workspace_path"].endswith("test-project")
     assert refs["workspace_alias_source"] == "codex_global_state"
     assert refs["workspace_confidence"] == "high"
