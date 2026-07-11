@@ -272,7 +272,7 @@ export function DashboardPage({
           value={`${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
           note="在线 / 总数"
         />
-        <Metric label="活跃会话" value={formatNumber(state.activeConversations)} note="窗口内有活动的会话" />
+        <Metric label="活跃对话" value={formatNumber(state.activeConversations)} note="窗口内有活动的对话" />
         <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
         <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <RiskHeadlineMetric
