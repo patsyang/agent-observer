@@ -51,10 +51,13 @@ def test_semantic_nonzero_exit_registry_has_expected_categories():
     "command,expected_category",
     [
         ("rg -n -F 'test-pattern' file1.md file2.html", "search"),
+        ("rg --files -g package.json -g tsconfig.json", "search"),
         ("findstr /s 'pattern' *.txt", "search"),
         ("Get-ChildItem | Select-String 'pattern'", "search"),
         ("git diff --stat", "git"),
         ("git status", "git"),
+        ("tsc --noEmit", "build"),
+        ("npx tsc", "build"),
     ],
 )
 def test_command_category_search_and_git(command, expected_category):

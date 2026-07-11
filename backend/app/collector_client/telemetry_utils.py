@@ -98,12 +98,12 @@ def command_category(command: str) -> str:
         return "permission_change"
     if any(term in lowered for term in ("pytest", "vitest", "playwright test", "npm test", "npm run test")):
         return "test"
-    if any(term in lowered for term in ("npm run build", "tsc", "vite build")):
-        return "build"
-    if lowered.strip().startswith("git "):
-        return "git"
     if any(term in lowered for term in ("rg ", "select-string", "findstr")):
         return "search"
+    if lowered.strip().startswith("git "):
+        return "git"
+    if any(term in lowered for term in ("npm run build", "vite build")) or re.search(r"\btsc\b", lowered):
+        return "build"
     if any(term in lowered for term in ("get-content", "type ", "cat ")):
         return "file_read"
     if re.search(r"\b(npm|pip|python -m pip)\b", lowered):
