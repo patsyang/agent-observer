@@ -64,6 +64,7 @@ scripts/*.ps1
 
 # Runtime data (generated at runtime)
 data/runtime/
+data/logs/
 
 # Data directory runtime artifacts
 data/packages/
@@ -86,6 +87,7 @@ frontend/apps/
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite
 backend/data/packages/
+backend/data/logs/
 backend/*.sqlite
 backend/*.db
 backend/app/*.sqlite
