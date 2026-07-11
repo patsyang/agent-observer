@@ -86,6 +86,7 @@ frontend/apps/
 
 # Backend data (keep only migrations, not runtime DBs)
 backend/data/*.sqlite
+backend/data/*.db
 backend/data/packages/
 backend/data/logs/
 backend/*.sqlite
