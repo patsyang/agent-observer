@@ -15,7 +15,9 @@ const mockResponse: McpCallsResponse = {
       mcp_tool: 'read_file',
       mcp_duration_ms: 42,
       mcp_is_error: false,
-      argument_keys: ['path', 'encoding'],
+      mcp_args_summary: '读取 /etc/config.yaml',
+      arguments: [{ key: 'path', value: '/etc/config.yaml' }, { key: 'encoding', value: 'utf-8' }],
+      result_text: 'file content here',
       risk_signals: []
     },
     {
@@ -26,7 +28,9 @@ const mockResponse: McpCallsResponse = {
       mcp_tool: 'create_issue',
       mcp_duration_ms: 120,
       mcp_is_error: true,
-      argument_keys: ['title', 'body'],
+      mcp_args_summary: '创建 Issue: 修复登录问题',
+      arguments: [{ key: 'title', value: '修复登录问题' }, { key: 'body', value: '详细描述' }],
+      result_text: 'Error: permission denied',
       risk_signals: ['destructive_operation']
     }
   ],
@@ -56,7 +60,7 @@ describe('McpObservationPage', () => {
     expect(screen.getByText('create_issue')).toBeInTheDocument();
   });
 
-  it('expands row to show argument keys and risk signals', async () => {
+  it('expands row to show arguments, result and risk signals', async () => {
     const user = userEvent.setup();
     const loadMcpCalls = vi.fn(async () => mockResponse);
     render(<McpObservationPage loadMcpCalls={loadMcpCalls} />);
@@ -66,8 +70,8 @@ describe('McpObservationPage', () => {
 
     await user.click(rows[1]);
     const detail = await screen.findByTestId('mcp-call-detail');
-    expect(within(detail).getByText('title')).toBeInTheDocument();
-    expect(within(detail).getByText('body')).toBeInTheDocument();
+    expect(within(detail).getByText('修复登录问题')).toBeInTheDocument();
+    expect(within(detail).getByText('Error: permission denied')).toBeInTheDocument();
     expect(within(detail).getByText('destructive_operation')).toBeInTheDocument();
   });
 

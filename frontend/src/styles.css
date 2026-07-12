@@ -1437,6 +1437,48 @@ mark {
   font-size: 12px;
 }
 
+.mcp-detail-section {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.mcp-detail-section > strong {
+  color: #243442;
+  font-size: 13px;
+}
+
+.mcp-arg {
+  display: grid;
+  gap: 2px;
+}
+
+.mcp-arg-key {
+  color: #16795b;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.mcp-arg-value,
+.mcp-result-text {
+  background: #f7fbfb;
+  border: 1px solid #d4e6e2;
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  margin: 0;
+  max-height: 240px;
+  overflow: auto;
+  padding: 8px 10px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.mcp-conv-ref {
+  color: #475467;
+  font-size: 12px;
+}
+
 table {
   background: #ffffff;
   border-collapse: collapse;

@@ -9,6 +9,9 @@ import json
 import sqlite3
 
 
+_MAX_RESULT_TEXT = 500
+
+
 def _fetch_risk_signals(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[str, list[str]]:
     """按 fact_id 批量取关联的 risk_type 列表。"""
     if not fact_ids:
@@ -22,6 +25,47 @@ def _fetch_risk_signals(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[s
     for row in rows:
         result.setdefault(row["fact_id"], []).append(row["risk_type"])
     return result
+
+
+def _extract_detail(raw_content: str | None) -> tuple[list[dict], str]:
+    """从 raw_content 解析 MCP 调用的参数和结果摘要。
+
+    返回 (arguments_list, result_text)。
+    arguments_list 格式: [{"key": "code", "value": "..."}, ...]
+    result_text: result.Ok.content 的文本拼接，截断到 _MAX_RESULT_TEXT 字符。
+    """
+    if not raw_content:
+        return [], ""
+    try:
+        raw = json.loads(raw_content)
+    except (json.JSONDecodeError, TypeError):
+        return [], ""
+    payload = raw.get("payload", {}) if isinstance(raw, dict) else {}
+    if not isinstance(payload, dict):
+        return [], ""
+
+    invocation = payload.get("invocation", {})
+    args_list: list[dict] = []
+    if isinstance(invocation, dict):
+        args = invocation.get("arguments")
+        if isinstance(args, dict):
+            for k, v in args.items():
+                args_list.append({"key": k, "value": str(v) if not isinstance(v, str) else v})
+
+    result_text = ""
+    result = payload.get("result")
+    if isinstance(result, dict):
+        ok = result.get("Ok")
+        if isinstance(ok, dict):
+            content = ok.get("content", [])
+            if isinstance(content, list):
+                parts = [c.get("text", "") for c in content if isinstance(c, dict) and c.get("type") == "text"]
+                result_text = "\n".join(parts)[:_MAX_RESULT_TEXT]
+        elif "Err" in result:
+            err = result["Err"]
+            result_text = str(err)[:_MAX_RESULT_TEXT]
+
+    return args_list, result_text
 
 
 def list_mcp_calls(
@@ -42,7 +86,7 @@ def list_mcp_calls(
     summary 反映筛选后、分页前的集合。
     """
     sql = (
-        "select ep.fact_id, ep.projection_json, of.occurred_at, of.conversation_ref "
+        "select ep.fact_id, ep.projection_json, ep.raw_content, of.occurred_at, of.conversation_ref "
         "from evidence_projections ep "
         "join observed_facts of on ep.fact_id = of.fact_id "
         "where ep.projection_json like '%\"mcp_server\"%'"
@@ -70,6 +114,7 @@ def list_mcp_calls(
             "occurred_at": row["occurred_at"],
             "conversation_ref": row["conversation_ref"],
             "projection": projection,
+            "raw_content": row["raw_content"],
         })
 
     risk_map = _fetch_risk_signals(conn, [p["fact_id"] for p in parsed])
@@ -84,6 +129,7 @@ def list_mcp_calls(
     items = []
     for p in page_items:
         proj = p["projection"]
+        arguments, result_text = _extract_detail(p["raw_content"])
         items.append({
             "fact_id": p["fact_id"],
             "occurred_at": p["occurred_at"],
@@ -92,7 +138,9 @@ def list_mcp_calls(
             "mcp_tool": proj.get("mcp_tool"),
             "mcp_duration_ms": proj.get("mcp_duration_ms"),
             "mcp_is_error": proj.get("mcp_is_error", False),
-            "argument_keys": proj.get("argument_keys", []),
+            "mcp_args_summary": proj.get("mcp_args_summary", ""),
+            "arguments": arguments,
+            "result_text": result_text,
             "risk_signals": risk_map.get(p["fact_id"], []),
         })
 

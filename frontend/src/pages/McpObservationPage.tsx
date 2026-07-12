@@ -122,10 +122,10 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
             <th>时间</th>
             <th>Server</th>
             <th>Tool</th>
+            <th>操作摘要</th>
             <th>耗时</th>
             <th>错误</th>
-            <th>参数键</th>
-            <th>风险信号</th>
+            <th>风险</th>
           </tr>
         </thead>
         <tbody>
@@ -138,23 +138,38 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
                 <td data-label="时间">{formatFullDateTime(item.occurred_at)}</td>
                 <td data-label="Server">{item.mcp_server}</td>
                 <td data-label="Tool">{item.mcp_tool}</td>
+                <td data-label="操作摘要">{item.mcp_args_summary || '-'}</td>
                 <td data-label="耗时">{formatNumber(item.mcp_duration_ms)} ms</td>
                 <td data-label="错误">{item.mcp_is_error ? '是' : '否'}</td>
-                <td data-label="参数键">{formatNumber(item.argument_keys.length)}</td>
-                <td data-label="风险信号">{formatNumber(item.risk_signals.length)}</td>
+                <td data-label="风险">{formatNumber(item.risk_signals.length)}</td>
               </tr>
               {expandedId === item.fact_id && (
                 <tr data-testid="mcp-call-detail">
                   <td colSpan={7}>
-                    <div className="source-list">
-                      <strong>参数键：</strong>
-                      {item.argument_keys.map((key) => (
-                        <span className="source-pill" key={key}>{key}</span>
-                      ))}
+                    {item.arguments.length > 0 && (
+                      <div className="mcp-detail-section">
+                        <strong>参数</strong>
+                        {item.arguments.map((arg) => (
+                          <div className="mcp-arg" key={arg.key}>
+                            <span className="mcp-arg-key">{arg.key}</span>
+                            <pre className="mcp-arg-value">{arg.value}</pre>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {item.result_text && (
+                      <div className="mcp-detail-section">
+                        <strong>结果</strong>
+                        <pre className="mcp-result-text">{item.result_text}</pre>
+                      </div>
+                    )}
+                    <div className="mcp-detail-section">
+                      <strong>会话</strong>
+                      <span className="mcp-conv-ref">{item.conversation_ref}</span>
                     </div>
                     {item.risk_signals.length > 0 && (
-                      <div className="source-list">
-                        <strong>风险信号：</strong>
+                      <div className="mcp-detail-section">
+                        <strong>风险信号</strong>
                         {item.risk_signals.map((signal) => (
                           <span className="source-pill" key={signal}>{signal}</span>
                         ))}
@@ -168,7 +183,7 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
         </tbody>
       </table>
 
-      <div className="list-footer">
+      <div className="pagination">
         <button disabled={page <= 1} onClick={() => setPage(page - 1)} type="button">上一页</button>
         <span>第 {formatNumber(page)} 页 / 共 {formatNumber(Math.max(1, Math.ceil(total / PAGE_SIZE)))} 页</span>
         <button disabled={!hasMore} onClick={() => setPage(page + 1)} type="button">下一页</button>

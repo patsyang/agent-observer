@@ -204,3 +204,28 @@ def test_mcp_event_raw_content_uploaded_preserved():
     fact = _tool_fact(_common(), record)
     assert fact is not None
     assert fact["projection"]["raw_content_uploaded"] is True
+
+
+def test_mcp_projection_includes_args_summary():
+    """MCP 事件 projection 包含 mcp_args_summary，取 code 首行。"""
+    record = _mcp_record(
+        invocation=_default_invocation(),
+        duration={"nanos": 1000000, "secs": 0},
+        result=_ok_result(),
+    )
+    fact = _tool_fact(_common(), record)
+    assert fact is not None
+    assert fact["projection"]["mcp_args_summary"] == "console.log('hello')"
+
+
+def test_mcp_projection_args_summary_uses_title_when_present():
+    """arguments 含 title 时 mcp_args_summary 取 title。"""
+    invocation = {
+        "server": "node_repl",
+        "tool": "js",
+        "arguments": {"code": "console.log('x')", "title": "测试操作"},
+    }
+    record = _mcp_record(invocation=invocation, duration={"nanos": 1000000, "secs": 0}, result=_ok_result())
+    fact = _tool_fact(_common(), record)
+    assert fact is not None
+    assert fact["projection"]["mcp_args_summary"] == "测试操作"

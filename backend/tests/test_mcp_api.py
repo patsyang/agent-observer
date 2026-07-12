@@ -35,7 +35,8 @@ def _create_test_db() -> sqlite3.Connection:
         create table evidence_projections (
             projection_id text primary key,
             fact_id text not null,
-            projection_json text not null
+            projection_json text not null,
+            raw_content text
         )
         """
     )
@@ -59,11 +60,11 @@ def _insert_fact(conn: sqlite3.Connection, fact_id: str, occurred_at: str, conve
     )
 
 
-def _insert_projection(conn: sqlite3.Connection, fact_id: str, projection: dict, projection_id: str | None = None) -> None:
+def _insert_projection(conn: sqlite3.Connection, fact_id: str, projection: dict, projection_id: str | None = None, raw_content: str | None = None) -> None:
     pid = projection_id or f"proj-{fact_id}"
     conn.execute(
-        "insert into evidence_projections (projection_id, fact_id, projection_json) values (?, ?, ?)",
-        (pid, fact_id, json.dumps(projection)),
+        "insert into evidence_projections (projection_id, fact_id, projection_json, raw_content) values (?, ?, ?, ?)",
+        (pid, fact_id, json.dumps(projection), raw_content),
     )
 
 
@@ -82,6 +83,7 @@ def _mcp_projection(
     duration_ms: int = 5,
     is_error: bool = False,
     argument_keys: list[str] | None = None,
+    args_summary: str = "",
 ) -> dict:
     return {
         "tool_name": tool,
@@ -90,6 +92,7 @@ def _mcp_projection(
         "mcp_duration_ms": duration_ms,
         "mcp_is_error": is_error,
         "argument_keys": argument_keys if argument_keys is not None else ["code"],
+        "mcp_args_summary": args_summary,
     }
 
 
@@ -102,23 +105,23 @@ def db_with_mcp_records() -> sqlite3.Connection:
     _insert_fact(conn, "fact-mcp-1", "2026-07-12T10:00:00+00:00", "ref:conv1")
     _insert_projection(conn, "fact-mcp-1", _mcp_projection(
         server="node_repl", tool="js", duration_ms=5, is_error=False,
-        argument_keys=["code", "timeout_ms"],
-    ))
+        argument_keys=["code", "timeout_ms"], args_summary="console.log('hello')",
+    ), raw_content=json.dumps({"payload": {"invocation": {"arguments": {"code": "console.log('hello')"}}, "result": {"Ok": {"content": [{"text": "hello", "type": "text"}], "isError": False}}}}))
 
     # MCP 2: filesystem/read_file, 有 risk + error
     _insert_fact(conn, "fact-mcp-2", "2026-07-12T11:00:00+00:00", "ref:conv2")
     _insert_projection(conn, "fact-mcp-2", _mcp_projection(
         server="filesystem", tool="read_file", duration_ms=12, is_error=True,
-        argument_keys=["path"],
-    ))
+        argument_keys=["path"], args_summary="/etc/config.yaml",
+    ), raw_content=json.dumps({"payload": {"invocation": {"arguments": {"path": "/etc/config.yaml"}}, "result": {"Err": "permission denied"}}}))
     _insert_risk(conn, "fact-mcp-2", "sensitive_content_exposure")
 
     # MCP 3: node_repl/exec, 有 risk
     _insert_fact(conn, "fact-mcp-3", "2026-07-12T12:00:00+00:00", "ref:conv3")
     _insert_projection(conn, "fact-mcp-3", _mcp_projection(
         server="node_repl", tool="exec", duration_ms=8, is_error=False,
-        argument_keys=["cmd"],
-    ))
+        argument_keys=["cmd"], args_summary="rm -rf /tmp/cache",
+    ), raw_content=json.dumps({"payload": {"invocation": {"arguments": {"cmd": "rm -rf /tmp/cache"}}, "result": {"Ok": {"content": [{"text": "done", "type": "text"}], "isError": False}}}}))
     _insert_risk(conn, "fact-mcp-3", "destructive_operation")
 
     # 非 MCP 记录：projection 不含 mcp_server
@@ -151,8 +154,9 @@ class TestListMcpCalls:
         assert item["mcp_tool"] == "js"
         assert item["mcp_duration_ms"] == 5
         assert item["mcp_is_error"] is False
-        assert "code" in item["argument_keys"]
-        assert "timeout_ms" in item["argument_keys"]
+        assert item["mcp_args_summary"] == "console.log('hello')"
+        assert any(a["key"] == "code" for a in item["arguments"])
+        assert item["result_text"] == "hello"
         assert item["risk_signals"] == []
 
     def test_filter_by_server_node_repl(self, db_with_mcp_records):

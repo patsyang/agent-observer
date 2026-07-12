@@ -1,3 +1,8 @@
+export interface McpCallArgument {
+  key: string;
+  value: string;
+}
+
 export interface McpCallItem {
   fact_id: string;
   occurred_at: string;
@@ -6,7 +11,9 @@ export interface McpCallItem {
   mcp_tool: string;
   mcp_duration_ms: number;
   mcp_is_error: boolean;
-  argument_keys: string[];
+  mcp_args_summary: string;
+  arguments: McpCallArgument[];
+  result_text: string;
   risk_signals: string[];
 }
 

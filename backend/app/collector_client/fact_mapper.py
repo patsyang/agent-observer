@@ -242,6 +242,19 @@ def _low_evidence_fact(common: dict, record: dict) -> dict:
         },
     }
 
+def _mcp_args_summary(invocation: dict) -> str:
+    """从 invocation.arguments 提取一句话摘要用于列表展示。"""
+    args = invocation.get("arguments")
+    if not isinstance(args, dict) or not args:
+        return ""
+    if isinstance(args.get("title"), str) and args["title"]:
+        return args["title"][:80]
+    if isinstance(args.get("code"), str) and args["code"]:
+        first_line = args["code"].split("\n", 1)[0].strip()
+        return first_line[:80] or args["code"][:80]
+    return json.dumps(args, ensure_ascii=False)[:80]
+
+
 def _mcp_projection(payload: dict) -> dict | None:
     """从 MCP 事件 payload 提取 server/tool/duration_ms/is_error projection 字段。
 
@@ -271,6 +284,7 @@ def _mcp_projection(payload: dict) -> dict | None:
         "mcp_tool": tool,
         "mcp_duration_ms": duration_ms,
         "mcp_is_error": is_error,
+        "mcp_args_summary": _mcp_args_summary(invocation),
     }
 
 
