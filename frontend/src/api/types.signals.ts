@@ -67,6 +67,10 @@ export interface SignalEvidenceItem {
   tool_name?: string | null;
   exit_code?: string | number | null;
   tool_context?: ToolContext | null;
+  mcp_server?: string | null;
+  mcp_tool?: string | null;
+  mcp_duration_ms?: number | null;
+  mcp_is_error?: boolean | null;
 }
 
 export interface ToolContext {

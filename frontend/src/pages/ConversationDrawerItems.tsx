@@ -1,4 +1,5 @@
 import type { ConversationHit, ConversationMessage, ToolContext } from '../api/types';
+import { McpContextBlock } from '../components/McpContextBlock';
 import { ToolContextBlock } from '../components/ToolContextBlock';
 import { SensitiveEvidence } from '../components/SensitiveEvidence';
 import { factTypeLabel, formatFullDateTime, severityLabel } from './dashboardLabels';
@@ -86,6 +87,7 @@ export function HitItem({
         <span>{severityLabel(hit.severity)}</span>
       </header>
       <ToolContextBlock context={hit.tool_context as ToolContext | null} />
+      {hit.mcp_server && <McpContextBlock mcpServer={hit.mcp_server} mcpTool={hit.mcp_tool ?? ''} mcpDurationMs={hit.mcp_duration_ms} mcpIsError={hit.mcp_is_error} />}
       <SensitiveEvidence matches={hit.sensitive_matches} />
       <p>{renderHighlightedText(hitReadableText(hit), highlightTerms)}</p>
       <small>{formatFullDateTime(hit.occurred_at)}</small>

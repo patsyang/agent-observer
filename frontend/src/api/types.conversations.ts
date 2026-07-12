@@ -64,6 +64,10 @@ export interface ConversationHit {
   content_preview: string;
   tool_context?: ToolContext | null;
   sensitive_matches?: SensitiveMatch[];
+  mcp_server?: string | null;
+  mcp_tool?: string | null;
+  mcp_duration_ms?: number | null;
+  mcp_is_error?: boolean | null;
 }
 
 export interface ConversationDetail extends ConversationSummary {

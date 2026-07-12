@@ -4,6 +4,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { ConversationDrawer } from './ConversationDrawer';
 import { EnrichmentPanel } from '../components/EnrichmentPanel';
 import { HandleSignalDialog } from '../components/HandleSignalDialog';
+import { McpContextBlock } from '../components/McpContextBlock';
 import { SensitiveEvidence } from '../components/SensitiveEvidence';
 import { signalKindLabel } from '../components/signalLabels';
 import type {
@@ -179,6 +180,7 @@ export function SignalDetailPage({
                       <small>{item.content_preview}</small>
                       <SensitiveEvidence matches={item.sensitive_matches} />
                       <ToolContextBlock context={item.tool_context} compact />
+                      {item.mcp_server && <McpContextBlock mcpServer={item.mcp_server} mcpTool={item.mcp_tool ?? ''} mcpDurationMs={item.mcp_duration_ms} mcpIsError={item.mcp_is_error} />}
                     </div>
                     {item.fact_id && (
                       <button className="compact-button" onClick={() => openEvidenceConversation(item)} type="button">

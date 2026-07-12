@@ -394,10 +394,17 @@ a {
   margin-top: 0;
 }
 
-.compact-filter input {
+.compact-filter input:not([type="checkbox"]) {
   min-height: 36px;
   min-width: 0;
   width: 100%;
+}
+
+.compact-filter input[type="checkbox"] {
+  cursor: pointer;
+  height: 16px;
+  margin: 0;
+  width: 16px;
 }
 
 .compact-filter select {

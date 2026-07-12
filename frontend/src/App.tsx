@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivitySquare, LayoutDashboard, MessagesSquare, Radio } from 'lucide-react';
+import { ActivitySquare, LayoutDashboard, MessagesSquare, Network, Radio } from 'lucide-react';
 
 import {
   clientPackageUrl,
@@ -31,17 +31,20 @@ import {
   fetchConversations,
   locateConversationMessage,
 } from './api/conversations';
+import { fetchMcpCalls } from './api/mcp';
 import { AccessConfigDrawer } from './components/AccessConfigDrawer';
 import { CollectorsPage } from './pages/CollectorsPage';
 import { ConversationQueryPage } from './pages/ConversationQueryPage';
 import { DashboardPage } from './pages/DashboardPage';
+import { McpObservationPage } from './pages/McpObservationPage';
 import { SignalDetailPage } from './pages/SignalDetailPage';
 
-type View = 'dashboard' | 'collectors' | 'conversations';
+type View = 'dashboard' | 'collectors' | 'conversations' | 'mcp';
 
 const navItems: Array<{ view: View; label: string; desc: string; icon: typeof LayoutDashboard }> = [
   { view: 'dashboard', label: '观测总览', desc: '信号与用量', icon: LayoutDashboard },
   { view: 'conversations', label: '会话查询', desc: '输入与响应', icon: MessagesSquare },
+  { view: 'mcp', label: 'MCP 观测', desc: '工具调用审计', icon: Network },
   { view: 'collectors', label: '采集器', desc: '状态与策略', icon: Radio }
 ];
 
@@ -101,7 +104,7 @@ export function App() {
       <main className="main">
         <header className="topbar">
           <div>
-            <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : '采集器'}</h1>
+            <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : view === 'mcp' ? 'MCP 观测' : '采集器'}</h1>
             <p>围绕信号、会话输入输出和 collector 接入状态进行日常排查。</p>
           </div>
           {view === 'dashboard' && <div className="topbar-status-slot" id="dashboard-topbar-status-slot" />}
@@ -165,6 +168,9 @@ export function App() {
             loadCollectors={fetchCollectors}
             deleteCollector={deleteCollector}
           />
+        )}
+        {view === 'mcp' && (
+          <McpObservationPage loadMcpCalls={fetchMcpCalls} />
         )}
         {drawerOpen && (
           <AccessConfigDrawer
