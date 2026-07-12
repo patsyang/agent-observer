@@ -32,7 +32,7 @@ def event_type(record: dict, value: dict) -> str:
 
 
 def arguments(value: dict) -> dict:
-    raw = value.get("arguments") or value.get("input") or {}
+    raw = value.get("arguments") or value.get("input")
     if isinstance(raw, dict):
         return raw
     if isinstance(raw, str) and raw.strip().startswith("{"):
@@ -41,6 +41,10 @@ def arguments(value: dict) -> dict:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
+    # MCP 事件回退：payload.arguments / payload.input 为空时查 payload.invocation.arguments
+    invocation = value.get("invocation")
+    if isinstance(invocation, dict):
+        return arguments(invocation)
     return {}
 
 

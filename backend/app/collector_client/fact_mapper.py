@@ -242,6 +242,38 @@ def _low_evidence_fact(common: dict, record: dict) -> dict:
         },
     }
 
+def _mcp_projection(payload: dict) -> dict | None:
+    """从 MCP 事件 payload 提取 server/tool/duration_ms/is_error projection 字段。
+
+    payload.invocation 缺失或非 dict 时返回 None，调用方不追加 MCP 字段。
+    duration 缺失时 mcp_duration_ms=0；result 缺失或非 Err 时 mcp_is_error=False。
+    """
+    invocation = payload.get("invocation")
+    if not isinstance(invocation, dict):
+        return None
+    server = str(invocation.get("server") or "")
+    tool = str(invocation.get("tool") or "")
+    duration = payload.get("duration")
+    duration_ms = 0
+    if isinstance(duration, dict):
+        duration_ms = int((_int(duration.get("secs")) * 1_000_000_000 + _int(duration.get("nanos"))) / 1_000_000)
+    is_error = False
+    result = payload.get("result")
+    if isinstance(result, dict):
+        if "Err" in result:
+            is_error = True
+        else:
+            ok = result.get("Ok")
+            if isinstance(ok, dict) and ok.get("isError") is True:
+                is_error = True
+    return {
+        "mcp_server": server,
+        "mcp_tool": tool,
+        "mcp_duration_ms": duration_ms,
+        "mcp_is_error": is_error,
+    }
+
+
 def _tool_fact(common: dict, record: dict) -> dict | None:
     payload = _payload(record)
     payload_type = _payload_type(record)
@@ -267,6 +299,22 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
     exit_code = _exit_code(record)
     if exit_code and exit_code != 0 and not _is_semantic_nonzero_exit(command_category, exit_code):
         return None
+    mcp_projection = _mcp_projection(payload) if payload_type == "mcp_tool_call_end" else None
+    if mcp_projection and mcp_projection.get("mcp_tool"):
+        tool_name = _clean(mcp_projection["mcp_tool"])
+    projection = {
+        "tool_name": tool_name,
+        "payload_type": payload_type,
+        "command": command,
+        "command_excerpt": command_excerpt(command),
+        "command_category": command_category,
+        "argument_keys": sorted(_safe_key(key) for key in args.keys())[:12],
+        "workdir_hash": _hash(str(args.get("workdir", "")))[:16] if args.get("workdir") else None,
+        "exit_code": exit_code,
+        "raw_content_uploaded": bool(common.get("upload_raw")),
+    }
+    if mcp_projection:
+        projection.update(mcp_projection)
     return {
         **common,
         "fact_type": "tool",
@@ -274,17 +322,7 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
         "quality": "high",
         "severity": "low",
         "summary": f"Agent 调用工具 {tool_name}，类别 {command_category or payload_type}，已提取工具调用摘要。",
-        "projection": {
-            "tool_name": tool_name,
-            "payload_type": payload_type,
-            "command": command,
-            "command_excerpt": command_excerpt(command),
-            "command_category": command_category,
-            "argument_keys": sorted(_safe_key(key) for key in args.keys())[:12],
-            "workdir_hash": _hash(str(args.get("workdir", "")))[:16] if args.get("workdir") else None,
-            "exit_code": exit_code,
-            "raw_content_uploaded": bool(common.get("upload_raw")),
-        },
+        "projection": projection,
     }
 
 

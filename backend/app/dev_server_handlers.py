@@ -32,6 +32,7 @@ from app.evidence_enrichment.service import (
     request_enrichment,
 )
 from app.ingest.service import ingest_telemetry
+from app.mcp.service import list_mcp_calls
 from app.package.builder import build_windows_package
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
@@ -203,6 +204,18 @@ def handle_get(handler) -> None:
                 return handler._json(200, signal_summary(conn, **_summary_query_options(handler.path, "all")))
             if path == "/api/risk-taxonomy":
                 return handler._json(200, taxonomy_payload())
+            if path == "/api/mcp/calls":
+                query = parse_qs(urlparse(handler.path).query)
+                server = _query_one(query, "server")
+                if server == "":
+                    server = None
+                return handler._json(200, list_mcp_calls(
+                    conn,
+                    page=_query_int(query, "page", 1),
+                    page_size=_query_int(query, "page_size", 50),
+                    server=server,
+                    risk_only=_query_bool(query, "risk_only", False),
+                ))
             if path.startswith("/api/signals/") and path.endswith("/enrichments/availability"):
                 try:
                     return handler._json(200, get_enrichment_availability(conn, path.split("/")[3]))

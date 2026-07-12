@@ -484,6 +484,10 @@ def _items(conn: sqlite3.Connection, facts: list[sqlite3.Row], projections: list
                 "exit_code": projection.get("exit_code") or exit_code_from_summary(fact["summary"]),
                 "tool_context": _tool_context(projection),
                 "sensitive_matches": sensitive_matches or [],
+                "mcp_server": full_projection.get("mcp_server"),
+                "mcp_tool": full_projection.get("mcp_tool"),
+                "mcp_duration_ms": full_projection.get("mcp_duration_ms"),
+                "mcp_is_error": full_projection.get("mcp_is_error"),
             }
         )
     return items

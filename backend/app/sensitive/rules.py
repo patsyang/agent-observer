@@ -88,6 +88,22 @@ RULES: list[dict[str, Any]] = [
     _rule("env_file", r"(?:^|[\\/])\.(?:env|environment)(?:\.local)?(?:\.[a-z]+)?$", "sensitive_reference"),
     _rule("credential_file", r"(?:^|[\\/])(?:\.?credentials|\.?netrc|\.?htpasswd|\.?npmrc|\.?pypirc)(?:\.[a-z]+)?$", "sensitive_reference"),
     _rule("ssh_directory", r"(?:^|/)\.ssh/[a-z]+", "sensitive_reference"),
+    # --- 云服务商凭据 ---
+    _rule("anthropic_api_key", r"sk-ant-[A-Za-z0-9_-]{40,}", "token"),
+    _rule("google_api_key", r"AIza[0-9A-Za-z_-]{35}", "token"),
+    _rule("stripe_live_key", r"sk_live_[A-Za-z0-9]{24,}", "token"),
+    _rule("slack_bot_token", r"xoxb-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,}", "token"),
+    _rule("slack_user_token", r"xoxp-[0-9]{10,13}-[0-9]{10,13}-[0-9]{10,13}-[A-Za-z0-9]{24,}", "token"),
+    _rule("slack_webhook_url", r"https://hooks\.slack\.com/services/T[A-Za-z0-9]+/B[A-Za-z0-9]+/[A-Za-z0-9]+", "token"),
+    # --- 数据库连接串 ---
+    _rule("postgres_connection", r"postgresql://[^:\s]+:[^@\s]+@[^\s]+", "secret"),
+    _rule("mysql_connection", r"mysql://[^:\s]+:[^@\s]+@[^\s]+", "secret"),
+    _rule("redis_connection", r"redis://[^:\s]+:[^@\s]+@[^\s]+", "secret"),
+    _rule("mongodb_connection", r"mongodb(?:\+srv)?://[^:\s]+:[^@\s]+@[^\s]+", "secret"),
+    # --- 其他平台 ---
+    _rule("npm_token", r"npm_[A-Za-z0-9]{36,}", "token"),
+    _rule("linear_api_key", r"lin_api_[A-Za-z0-9]{40,}", "token"),
+    _rule("figma_token", r"figd_[A-Za-z0-9]{40,}", "token"),
 ]
 
 # 排除只对 matched_value 做（不对整条 raw_content），避免 "test" 子串让约 20% fact
@@ -112,4 +128,10 @@ EXCLUSION_PATTERNS: list[re.Pattern] = [
     re.compile(r"\b(?:undefined|null|none|nil|getenv|getToken|getString)\b", re.IGNORECASE),  # 空值/代码
     re.compile(r"(?:Utils|Helper|Manager|Factory)\.[A-Za-z_]\w*\s*\("),  # 代码方法调用（JwtTokenUtils.getToken()）
     re.compile(r"[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+\s*\([^)]*\)$"),  # 形如 obj.method(...) 的代码调用
+    # 文档示例值 / 本地测试连接串 —— 命中即降级 low
+    re.compile(r"^AKIA[A-Z0-9]*EXAMPLE$"),  # AWS 文档示例 key
+    re.compile(r"postgresql://[^:]+:[^@]+@(?:localhost|127\.0\.0\.1)"),  # 本地测试连接串
+    re.compile(r"mysql://[^:]+:[^@]+@(?:localhost|127\.0\.0\.1)"),
+    re.compile(r"redis://[^:]+:[^@]+@(?:localhost|127\.0\.0\.1)"),
+    re.compile(r"mongodb(?:\+srv)?://[^:]+:[^@]+@(?:localhost|127\.0\.0\.1)"),
 ]

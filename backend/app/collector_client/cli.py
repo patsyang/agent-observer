@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import urllib.error
 from datetime import datetime
 from pathlib import Path
 from typing import Callable
 
-from app.collector_client.config import CollectorConfig, load_config
+from app.collector_client.config import CollectorConfig, auto_config, load_config
+from app.collector_client.discovery import DiscoveredSource, _discovery_rules, discover_sources
 from app.collector_client.local_log import local_log_emit
 from app.collector_client.runtime import CommandResult, _json_result, _post_heartbeat, _run_once, _set_running, _start
 from app.collector_client.status import _state_payload, _status_payload
@@ -21,6 +23,11 @@ def run(argv: list[str] | None = None, cwd: Path | None = None, emit: Emit | Non
     workdir = cwd or Path.cwd()
     command = args[0] if args else "status"
     config, error = load_config(workdir)
+    if error == "missing_config" and command in ("start", "run-once"):
+        discovered = discover_sources()
+        _emit_discovery_log(emit, discovered)
+        server_url_override = os.environ.get("AGENT_OBSERVER_SERVER_URL")
+        config, error = auto_config(workdir, server_url_override)
     if command == "doctor":
         return _doctor(config, error)
     if error or config is None:
@@ -71,7 +78,44 @@ def _mirror_emit(local_emit: Emit, emit: Emit | None) -> Emit:
     return mirrored
 
 
+def _emit_discovery_log(emit: Emit | None, discovered: list[DiscoveredSource]) -> None:
+    if emit is None:
+        return
+    discovered_map = {item.source_kind: item for item in discovered}
+    for rule in _discovery_rules():
+        item = discovered_map.get(rule["source_kind"])
+        payload: dict[str, object] = {
+            "mode": "discovery",
+            "agent_type": rule["agent_type"],
+            "display_name": rule["display_name"],
+            "found": item is not None,
+        }
+        if item is not None:
+            payload["root"] = str(item.root)
+        emit(json.dumps(payload, sort_keys=True))
+
+
 def _doctor(config: CollectorConfig | None, error: str | None) -> CommandResult:
+    if error == "missing_config":
+        discovered = discover_sources()
+        if discovered:
+            names = "、".join(item.display_name for item in discovered)
+            return _json_result(
+                2,
+                {
+                    "status": "error",
+                    "error": "missing_config",
+                    "message": f"未找到配置文件，但发现 {names} 已安装。执行 start 命令可自动生成配置。",
+                },
+            )
+        return _json_result(
+            2,
+            {
+                "status": "error",
+                "error": "missing_config",
+                "message": "未发现已安装的 Agent，请先安装 Agent 或手动创建配置文件",
+            },
+        )
     if error or config is None:
         return _json_result(2, {"status": "error", "enrichment": error})
     try:
@@ -144,6 +188,12 @@ def _human_log_line(payload: dict[str, object]) -> str:
         return f"[{now}] 等待下一轮采集：{seconds} 秒"
     if mode == "stopped":
         return f"[{now}] collector 已停止，outbox 剩余 {payload.get('outbox_backlog', 0)} 条"
+    if mode == "discovery":
+        if payload.get("found"):
+            return f"[{now}] 发现 {payload.get('display_name')} 日志目录：{payload.get('root')}"
+        return f"[{now}] 未发现 {payload.get('display_name')} 日志目录"
+    if payload.get("error") == "no_agent_found":
+        return f"[{now}] 未发现已安装的 Agent，请先安装 Agent 或手动创建配置文件"
     if payload.get("status") == "error":
         return f"[{now}] 运行失败: {payload.get('error') or payload.get('last_error')}"
     return f"[{now}] {payload.get('status', 'ok')}"

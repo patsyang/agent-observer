@@ -21,8 +21,15 @@ from app.conversations.time_window import normalize_iso_param, window_cutoff
 logger = logging.getLogger("agent-observer.app.conversations.service")
 
 _HIT_COLUMNS = (
-    "fact_id, category, fact_type, severity, occurred_at, summary, content_preview, "
-    "tool_context_json, sensitive_matches_json, source_line"
+    "conversation_hits.fact_id, conversation_hits.category, conversation_hits.fact_type, "
+    "conversation_hits.severity, conversation_hits.occurred_at, conversation_hits.summary, "
+    "conversation_hits.content_preview, conversation_hits.tool_context_json, "
+    "conversation_hits.sensitive_matches_json, conversation_hits.source_line"
+)
+_PROJECTION_JOIN = (
+    "left join evidence_projections ep on ep.fact_id = conversation_hits.fact_id "
+    "and ep.projection_id = (select min(ep2.projection_id) from evidence_projections "
+    "ep2 where ep2.fact_id = conversation_hits.fact_id)"
 )
 _MESSAGE_COLUMNS = (
     "fact_id, role, category, occurred_at, content, raw_available, sensitive_matches_json, source_line"
@@ -334,15 +341,16 @@ def query_conversation_hits(
     where = "conversation_ref = ?"
     params: list = [conversation_ref]
     if category and category.strip():
-        where += " and category = ?"
+        where += " and conversation_hits.category = ?"
         params.append(category.strip())
     total = conn.execute(
         f"select count(*) from conversation_hits where {where}", params
     ).fetchone()[0]
     offset = (current_page - 1) * limit
     rows = conn.execute(
-        f"select {_HIT_COLUMNS} from conversation_hits where {where} "
-        "order by occurred_at desc, fact_id desc limit ? offset ?",
+        f"select {_HIT_COLUMNS}, ep.projection_json from conversation_hits "
+        f"{_PROJECTION_JOIN} where {where} "
+        "order by occurred_at desc, conversation_hits.fact_id desc limit ? offset ?",
         (*params, limit, offset),
     ).fetchall()
     return {
@@ -394,9 +402,10 @@ def query_conversation_hits_by_fact_ids(
         return {"hits": []}
     placeholders = ",".join("?" * len(fact_ids))
     rows = conn.execute(
-        f"select {_HIT_COLUMNS} from conversation_hits "
-        f"where conversation_ref = ? and fact_id in ({placeholders}) "
-        "order by occurred_at desc, fact_id desc",
+        f"select {_HIT_COLUMNS}, ep.projection_json from conversation_hits "
+        f"{_PROJECTION_JOIN} "
+        f"where conversation_ref = ? and conversation_hits.fact_id in ({placeholders}) "
+        "order by occurred_at desc, conversation_hits.fact_id desc",
         (conversation_ref, *fact_ids),
     ).fetchall()
     return {"hits": [_hit_dict(r) for r in rows]}
@@ -462,6 +471,7 @@ def _message_dict(row: sqlite3.Row) -> dict:
 
 
 def _hit_dict(row: sqlite3.Row) -> dict:
+    projection = _loads_dict(row["projection_json"]) or {}
     return {
         "fact_id": row["fact_id"],
         "category": row["category"],
@@ -472,6 +482,10 @@ def _hit_dict(row: sqlite3.Row) -> dict:
         "content_preview": row["content_preview"],
         "tool_context": _loads_dict(row["tool_context_json"]),
         "sensitive_matches": _loads_list(row["sensitive_matches_json"]),
+        "mcp_server": projection.get("mcp_server"),
+        "mcp_tool": projection.get("mcp_tool"),
+        "mcp_duration_ms": projection.get("mcp_duration_ms"),
+        "mcp_is_error": projection.get("mcp_is_error"),
     }
 
 
