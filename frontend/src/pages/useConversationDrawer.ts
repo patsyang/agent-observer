@@ -11,6 +11,8 @@ import type {
 } from '../api/types';
 import {
   buildHighlightTerms,
+  filterHits,
+  filterMessages,
   isActionableHit,
 } from './ConversationDrawerItems';
 
@@ -59,6 +61,9 @@ export interface UseConversationDrawerReturn {
   highlightTerms: string[];
   actionableHits: ConversationHit[];
   technicalHits: ConversationHit[];
+  searchQuery: string;
+  onSearchChange: (query: string) => void;
+  filteredMessages: ConversationMessage[];
 }
 
 export function useConversationDrawer({
@@ -75,6 +80,7 @@ export function useConversationDrawer({
   const [hitsTab, setHitsTab] = useState<TabState<ConversationHit, HitsFilter>>(emptyHitsTab);
   const [highlightedHits, setHighlightedHits] = useState<ConversationHit[]>([]);
   const [technicalExpanded, setTechnicalExpanded] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
 
   const ref = detail.conversation_ref;
   const focusFactId = detail.focus_fact_id;
@@ -199,9 +205,13 @@ export function useConversationDrawer({
 
   const allHitsForTerms = [...highlightedHits, ...hitsTab.items];
   const highlightTerms = buildHighlightTerms(messagesTab.items, allHitsForTerms, highlightedHits);
-  const remainingHits = hitsTab.items.filter((h) => !highlightIds.includes(h.fact_id));
-  const actionableHits = remainingHits.filter(isActionableHit);
-  const technicalHits = remainingHits.filter((h) => !isActionableHit(h));
+  const filteredMessages = filterMessages(messagesTab.items, searchQuery);
+  const filteredRemainingHits = filterHits(
+    hitsTab.items.filter((h) => !highlightIds.includes(h.fact_id)),
+    searchQuery,
+  );
+  const actionableHits = filteredRemainingHits.filter(isActionableHit);
+  const technicalHits = filteredRemainingHits.filter((h) => !isActionableHit(h));
 
   return {
     activeTab,
@@ -217,5 +227,8 @@ export function useConversationDrawer({
     highlightTerms,
     actionableHits,
     technicalHits,
+    searchQuery,
+    onSearchChange: setSearchQuery,
+    filteredMessages,
   };
 }

@@ -138,3 +138,25 @@ export function buildHighlightTerms(
     ...hits.flatMap((h) => (h.sensitive_matches ?? []).map((match) => match.matched_value)),
   ].filter((value): value is string => typeof value === 'string' && value.length >= 7);
 }
+
+// 仅搜索已加载内容；空 query 返回原列表。大小写不敏感。
+export function filterMessages(messages: ConversationMessage[], query: string): ConversationMessage[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return messages;
+  return messages.filter((m) => m.content.toLowerCase().includes(q));
+}
+
+export function filterHits(hits: ConversationHit[], query: string): ConversationHit[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return hits;
+  return hits.filter((h) => {
+    const text = [h.content_preview, h.summary]
+      .filter((v): v is string => typeof v === 'string')
+      .join(' ')
+      .toLowerCase();
+    if (text.includes(q)) return true;
+    return (h.sensitive_matches ?? []).some((m) =>
+      typeof m.matched_value === 'string' && m.matched_value.toLowerCase().includes(q)
+    );
+  });
+}

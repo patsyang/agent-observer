@@ -31,7 +31,7 @@ const mockResponse: McpCallsResponse = {
       mcp_args_summary: '创建 Issue: 修复登录问题',
       arguments: [{ key: 'title', value: '修复登录问题' }, { key: 'body', value: '详细描述' }],
       result_text: 'Error: permission denied',
-      risk_signals: ['destructive_operation']
+      risk_signals: [{ risk_type: 'destructive_operation', severity: 'high', object_type: 'file' }]
     }
   ],
   total: 2,
@@ -50,7 +50,9 @@ describe('McpObservationPage', () => {
     const loadMcpCalls = vi.fn(async () => mockResponse);
     render(<McpObservationPage loadMcpCalls={loadMcpCalls} />);
 
-    expect(await screen.findByTestId('mcp-page')).toBeInTheDocument();
+    // 等待数据行出现（表示数据已加载），再检查 metric
+    const rows = await screen.findAllByTestId('mcp-call-row');
+    expect(rows).toHaveLength(2);
     expect(screen.getByTestId('mcp-summary-servers')).toHaveTextContent('2');
     expect(screen.getByTestId('mcp-summary-total')).toHaveTextContent('2');
     expect(screen.getByTestId('mcp-summary-errors')).toHaveTextContent('1');
@@ -75,20 +77,23 @@ describe('McpObservationPage', () => {
     expect(within(detail).getByText('destructive_operation')).toBeInTheDocument();
   });
 
-  it('filters by server and risk-only flag', async () => {
+  it('filters by server, risk-only and error-only flags', async () => {
     const user = userEvent.setup();
-    const loadMcpCalls = vi.fn(async (params: { page?: number; page_size?: number; server?: string; risk_only?: boolean } = {}) => mockResponse);
+    const loadMcpCalls = vi.fn(async (params: { page?: number; page_size?: number; server?: string; risk_only?: boolean; error_only?: boolean } = {}) => mockResponse);
     render(<McpObservationPage loadMcpCalls={loadMcpCalls} />);
 
-    await screen.findByTestId('mcp-page');
+    // 等待数据加载完成（数据行出现）后再操作筛选器
+    await screen.findAllByTestId('mcp-call-row');
 
     await user.selectOptions(screen.getByLabelText('MCP Server'), 'github');
     await user.click(screen.getByLabelText('仅看风险'));
+    await user.click(screen.getByLabelText('仅看错误'));
 
     await waitFor(() => {
       const lastCall = loadMcpCalls.mock.calls.at(-1)?.[0];
       expect(lastCall?.server).toBe('github');
       expect(lastCall?.risk_only).toBe(true);
+      expect(lastCall?.error_only).toBe(true);
     });
   });
 });

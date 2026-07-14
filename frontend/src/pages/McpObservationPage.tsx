@@ -10,34 +10,48 @@ interface Props {
     page_size?: number;
     server?: string;
     risk_only?: boolean;
+    error_only?: boolean;
   }) => Promise<McpCallsResponse>;
 }
 
 type LoadState =
-  | { status: 'loading' }
   | { status: 'error' }
-  | { status: 'ready'; data: McpCallsResponse };
+  | { status: 'ready'; data: McpCallsResponse; loading: boolean };
 
 const PAGE_SIZE = 20;
 
+const emptyData: McpCallsResponse = {
+  items: [],
+  total: 0,
+  page: 1,
+  page_size: PAGE_SIZE,
+  summary: { servers: [], total_calls: 0, error_calls: 0, risk_calls: 0 },
+};
+
 export function McpObservationPage({ loadMcpCalls }: Props) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({
+    status: 'ready',
+    data: emptyData,
+    loading: true,
+  });
   const [server, setServer] = useState('');
   const [riskOnly, setRiskOnly] = useState(false);
+  const [errorOnly, setErrorOnly] = useState(false);
   const [page, setPage] = useState(1);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setState({ status: 'loading' });
+    setState((c) => (c.status === 'ready' ? { ...c, loading: true } : c));
     loadMcpCalls({
       page,
       page_size: PAGE_SIZE,
       server: server || undefined,
       risk_only: riskOnly || undefined,
+      error_only: errorOnly || undefined,
     })
       .then((data) => {
-        if (!cancelled) setState({ status: 'ready', data });
+        if (!cancelled) setState({ status: 'ready', data, loading: false });
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error' });
@@ -45,20 +59,11 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [loadMcpCalls, page, server, riskOnly]);
+  }, [loadMcpCalls, page, server, riskOnly, errorOnly]);
 
-  if (state.status === 'loading') {
-    return (
-      <section className="panel" data-testid="mcp-page">
-        <h2>MCP 工具调用观测</h2>
-        <p>正在加载 MCP 调用记录。</p>
-      </section>
-    );
-  }
   if (state.status === 'error') {
     return (
       <section className="panel" data-testid="mcp-page">
-        <h2>MCP 工具调用观测</h2>
         <p>MCP 调用数据不可用。请确认后端服务正常。</p>
       </section>
     );
@@ -67,36 +72,34 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
   const { items, summary, total } = state.data;
   const hasMore = page * PAGE_SIZE < total;
   const resetPage = () => setPage(1);
+  const showPlaceholder = state.loading && items.length === 0;
 
   return (
     <section className="panel" data-testid="mcp-page">
-      <h2>MCP 工具调用观测</h2>
-      <p className="panel-intro">审计 MCP 工具调用的耗时、错误与关联风险信号。</p>
-
       <section className="metrics" aria-label="MCP 汇总">
         <div className="metric" data-testid="mcp-summary-servers">
           <span>Servers</span>
-          <strong>{formatNumber(summary.servers.length)}</strong>
+          <strong>{showPlaceholder ? '—' : formatNumber(summary.servers.length)}</strong>
           <small>已接入服务器</small>
         </div>
         <div className="metric" data-testid="mcp-summary-total">
           <span>调用总数</span>
-          <strong>{formatNumber(summary.total_calls)}</strong>
+          <strong>{showPlaceholder ? '—' : formatNumber(summary.total_calls)}</strong>
           <small>窗口内调用</small>
         </div>
         <div className="metric" data-testid="mcp-summary-errors">
           <span>错误数</span>
-          <strong>{formatNumber(summary.error_calls)}</strong>
+          <strong>{showPlaceholder ? '—' : formatNumber(summary.error_calls)}</strong>
           <small>失败调用</small>
         </div>
         <div className="metric" data-testid="mcp-summary-risks">
           <span>风险数</span>
-          <strong>{formatNumber(summary.risk_calls)}</strong>
+          <strong>{showPlaceholder ? '—' : formatNumber(summary.risk_calls)}</strong>
           <small>命中风险信号</small>
         </div>
       </section>
 
-      <section className="context-bar">
+      <section className="filter-bar">
         <label className="compact-filter">
           MCP Server
           <select aria-label="MCP Server" onChange={(e) => { setServer(e.target.value); resetPage(); }} value={server}>
@@ -113,6 +116,14 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
             onChange={(e) => { setRiskOnly(e.target.checked); resetPage(); }}
           />
           仅看风险
+        </label>
+        <label className="compact-filter">
+          <input
+            type="checkbox"
+            checked={errorOnly}
+            onChange={(e) => { setErrorOnly(e.target.checked); resetPage(); }}
+          />
+          仅看错误
         </label>
       </section>
 
@@ -170,8 +181,12 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
                     {item.risk_signals.length > 0 && (
                       <div className="mcp-detail-section">
                         <strong>风险信号</strong>
-                        {item.risk_signals.map((signal) => (
-                          <span className="source-pill" key={signal}>{signal}</span>
+                        {item.risk_signals.map((signal, idx) => (
+                          <div className="mcp-risk-row" key={idx}>
+                            <span className={`severity-badge severity-${signal.severity}`}>{signal.severity}</span>
+                            <span className="mcp-risk-type">{signal.risk_type}</span>
+                            <span className="mcp-risk-object">对象: {signal.object_type}</span>
+                          </div>
                         ))}
                       </div>
                     )}

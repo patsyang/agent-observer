@@ -27,37 +27,39 @@ export function RiskHeadlineMetric({ summary, loading, activeFamily, onSelectFam
   return (
     <div className="metric risk-headline" aria-label="待研判风险" data-testid="risk-headline">
       <span>待研判风险</span>
-      <strong>{loading ? '…' : total}</strong>
+      <strong>{loading ? <span className="loading-inline">加载中</span> : total}</strong>
       <small className="risk-severity-note">
-        高危 {severityTotals.high} · 中危 {severityTotals.medium} · 低危 {severityTotals.low}
+        {loading ? <span className="loading-inline">加载中</span> : `高危 ${severityTotals.high} · 中危 ${severityTotals.medium} · 低危 ${severityTotals.low}`}
       </small>
-      <div className="risk-family-segments" role="group" aria-label="按风险分类筛选">
-        <button
-          type="button"
-          className={`chip ${activeFamily === null ? 'active' : ''}`}
-          onClick={() => onSelectFamily(null)}
-        >
-          全部 {total}
-        </button>
-        {families.map((family) => (
+      {loading ? null : (
+        <div className="risk-family-segments" role="group" aria-label="按风险分类筛选">
           <button
-            key={family.id}
             type="button"
-            className={[
-              'chip',
-              activeFamily === family.id ? 'active' : '',
-              family.id === 'uncategorized' ? 'chip-warn' : ''
-            ]
-              .filter(Boolean)
-              .join(' ')}
-            onClick={() => onSelectFamily(activeFamily === family.id ? null : family.id)}
-            disabled={family.total === 0}
-            title={family.label}
+            className={`chip ${activeFamily === null ? 'active' : ''}`}
+            onClick={() => onSelectFamily(null)}
           >
-            {family.label} {family.total}
+            全部 {total}
           </button>
-        ))}
-      </div>
+          {families.map((family) => (
+            <button
+              key={family.id}
+              type="button"
+              className={[
+                'chip',
+                activeFamily === family.id ? 'active' : '',
+                family.id === 'uncategorized' ? 'chip-warn' : ''
+              ]
+                .filter(Boolean)
+                .join(' ')}
+              onClick={() => onSelectFamily(activeFamily === family.id ? null : family.id)}
+              disabled={family.total === 0}
+              title={family.label}
+            >
+              {family.label} {family.total}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

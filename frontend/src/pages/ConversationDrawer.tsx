@@ -1,4 +1,4 @@
-import { RefreshCw, X } from 'lucide-react';
+import { RefreshCw, Search, X } from 'lucide-react';
 
 import type {
   ConversationDetail,
@@ -41,6 +41,7 @@ export function ConversationDrawer({
     highlightedHits, technicalExpanded, setTechnicalExpanded,
     onMessagesFilterChange, refreshCurrentTab, loadMore,
     highlightTerms, actionableHits, technicalHits,
+    searchQuery, onSearchChange, filteredMessages,
   } = drawer;
 
   const conversationName = detail.session_title || detail.conversation_ref;
@@ -123,6 +124,19 @@ export function ConversationDrawer({
           </button>
         </div>
 
+        <div className="drawer-search">
+          <Search aria-hidden="true" size={14} />
+          <input
+            type="search"
+            value={searchQuery}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="搜索已加载内容（大小写不敏感）"
+            aria-label="搜索已加载内容"
+            data-testid="drawer-search-input"
+          />
+          {searchQuery && <small className="muted-inline">仅搜索已加载内容</small>}
+        </div>
+
         {activeTab === 'messages' && (
           <section className="drawer-section" data-testid="messages-tab">
             <div className="tab-filter">
@@ -132,11 +146,14 @@ export function ConversationDrawer({
             </div>
             {messagesTab.loading && <p>正在加载...</p>}
             {messagesTab.error && <p>加载失败：{messagesTab.error}</p>}
-            {!messagesTab.loading && !messagesTab.error && messagesTab.items.length === 0 && (
+            {!messagesTab.loading && !messagesTab.error && messagesTab.items.length === 0 && !searchQuery && (
               <p>该会话暂无可展示的输入输出原文。</p>
             )}
+            {!messagesTab.loading && !messagesTab.error && filteredMessages.length === 0 && searchQuery && (
+              <p>未找到匹配“{searchQuery}”的已加载内容。</p>
+            )}
             <div className="conversation-message-list">
-              {messagesTab.items.map((m) => (
+              {filteredMessages.map((m) => (
                 <MessageItem key={m.fact_id} message={m} highlightTerms={highlightTerms} />
               ))}
             </div>
@@ -152,8 +169,11 @@ export function ConversationDrawer({
           <section className="drawer-section" data-testid="hits-tab">
             {hitsTab.loading && <p>正在加载...</p>}
             {hitsTab.error && <p>加载失败：{hitsTab.error}</p>}
-            {!hitsTab.loading && !hitsTab.error && hitsTab.items.length === 0 && (
+            {!hitsTab.loading && !hitsTab.error && hitsTab.items.length === 0 && !searchQuery && (
               <p>该会话没有被信号命中的内容。</p>
+            )}
+            {!hitsTab.loading && !hitsTab.error && hitsTab.items.length > 0 && actionableHits.length === 0 && technicalHits.length === 0 && searchQuery && (
+              <p>未找到匹配“{searchQuery}”的已加载命中。</p>
             )}
             {actionableHits.length > 0 && (
               <div className="conversation-hit-list">

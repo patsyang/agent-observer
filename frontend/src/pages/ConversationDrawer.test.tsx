@@ -199,4 +199,59 @@ describe('ConversationDrawer', () => {
     fireEvent.click(backdrop!);
     expect(onClose).toHaveBeenCalled();
   });
+
+  it('搜索框过滤已加载 messages（大小写不敏感）', async () => {
+    const loaders = makeLoaders({
+      messages: () => Promise.resolve({
+        messages: [
+          { fact_id: 'm1', role: 'user', category: 'agent_prompt', occurred_at: '2026-07-01T10:00:00Z', content: 'Hello World', raw_available: false },
+          { fact_id: 'm2', role: 'assistant', category: 'agent_response', occurred_at: '2026-07-01T10:01:00Z', content: 'Goodbye', raw_available: false },
+        ],
+        total: 2, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, messages_total: 2 }} onClose={() => {}} {...loaders} />);
+    await waitFor(() => {
+      expect(screen.getByText('Hello World')).toBeInTheDocument();
+      expect(screen.getByText('Goodbye')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByTestId('drawer-search-input'), { target: { value: 'hello' } });
+    expect(screen.getByText('Hello World')).toBeInTheDocument();
+    expect(screen.queryByText('Goodbye')).not.toBeInTheDocument();
+  });
+
+  it('搜索框过滤已加载 hits（含 sensitive_matches.matched_value）', async () => {
+    const loaders = makeLoaders({
+      hits: () => Promise.resolve({
+        hits: [phoneHit, technicalHit], total: 2, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, hits_total: 2 }} onClose={() => {}} {...loaders} />);
+    fireEvent.click(screen.getByRole('tab', { name: /命中内容/ }));
+    await waitFor(() => {
+      expect(screen.getByText(/13812345678/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/本页已折叠技术活动/)).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('drawer-search-input'), { target: { value: '13812345678' } });
+    expect(screen.getByText(/13812345678/)).toBeInTheDocument();
+    expect(screen.queryByText(/本页已折叠技术活动/)).not.toBeInTheDocument();
+  });
+
+  it('搜索无匹配时显示提示', async () => {
+    const loaders = makeLoaders({
+      messages: () => Promise.resolve({
+        messages: [
+          { fact_id: 'm1', role: 'user', category: 'agent_prompt', occurred_at: '2026-07-01T10:00:00Z', content: 'Hello World', raw_available: false },
+        ],
+        total: 1, page: 1, page_size: 50, has_more: false,
+      }),
+    });
+    render(<ConversationDrawer detail={{ ...baseDetail, messages_total: 1 }} onClose={() => {}} {...loaders} />);
+    await waitFor(() => {
+      expect(screen.getByText('Hello World')).toBeInTheDocument();
+    });
+    fireEvent.change(screen.getByTestId('drawer-search-input'), { target: { value: 'nonexistent' } });
+    expect(screen.getByText(/未找到匹配/)).toBeInTheDocument();
+    expect(screen.queryByText('Hello World')).not.toBeInTheDocument();
+  });
 });

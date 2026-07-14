@@ -26,10 +26,10 @@ interface Props {
 }
 type AgentType = '' | 'codex' | 'workbuddy' | 'claude';
 type LoadState =
-  | { status: 'loading' }
   | { status: 'error' }
   | {
       status: 'ready';
+      summaryLoading: boolean;
       detailsLoading: boolean;
       collectors: CollectorsResponse;
       collectorCounts: DashboardSummary['collectors'];
@@ -62,7 +62,21 @@ export function DashboardPage({
   loadUsageSummary,
   onOpenSignal
 }: Props) {
-  const [state, setState] = useState<LoadState>({ status: 'loading' });
+  const [state, setState] = useState<LoadState>({
+    status: 'ready',
+    summaryLoading: true,
+    detailsLoading: true,
+    collectors: { collectors: [] },
+    collectorCounts: { total: 0, online: 0, degraded: 0, offline: 0, items: [] },
+    facts: { facts: [], total: 0, page: 1, page_size: 5, has_more: false },
+    signals: { signals: [], total: 0, page: 1, page_size: 20, has_more: false },
+    signalSummary: null,
+    usage: emptyUsage('1h'),
+    risks: { mode: 'summary', window: '1h', signals: [] },
+    processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
+    highPriorityCount: 0,
+    activeConversations: 0,
+  });
   const [familyFilter, setFamilyFilter] = useState<string | null>(null);
   const skipFamilyEffect = useRef(true);
   const [submittedFilters, setSubmittedFilters] = useState({
@@ -90,61 +104,69 @@ export function DashboardPage({
     let cancelled = false;
     const { agentType, end_at, start_at, window, workspaceQuery } = submittedFilters;
     const requestWindow: TimeWindowParam = window || 'custom';
-    setState({ status: 'loading' });
+    setState((current) => {
+      if (current.status !== 'ready') return current;
+      return { ...current, summaryLoading: true, detailsLoading: true };
+    });
+
+    // 所有请求并行发出，各自到位后独立更新对应区块
+    const early: { signals?: SignalsResponse; signalSummary?: SignalSummary; usage?: UsageSummary; risks?: RiskSummary; processing?: ProcessingStatus } = {};
+    const emptySignals: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
+    const emptyRisks: RiskSummary = { mode: 'summary', window: requestWindow, signals: [] };
+
+    const signalsP = loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, family: familyFilter ?? undefined, page: 1, page_size: 20 })
+      .then((v) => { if (!cancelled) { early.signals = v; setState((c) => c.status === 'ready' ? { ...c, signals: v } : c); } })
+      .catch(() => { if (!cancelled) { early.signals = emptySignals; setState((c) => c.status === 'ready' ? { ...c, signals: emptySignals } : c); } });
+    const signalSummaryP = loadSignalSummary(requestWindow, agentType, start_at, end_at)
+      .then((v) => { if (!cancelled) { early.signalSummary = v; setState((c) => c.status === 'ready' ? { ...c, signalSummary: v } : c); } })
+      .catch(() => {});
+    const usageP = loadUsageSummary(requestWindow, agentType, start_at, end_at)
+      .then((v) => { if (!cancelled) { early.usage = v; setState((c) => c.status === 'ready' ? { ...c, usage: v } : c); } })
+      .catch(() => { if (!cancelled) { early.usage = emptyUsage(requestWindow); setState((c) => c.status === 'ready' ? { ...c, usage: emptyUsage(requestWindow) } : c); } });
+    const riskSummaryP = loadRiskSummary(requestWindow, agentType, start_at, end_at)
+      .then((v) => { if (!cancelled) { early.risks = v; setState((c) => c.status === 'ready' ? { ...c, risks: v } : c); } })
+      .catch(() => { if (!cancelled) { early.risks = emptyRisks; setState((c) => c.status === 'ready' ? { ...c, risks: emptyRisks } : c); } });
+    const processingP = loadProcessingStatus()
+      .then((v) => { if (!cancelled) { early.processing = v; setState((c) => c.status === 'ready' ? { ...c, processing: v } : c); } })
+      .catch(() => {});
+
     loadDashboardSummary(requestWindow, agentType, start_at, end_at)
       .then((summary) => {
-        if (!cancelled) {
-          setState({
-            status: 'ready',
-            detailsLoading: true,
-            collectors: { collectors: summary.collectors.items },
-            collectorCounts: summary.collectors,
-            facts: { facts: summary.facts.items, total: summary.facts.total, page: 1, page_size: 5, has_more: summary.facts.total > summary.facts.items.length },
-            signals: {
-              signals: summary.signals.items,
-              total: summary.signals.total,
-              page: 1,
-              page_size: 20,
-              has_more: summary.signals.total > summary.signals.items.length
-            },
-            usage: emptyUsage(requestWindow),
-            signalSummary: null,
-            risks: { mode: 'summary', window: requestWindow, signals: summary.risks.top },
-            processing: { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
-            highPriorityCount: summary.signals.high_priority_count ?? 0,
-            activeConversations: summary.active_conversations ?? 0,
-          });
-          setLastRefresh(new Date().toISOString());
-        }
-        return Promise.allSettled([
-          loadSignals({ window: requestWindow, start_at, end_at, workspace_query: workspaceQuery.trim(), agent_type: agentType, family: familyFilter ?? undefined, page: 1, page_size: 20 }),
-          loadSignalSummary(requestWindow, agentType, start_at, end_at),
-          loadUsageSummary(requestWindow, agentType, start_at, end_at),
-          loadRiskSummary(requestWindow, agentType, start_at, end_at),
-          loadProcessingStatus()
-        ]);
-      })
-      .then((results) => {
         if (cancelled) return;
-        setState((current) => {
-          if (current.status !== 'ready') return current;
-          const [signals, signalSummaryResult, usage, risks, processing] = results;
-          const emptySignals: SignalsResponse = { signals: [], total: 0, page: 1, page_size: 20, has_more: false };
-          const emptyRisks: RiskSummary = { mode: 'summary', window: requestWindow, signals: [] };
-          return {
-            ...current,
-            detailsLoading: false,
-            signals: signals.status === 'fulfilled' ? signals.value : emptySignals,
-            signalSummary: signalSummaryResult.status === 'fulfilled' ? signalSummaryResult.value : current.signalSummary,
-            usage: usage.status === 'fulfilled' ? usage.value : emptyUsage(requestWindow),
-            risks: risks.status === 'fulfilled' ? risks.value : emptyRisks,
-            processing: processing.status === 'fulfilled' ? processing.value : current.processing
-          };
+        const allArrived = early.signals && early.signalSummary && early.usage && early.risks && early.processing;
+        setState({
+          status: 'ready',
+          summaryLoading: false,
+          detailsLoading: !allArrived,
+          collectors: { collectors: summary.collectors.items },
+          collectorCounts: summary.collectors,
+          facts: { facts: summary.facts.items, total: summary.facts.total, page: 1, page_size: 5, has_more: summary.facts.total > summary.facts.items.length },
+          signals: early.signals ?? {
+            signals: summary.signals.items,
+            total: summary.signals.total,
+            page: 1,
+            page_size: 20,
+            has_more: summary.signals.total > summary.signals.items.length
+          },
+          usage: early.usage ?? emptyUsage(requestWindow),
+          signalSummary: early.signalSummary ?? null,
+          risks: early.risks ?? { mode: 'summary', window: requestWindow, signals: summary.risks.top },
+          processing: early.processing ?? { state: 'idle', counts: { pending: 0, running: 0, succeeded: 0, failed: 0 }, latest_failed: null },
+          highPriorityCount: summary.signals.high_priority_count ?? 0,
+          activeConversations: summary.active_conversations ?? 0,
         });
+        setLastRefresh(new Date().toISOString());
       })
       .catch(() => {
         if (!cancelled) setState({ status: 'error' });
       });
+
+    // 所有详情完成后清除 detailsLoading
+    Promise.allSettled([signalsP, signalSummaryP, usageP, riskSummaryP, processingP]).then(() => {
+      if (cancelled) return;
+      setState((c) => c.status === 'ready' ? { ...c, detailsLoading: false } : c);
+    });
+
     return () => {
       cancelled = true;
     };
@@ -179,18 +201,9 @@ export function DashboardPage({
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [familyFilter]);
-  if (state.status === 'loading') {
-    return (
-      <section className="panel">
-        <h2>正在加载观测数据</h2>
-        <p>读取采集器、会话信号和用量趋势。</p>
-      </section>
-    );
-  }
-
   if (state.status === 'error') {
     return (
-      <section className="panel">
+      <section className="panel" data-testid="dashboard-page">
         <h2>观测数据不可用</h2>
         <p>请确认后端服务在 127.0.0.1:8765 运行。</p>
         <button onClick={() => setRefreshToken((value) => value + 1)}>重试</button>
@@ -214,6 +227,8 @@ export function DashboardPage({
           collectors={state.collectors}
           facts={state.facts}
           onlineCount={onlineCollectors.length}
+          loading={state.summaryLoading}
+          signalsLoading={state.detailsLoading}
         />,
         sidebarSlot
       )}
@@ -269,12 +284,12 @@ export function DashboardPage({
       <section className="metrics" aria-label="核心指标">
         <Metric
           label="采集器"
-          value={`${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
+          value={state.summaryLoading ? <span className="loading-inline">加载中</span> : `${formatNumber(state.collectorCounts.online)} / ${formatNumber(state.collectorCounts.total)}`}
           note="在线 / 总数"
         />
-        <Metric label="活跃对话" value={formatNumber(state.activeConversations)} note="窗口内有活动的对话" />
-        <Metric label="实际计算Token" value={formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
-        <Metric label={`缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
+        <Metric label="活跃对话" value={state.summaryLoading ? <span className="loading-inline">加载中</span> : formatNumber(state.activeConversations)} note="窗口内有活动的对话" />
+        <Metric label="实际计算Token" value={state.detailsLoading ? <span className="loading-inline">加载中</span> : formatNumber(state.usage.totals.effective_units)} note="非缓存输入 + 输出" />
+        <Metric label={state.detailsLoading ? '缓存命中' : `缓存命中 (${formatPercent(state.usage.totals.cache_hit_rate)})`} value={state.detailsLoading ? <span className="loading-inline">加载中</span> : formatNumber(state.usage.totals.cached_input_units)} note="可复用输入" />
         <RiskHeadlineMetric
           summary={state.signalSummary}
           loading={isLoading}

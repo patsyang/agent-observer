@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+
 import type { CollectorsResponse, FactsResponse } from '../api/types';
 import { formatNumber } from '../utils/numberFormat';
 import { collectorRuntimeLabel, qualitySummary, queueSummary, reasonCodeLabel, sumBacklog } from './dashboardLabels';
@@ -7,9 +9,11 @@ interface Props {
   collectors: CollectorsResponse;
   facts: FactsResponse;
   onlineCount: number;
+  loading?: boolean;
+  signalsLoading?: boolean;
 }
 
-function Mini({ label, value }: { label: string; value: string }) {
+function Mini({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="mini">
       <span>{label}</span>
@@ -18,21 +22,25 @@ function Mini({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function DashboardAccessPanel({ activeSignalCount, collectors, facts, onlineCount }: Props) {
+const LoadingText = () => <span className="loading-inline">加载中</span>;
+
+export function DashboardAccessPanel({ activeSignalCount, collectors, facts, onlineCount, loading, signalsLoading }: Props) {
   return (
     <section className="sidebar-context" aria-label="接入与筛选" data-testid="dashboard-sidebar-context">
       <div className="sidebar-context__header">
         <h2>接入与筛选</h2>
-        <span className={onlineCount ? 'badge green' : 'badge amber'}>
-          {onlineCount ? '已收到心跳' : '等待采集器'}
+        <span className={loading ? 'badge' : onlineCount ? 'badge green' : 'badge amber'}>
+          {loading ? <LoadingText /> : onlineCount ? '已收到心跳' : '等待采集器'}
         </span>
       </div>
       <div className="context-stack">
-        <Mini label="命中质量" value={qualitySummary(facts)} />
-        <Mini label="待传 outbox" value={formatNumber(sumBacklog(collectors))} />
-        <Mini label="重点队列" value={queueSummary(activeSignalCount)} />
+        <Mini label="命中质量" value={loading ? <LoadingText /> : qualitySummary(facts)} />
+        <Mini label="待传 outbox" value={loading ? <LoadingText /> : formatNumber(sumBacklog(collectors))} />
+        <Mini label="重点队列" value={signalsLoading ? <LoadingText /> : queueSummary(activeSignalCount)} />
       </div>
-      {collectors.collectors.length === 0 ? (
+      {loading ? (
+        <p><LoadingText /></p>
+      ) : collectors.collectors.length === 0 ? (
         <p>还没有采集器注册。请下载 Windows 包并运行 start。</p>
       ) : (
         <div className="sidebar-collector-list">

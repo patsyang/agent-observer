@@ -3,6 +3,12 @@ export interface McpCallArgument {
   value: string;
 }
 
+export interface McpRiskSignal {
+  risk_type: string;
+  severity: string;
+  object_type: string;
+}
+
 export interface McpCallItem {
   fact_id: string;
   occurred_at: string;
@@ -14,7 +20,7 @@ export interface McpCallItem {
   mcp_args_summary: string;
   arguments: McpCallArgument[];
   result_text: string;
-  risk_signals: string[];
+  risk_signals: McpRiskSignal[];
 }
 
 export interface McpCallSummary {
