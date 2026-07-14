@@ -65,6 +65,117 @@ def test_command_category_search_and_git(command, expected_category):
     assert command_category(command) == expected_category
 
 
+@pytest.mark.parametrize(
+    "command,expected_category",
+    [
+        # 真正的权限变更命令应识别为 permission_change
+        ("chmod 755 /etc/config/file", "permission_change"),
+        ("chown root:root /etc/shadow", "permission_change"),
+        ("icacls C:\\Users\\admin\\file /grant Users:F", "permission_change"),
+        ("takeown /f C:\\Windows\\system32\\file", "permission_change"),
+        ("Set-Acl -Path C:\\file -AclObject $acl", "permission_change"),
+        ("attrib +r C:\\file.txt", "permission_change"),
+        ("attrib -r C:\\file.txt", "permission_change"),
+        # attrib 带标志（递归设置只读）也应识别为 permission_change
+        ("attrib /s +r *.txt", "permission_change"),
+        ("attrib /s /d +h C:\\folder", "permission_change"),
+        # cacls/xcacls（旧版 Windows 权限修改工具）
+        ("cacls file /e /p users:f", "permission_change"),
+        ("xcacls file /e /p users:f", "permission_change"),
+    ],
+)
+def test_command_category_permission_change_positive(command, expected_category):
+    """真正的权限变更命令应识别为 permission_change。"""
+    assert command_category(command) == expected_category
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        # 命令文本中含 "permission" 字样但不是权限变更命令
+        "Resolve-Path D:/workspace/permission-config.md",
+        "Get-Content D:/docs/permissions.md | Select-String 'admin'",
+        "cat permission_report.txt",
+        "rg 'permission' D:/workspace/docs",
+        # 命令文本中含 "type" 字样但不是 type 命令
+        "Get-Content file.txt | Where-Object { $_ -match 'type' }",
+        "rg '--type=md' D:/workspace",
+    ],
+)
+def test_command_category_permission_change_no_false_positive(command):
+    """含 permission/type 字样但非权限变更/非 type 命令不应被误判。
+
+    回归：旧逻辑用 ``"permission" in lowered`` 子串匹配，会把任何文本中
+    出现 "permission" 的命令误判为权限变更（如 Markdown 表头、属性名、文档路径）。
+    """
+    category = command_category(command)
+    assert category != "permission_change", (
+        f"命令 {command!r} 不应被识别为 permission_change，实际为 {category!r}"
+    )
+
+
+@pytest.mark.parametrize(
+    "command,expected_category",
+    [
+        # type 命令仍应识别为 file_read
+        ("type file.txt", "file_read"),
+        ("type C:\\Windows\\System32\\drivers\\etc\\hosts", "file_read"),
+        # get-content / cat 也应识别为 file_read
+        ("Get-Content file.txt", "file_read"),
+        ("cat file.txt", "file_read"),
+    ],
+)
+def test_command_category_type_still_file_read(command, expected_category):
+    """type 命令应识别为 file_read（回归：拆分 'type ' 子串匹配为词边界正则）。"""
+    assert command_category(command) == expected_category
+
+
+@pytest.mark.parametrize(
+    "command,expected_category",
+    [
+        # --type= 参数不应被识别为 file_read（回归：\btype\b 会误匹配 --type=）
+        ("python --type=md file.py", "shell"),
+        # concat 不应被识别为 file_read（回归：'cat ' 子串匹配 'concat '）
+        ("concat file1 file2", "shell"),
+    ],
+)
+def test_command_category_file_read_no_false_positive(command, expected_category):
+    """含 type/cat 子串但非 file_read 命令不应被误判。
+
+    回归1：``\\btype\\b`` 会匹配 ``--type=md`` 中的 type（'-' 是非单词字符，形成词边界），
+    收紧为 ``\\btype\\s`` 要求 type 后跟空白。
+
+    回归2：``"cat " in lowered`` 子串匹配会误判 ``concat file1 file2``，
+    收紧为 ``\\bcat\\s`` 词边界正则。
+    """
+    assert command_category(command) == expected_category
+
+
+@pytest.mark.parametrize(
+    "command,expected_category",
+    [
+        # 搜索 pattern 中含 "RM-06" 等含 rm/del 的标识符不应被误判为破坏性
+        # 旧逻辑 \b(rm|del|erase|rmdir)\b 会匹配 "rm-06" 中的 "rm"（- 是非单词字符，形成词边界）
+        ('rg -n "RM-06|命中对象|lower-grid" "output/ai-prd-kit-v2/..."', "search"),
+        ('rg -n "DEL-001|delete-flag" "src/"', "search"),
+        ('rg "RM-2024" .', "search"),
+        # 真正的 rm/del 命令仍应为 destructive
+        ("rm -rf /tmp/test", "destructive"),
+        ("rm /tmp/file", "destructive"),
+        ("del file.txt", "destructive"),
+        ("sudo rm -rf /var/log/app", "destructive"),
+    ],
+)
+def test_command_category_rm_in_search_pattern_not_destructive(command, expected_category):
+    """搜索 pattern 中含 rm/del 标识符不应被误判为破坏性命令。
+
+    回归：``\\b(rm|del|erase|rmdir)\\b`` 会匹配 ``"RM-06"`` 中的 ``rm``
+    （``-`` 是非单词字符，``rm`` 后形成词边界）。收紧为 ``\\b(rm|del|erase|rmdir)\\b(?!\\-)``
+    排除 rm 后紧跟 ``-`` 的情况（标识符常见形式，如 RM-06、del-file）。
+    """
+    assert command_category(command) == expected_category
+
+
 # --- 端到端测试：rg exit 1 不应产生 tool_execution_failure ---
 
 

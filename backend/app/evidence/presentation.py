@@ -27,7 +27,7 @@ def projection_preview(
     command_category = _string_value(projection, "command_category")
     exit_code = projection.get("exit_code")
     if command:
-        pieces = [f"命令 {_truncate(command)}"]
+        pieces = [f"命令 {_truncate(command, 500)}"]
         if exit_code is not None:
             pieces.append(f"退出码 {exit_code}")
         if projection.get("is_timeout"):

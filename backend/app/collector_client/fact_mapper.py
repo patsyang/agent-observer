@@ -204,8 +204,9 @@ def _destructive_fact(common: dict, record: dict) -> dict | None:
     command = command_text(args)
     command_category = _command_category(command)
     operation = _clean(record.get("operation") or record.get("action") or args.get("operation") or payload.get("name") or record.get("tool") or "")
-    path = _clean(record.get("path") or record.get("target") or args.get("path") or args.get("workdir") or "")
-    if operation not in DESTRUCTIVE_OPERATIONS and command_category not in {"destructive", "permission_change"} and "delete" not in path:
+    raw_path = str(record.get("path") or record.get("target") or args.get("path") or args.get("workdir") or "")
+    path = _clean(raw_path)
+    if operation not in DESTRUCTIVE_OPERATIONS and command_category not in {"destructive", "permission_change"} and not re.search(r"\bdelet(e|ion)\b", raw_path, re.I):
         return None
     object_type = _object_type(path)
     return {
@@ -359,12 +360,15 @@ def _source_refs(
 ) -> dict:
     payload = _payload(record)
     session_ref = record.get("session_id") or record.get("session") or payload.get("id") or path.stem
+    # conversation_ref 优先取会话级标识（conversation_id/session_id），
+    # turn_id 降级为兜底：避免同一会话按 turn 拆成多个 conversation_ref，
+    # 与 materialize.py 的"会话级 ref"设计意图一致。
     conversation_ref = (
         record.get("conversation_id")
         or record.get("conversation")
-        or payload.get("turn_id")
         or record.get("session_id")
         or record.get("session")
+        or payload.get("turn_id")
         or path.stem
     )
     refs = {
@@ -421,6 +425,15 @@ def _is_error(record: dict) -> bool:
     status = str(record.get("status") or record.get("level") or payload.get("status") or "").lower()
     if status in {"error", "failed", "failure"}:
         return True
+    # custom_tool_call_output 自身没有 status 字段，检查关联的 custom_tool_call 的 status。
+    # attach_call_context 会把 custom_tool_call 的 record 附加到 _agent_observer_call。
+    call = record.get("_agent_observer_call")
+    if isinstance(call, dict):
+        call_record = call.get("record")
+        if isinstance(call_record, dict):
+            call_status = str(_payload(call_record).get("status") or "").lower()
+            if call_status in {"error", "failed", "failure"}:
+                return True
     if _payload_type(record) == "patch_apply_end" and payload.get("success") is False:
         return True
     try:

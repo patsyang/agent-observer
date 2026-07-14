@@ -215,6 +215,7 @@ def handle_get(handler) -> None:
                     page_size=_query_int(query, "page_size", 50),
                     server=server,
                     risk_only=_query_bool(query, "risk_only", False),
+                    error_only=_query_bool(query, "error_only", False),
                 ))
             if path.startswith("/api/signals/") and path.endswith("/enrichments/availability"):
                 try:

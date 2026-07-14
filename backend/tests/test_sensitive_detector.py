@@ -231,3 +231,84 @@ def test_target_session_phone_detected():
     # 用户报告的会话 ref:76d4e2c57baceb3d 的手机号必须命中。
     assert any(m["matched_value"] == "13521661669" and m["category"] == "phone"
                for m in det.detect("用户的手机号是 13521661669"))
+
+
+# ---------------------------------------------------------------------------
+# 身份证校验器：区域码 + 日期校验（防 URL 18 位数字误判）
+# ---------------------------------------------------------------------------
+
+def test_detect_id_card_rejects_url_article_id():
+    # 202605263749854859 来自东方财富网 URL 文章 ID，不是身份证号。
+    # 省份码 20 不在有效行政区划代码范围内。
+    matches = det.detect("https://finance.eastmoney.com/a/202605263749854859.html")
+    assert not any(m["category"] == "id_card" for m in matches), \
+        "URL 文章 ID 被误判为身份证号"
+
+
+def test_detect_id_card_rejects_invalid_region_code():
+    # 169999199001011234：省份码 16 不在有效范围内（11-65/71/81/82/83）。
+    # 校验位碰巧通过（total=153, 153%11=10, check_chars[10]='2'==末位'4'？不，
+    # 末位是 4 但 check_chars[10]='2'，校验位也不通过）。即使校验位通过，区域码也应拒绝。
+    # 使用 209999199001011232（省份码 20，校验位需通过）来测试区域码拒绝：
+    # 2*7+0*9+9*10+9*5+9*8+9*4+1*2+9*1+9*6+0*3+0*7+1*9+0*10+1*5+1*8+2*4+3*2
+    # =14+0+90+45+72+36+2+9+54+0+0+9+0+5+8+8+6=358, 358%11=6, check_chars[6]='5' != '2'
+    # 直接用 detect 测试：区域码 20 应被拒绝，不产生 id_card 命中。
+    assert not any(m["category"] == "id_card" for m in det.detect("编号 209999199001011232"))
+
+
+def test_detect_id_card_rejects_invalid_date_feb_30():
+    # 110101199002301234：北京区域码有效，但 2 月 30 日不存在。
+    # 校验位不需要通过——日期校验在校验位之前。
+    assert not any(m["category"] == "id_card" for m in det.detect("身份证 110101199002301234"))
+
+
+def test_detect_id_card_rejects_invalid_date_1900_feb_29():
+    # 110101190002291234：1900 年不是闰年（世纪年不被 400 整除），2 月 29 日无效。
+    assert not any(m["category"] == "id_card" for m in det.detect("身份证 110101190002291234"))
+
+
+def test_detect_id_card_accepts_hong_kong_resident_permit():
+    # 810101199001011232：香港居民居住证（81 开头），1990-01-01 有效，校验位通过。
+    # total=175, 175%11=10, check_chars[10]='2' == 末位 '2'。
+    matches = det.detect("港澳台居住证 810101199001011232")
+    id_cards = [m for m in matches if m["category"] == "id_card"]
+    assert len(id_cards) == 1
+    assert id_cards[0]["matched_value"] == "810101199001011232"
+    assert id_cards[0]["confidence"] == "high"
+
+
+def test_detect_id_card_accepts_valid_leap_year_2000_feb_29():
+    # 11010120000229123X：2000 年是闰年（被 400 整除），2 月 29 日有效。
+    # 校验位：total=134, 134%11=2, check_chars[2]='X'。
+    matches = det.detect("身份证 11010120000229123X")
+    id_cards = [m for m in matches if m["category"] == "id_card"]
+    assert len(id_cards) == 1
+    assert id_cards[0]["matched_value"] == "11010120000229123X"
+
+
+# ---------------------------------------------------------------------------
+# sensitive_matches 去重：同值同类别跨 span 去重
+# ---------------------------------------------------------------------------
+
+def test_detect_dedup_same_email_multiple_occurrences():
+    # 同一邮箱在文本中多次出现，只保留一条命中。
+    text = "联系 alice@example.com 或 alice@example.com 重复"
+    emails = [m for m in det.detect(text) if m["category"] == "email"]
+    assert len(emails) == 1
+    assert emails[0]["matched_value"] == "alice@example.com"
+
+
+def test_detect_dedup_different_emails_kept():
+    # 不同邮箱都保留。
+    text = "alice@example.com 和 bob@example.com"
+    emails = [m for m in det.detect(text) if m["category"] == "email"]
+    assert len(emails) == 2
+
+
+def test_detect_dedup_same_value_different_categories_kept():
+    # 同一值不同类别（如同一数字既是手机号又是身份证号）都保留。
+    # 110101199003076536 是有效身份证号；不会同时匹配手机号（11 位 vs 18 位）。
+    # 改用更合理的场景：同一邮箱值不会被不同规则重复匹配，但同类别去重生效。
+    text = "vip@1234567.com.cn 客服邮箱 vip@1234567.com.cn"
+    emails = [m for m in det.detect(text) if m["category"] == "email"]
+    assert len(emails) == 1

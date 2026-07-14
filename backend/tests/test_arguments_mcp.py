@@ -112,3 +112,48 @@ def test_arguments_invocation_arguments_json_string_parsed():
     }
     result = arguments(payload)
     assert result == {"code": "console.log(1)", "timeout_ms": 5000}
+
+
+def test_arguments_extracts_command_from_codex_custom_tool_call_js_input():
+    """Codex custom_tool_call 的 input 是 JS 代码字符串，应从中提取命令。
+
+    回归：曾因 input 不以 '{' 开头直接返回 {}，导致 command_text/command_category 为空，
+    无法做语义退出码判断和命令分类。
+    """
+    payload = {
+        "type": "custom_tool_call",
+        "name": "exec",
+        "input": 'const [files, labTop] = await Promise.all([tools.exec_command({cmd:"rg --files udsp_mcc/src"},{workdir:"D:/workspace/test"}), tools.exec_command({cmd:"git status"})])',
+    }
+    result = arguments(payload)
+    assert result == {"cmd": "rg --files udsp_mcc/src"}
+
+
+def test_arguments_extracts_command_from_js_input_with_single_quotes():
+    """JS 代码中 cmd 值用单引号时也应提取。"""
+    payload = {
+        "type": "custom_tool_call",
+        "input": "tools.exec_command({cmd:'pnpm typecheck'})",
+    }
+    result = arguments(payload)
+    assert result == {"cmd": "pnpm typecheck"}
+
+
+def test_arguments_returns_empty_for_js_input_without_cmd_pattern():
+    """JS 代码中没有 cmd:"..." 模式时返回 {}，回退到 invocation 检查。"""
+    payload = {
+        "type": "custom_tool_call",
+        "input": "const x = await someOtherTool({path: '/tmp'})",
+    }
+    result = arguments(payload)
+    assert result == {}
+
+
+def test_arguments_returns_empty_for_plain_string_input():
+    """非 JSON、非 JS 代码的纯字符串 input 返回 {}。"""
+    payload = {
+        "type": "custom_tool_call",
+        "input": "just a plain string",
+    }
+    result = arguments(payload)
+    assert result == {}

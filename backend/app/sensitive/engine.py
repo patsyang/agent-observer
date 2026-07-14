@@ -42,7 +42,8 @@ def _match_dict(rule: dict[str, Any], m: re.Match, confidence: str, source: str)
 
 def _detect_impl(text: str, source: str) -> list[dict[str, Any]]:
     hits: list[dict[str, Any]] = []
-    seen: set[tuple[int, int, str]] = set()  # (start, end, category) 去重
+    seen_spans: set[tuple[int, int, str]] = set()  # (start, end, category) 同 span 去重
+    seen_values: set[tuple[str, str]] = set()  # (matched_value, category) 同值去重
     for rule in RULES:
         validator = rule["validator"]
         for m in rule["pattern"].finditer(text):  # finditer 多命中
@@ -50,10 +51,14 @@ def _detect_impl(text: str, source: str) -> list[dict[str, Any]]:
             if validator is not None and not validator(value):  # per-match 校验，失败只丢该 match
                 continue
             confidence = "low" if _matches_exclusion(value) else "high"
-            key = (m.start(), m.end(), rule["category"])
-            if key in seen:  # 同 span 同类别去重
+            span_key = (m.start(), m.end(), rule["category"])
+            value_key = (value, rule["category"])
+            if span_key in seen_spans:  # 同 span 同类别去重
                 continue
-            seen.add(key)
+            if value_key in seen_values:  # 同值同类别跨 span 去重
+                continue
+            seen_spans.add(span_key)
+            seen_values.add(value_key)
             hits.append(_match_dict(rule, m, confidence, source))
     hits.sort(key=lambda h: h["_span"])
     for h in hits:

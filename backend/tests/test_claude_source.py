@@ -109,7 +109,7 @@ def test_assistant_tool_use_long_command_truncated_with_ellipsis(tmp_path):
     fact = next(f for f in result.facts if f["category"] == "tool_call")
     excerpt = fact["projection"]["command_excerpt"]
     assert excerpt.endswith("...")
-    assert len(excerpt) == 182  # text[:179] + "..."
+    assert len(excerpt) == 502  # text[:499] + "..." (limit=500)
 
 
 def test_user_tool_result_collects_tool_result(tmp_path):

@@ -441,3 +441,228 @@ def test_tool_execution_failure_signature_groups_same_failure_shape(tmp_path):
     }
 
     assert signatures == {"tool_execution_failure:function_call_output:function_call_output:1"}
+
+
+def test_conversation_ref_stable_across_turns_with_same_session_id(tmp_path):
+    """同 session_id 不同 turn_id 的事件应生成相同 conversation_ref。
+
+    回归：曾因 payload.turn_id 优先于 session_id 导致会话碎片化（39 个 conversation_ref），
+    与 materialize.py 的"会话级 ref"设计意图冲突。
+    """
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-07-14T10:00:00+00:00",
+            "type": "usage",
+            "total_tokens": 100,
+            "session_id": "session-stable-conv-ref",
+            "payload": {"turn_id": "turn-1"},
+        },
+        {
+            "timestamp": "2026-07-14T10:01:00+00:00",
+            "type": "usage",
+            "total_tokens": 200,
+            "session_id": "session-stable-conv-ref",
+            "payload": {"turn_id": "turn-2"},
+        },
+        {
+            "timestamp": "2026-07-14T10:02:00+00:00",
+            "type": "usage",
+            "total_tokens": 300,
+            "session_id": "session-stable-conv-ref",
+            # 无 turn_id 的事件（content/usage 类常见）也应归到同一 conversation_ref
+        },
+    ]
+    (sessions / "stable-conv-ref.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records), encoding="utf-8"
+    )
+
+    facts = collect_facts(
+        "collector-codex-stable-conv",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    usage_facts = [fact for fact in facts if fact["category"] == "usage"]
+    assert len(usage_facts) >= 2
+    conv_refs = {fact["source_refs"]["conversation_ref"] for fact in usage_facts}
+    assert len(conv_refs) == 1, f"同 session_id 的事件应归到同一 conversation_ref，实际: {conv_refs}"
+
+
+def test_conversation_ref_falls_back_to_turn_id_when_session_id_missing(tmp_path):
+    """session_id 缺失时，turn_id 仍可作为 conversation_ref 兜底。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-07-14T10:00:00+00:00",
+            "type": "usage",
+            "total_tokens": 100,
+            "payload": {"turn_id": "turn-fallback-only"},
+        },
+    ]
+    (sessions / "turn-fallback.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records), encoding="utf-8"
+    )
+
+    facts = collect_facts(
+        "collector-codex-turn-fallback",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    usage_facts = [fact for fact in facts if fact["category"] == "usage"]
+    assert usage_facts
+    conv_ref = usage_facts[0]["source_refs"]["conversation_ref"]
+    assert conv_ref, "turn_id 兜底应生成非空 conversation_ref"
+
+
+def _custom_tool_call(call_id: str, js_input: str, status: str = "completed") -> dict:
+    """构造 Codex 新格式 custom_tool_call 事件。"""
+    return {
+        "timestamp": "2026-07-14T10:00:00.000Z",
+        "type": "response_item",
+        "session_id": "session-custom-tool",
+        "payload": {
+            "type": "custom_tool_call",
+            "name": "exec",
+            "call_id": call_id,
+            "id": call_id,
+            "status": status,
+            "input": js_input,
+        },
+    }
+
+
+def _custom_tool_call_output(call_id: str, output: object) -> dict:
+    """构造 Codex 新格式 custom_tool_call_output 事件。"""
+    return {
+        "timestamp": "2026-07-14T10:01:00.000Z",
+        "type": "response_item",
+        "session_id": "session-custom-tool",
+        "payload": {
+            "type": "custom_tool_call_output",
+            "call_id": call_id,
+            "output": output,
+        },
+    }
+
+
+def test_custom_tool_call_output_list_with_exit_code_produces_failure(tmp_path):
+    """custom_tool_call_output 的 output 是 list 且含退出码文本时，应生成 tool_execution_failure。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        _custom_tool_call(
+            "call-list-exit",
+            'tools.exec_command({cmd:"pnpm test"})',
+        ),
+        _custom_tool_call_output(
+            "call-list-exit",
+            [
+                {"text": "Script completed\nWall time: 0.8 seconds\nProcess exited with code 1\nOutput:\n", "type": "input_text"},
+                {"text": "test failed", "type": "input_text"},
+            ],
+        ),
+    ]
+    (sessions / "custom-list-exit.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records), encoding="utf-8"
+    )
+
+    facts = collect_facts(
+        "collector-codex-list-exit",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    failure_facts = [fact for fact in facts if fact["category"] == "tool_execution_failure"]
+    assert failure_facts, "list output 含退出码 1 时应生成 tool_execution_failure"
+    assert failure_facts[0]["projection"]["exit_code"] == 1
+
+
+def test_custom_tool_call_output_uses_call_status_when_exit_code_missing(tmp_path):
+    """custom_tool_call_output 无退出码但关联的 custom_tool_call status=failed 时，应判定为 error。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        _custom_tool_call(
+            "call-status-failed",
+            'tools.exec_command({cmd:"playwright test"})',
+            status="failed",
+        ),
+        _custom_tool_call_output(
+            "call-status-failed",
+            [
+                {"text": "Script completed\nWall time: 5.5 seconds\nOutput:\n1 failed\n3 passed\n", "type": "input_text"},
+            ],
+        ),
+    ]
+    (sessions / "custom-status-failed.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records), encoding="utf-8"
+    )
+
+    facts = collect_facts(
+        "collector-codex-status-failed",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    failure_facts = [fact for fact in facts if fact["category"] == "tool_execution_failure"]
+    assert failure_facts, "call status=failed 且无退出码时应生成 tool_execution_failure"
+
+
+def test_custom_tool_call_output_completed_not_error(tmp_path):
+    """custom_tool_call status=completed 且 output 无退出码时，不应判定为 error。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        _custom_tool_call(
+            "call-completed-ok",
+            'tools.exec_command({cmd:"pnpm typecheck"})',
+            status="completed",
+        ),
+        _custom_tool_call_output(
+            "call-completed-ok",
+            [
+                {"text": "Script completed\nWall time: 2.0 seconds\nOutput:\ntypecheck passed\n", "type": "input_text"},
+            ],
+        ),
+    ]
+    (sessions / "custom-completed-ok.jsonl").write_text(
+        "\n".join(json.dumps(record) for record in records), encoding="utf-8"
+    )
+
+    facts = collect_facts(
+        "collector-codex-completed-ok",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        history_window_days=7,
+        max_events=20,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+
+    categories = {fact["category"] for fact in facts}
+    assert "tool_execution_failure" not in categories, "status=completed 且无退出码时不应生成 error"

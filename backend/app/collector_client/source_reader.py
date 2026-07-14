@@ -145,7 +145,7 @@ def _remember_call_context(cursor: dict, records: list[tuple[int, int, dict]]) -
         cursor["call_context"] = context
     for line_no, _, record in records:
         payload = _payload(record)
-        if payload.get("type") != "function_call":
+        if payload.get("type") not in {"function_call", "custom_tool_call"}:
             continue
         call_id = str(payload.get("call_id") or "")
         if call_id:

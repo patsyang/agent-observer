@@ -19,7 +19,7 @@ def attach_call_context(records: Iterable[tuple[int, dict]]) -> list[tuple[int, 
     calls: dict[str, dict] = {}
     for line_number, record in rows:
         payload = _payload(record)
-        if payload.get("type") != "function_call":
+        if payload.get("type") not in {"function_call", "custom_tool_call"}:
             continue
         call_id = str(payload.get("call_id") or "")
         if call_id:
@@ -28,7 +28,7 @@ def attach_call_context(records: Iterable[tuple[int, dict]]) -> list[tuple[int, 
     for line_number, record in rows:
         payload = _payload(record)
         call_id = str(payload.get("call_id") or "")
-        if payload.get("type") == "function_call_output" and call_id in calls:
+        if payload.get("type") in {"function_call_output", "custom_tool_call_output"} and call_id in calls:
             record = dict(record)
             record["_agent_observer_call"] = calls[call_id]
         enriched.append((line_number, record))
@@ -70,8 +70,25 @@ def tool_failure_fact(common: dict, projection: dict) -> dict:
     }
 
 
+def _output_as_text(output: object) -> str:
+    """将 output 字段归一化为文本：str 直接返回；list 拼接 text/content 字段。"""
+    if isinstance(output, str):
+        return output
+    if isinstance(output, list):
+        parts: list[str] = []
+        for item in output:
+            if isinstance(item, dict):
+                text = item.get("text") or item.get("content") or ""
+                if isinstance(text, str):
+                    parts.append(text)
+            elif isinstance(item, str):
+                parts.append(item)
+        return "\n".join(parts)
+    return ""
+
+
 def _projection_from_output(payload: dict, call_payload: dict, args: dict) -> dict | None:
-    output = str(payload.get("output") or "")
+    output = _output_as_text(payload.get("output"))
     envelope = parse_tool_output(output)
     if envelope.exit_code is None or envelope.exit_code == 0:
         return None
@@ -101,9 +118,9 @@ def _projection_from_output(payload: dict, call_payload: dict, args: dict) -> di
 
 def _standalone_output_projection(record: dict) -> dict | None:
     payload = _payload(record)
-    if payload.get("type") != "function_call_output":
+    if payload.get("type") not in {"function_call_output", "custom_tool_call_output"}:
         return None
-    projection = _projection_from_output(payload, {"name": "function_call_output"}, {})
+    projection = _projection_from_output(payload, {"name": payload.get("type") or "tool_output"}, {})
     if projection is None or projection.get("exit_code") == 0:
         return None
     return projection

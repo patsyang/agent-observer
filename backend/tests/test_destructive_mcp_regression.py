@@ -118,3 +118,52 @@ def test_mcp_event_with_console_log_command_category_empty():
     assert fact is not None
     assert fact["projection"]["command"] == ""
     assert fact["projection"]["command_category"] == ""
+
+
+def _record_with_path(command: str, path: str) -> dict:
+    """构造一个带 path 字段的 function_call record（用于测试 path 中的关键词匹配）。"""
+    return {
+        "type": "response_item",
+        "path": path,
+        "payload": {
+            "type": "function_call",
+            "name": "shell_command",
+            "call_id": "call_path_test_1",
+            "arguments": {"command": command},
+        },
+    }
+
+
+def test_path_with_undelete_word_not_destructive():
+    """path 中包含 'undelete'（无词边界）不应触发破坏性 fact。
+
+    回归：旧逻辑用 ``"delete" not in path`` 子串匹配，会把 'undelete' 中的
+    'delete' 子串误判为删除操作路径。新逻辑用 ``\\bdelet(e|ion)\\b`` 词边界正则，
+    'undelete' 中 'delete' 前无词边界，不匹配。
+    """
+    record = _record_with_path(
+        command="python D:/workspace/undelete_recovery.py",
+        path="D:/workspace/undelete_recovery.py",
+    )
+    destructive = _destructive_fact(_common(), record)
+    assert destructive is None, (
+        "path 含 'undelete'（无词边界）不应触发破坏性 fact"
+    )
+
+
+def test_path_with_deletion_word_still_destructive():
+    """path 中包含 'deletion'（有词边界）仍应触发破坏性 fact。
+
+    确保词边界正则不会漏掉真正的 'deletion' 关键词。
+    使用 'deletion.log'（点号是非单词字符，形成词边界）。
+    """
+    record = _record_with_path(
+        command="ls D:/workspace/deletion.log",
+        path="D:/workspace/deletion.log",
+    )
+    destructive = _destructive_fact(_common(), record)
+    assert destructive is not None, (
+        "path 含 'deletion'（有词边界）应触发破坏性 fact"
+    )
+    assert destructive["fact_type"] == "risk"
+    assert destructive["category"] == "destructive_operation"

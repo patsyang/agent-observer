@@ -12,18 +12,22 @@ import sqlite3
 _MAX_RESULT_TEXT = 500
 
 
-def _fetch_risk_signals(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[str, list[str]]:
-    """按 fact_id 批量取关联的 risk_type 列表。"""
+def _fetch_risk_signals(conn: sqlite3.Connection, fact_ids: list[str]) -> dict[str, list[dict]]:
+    """按 fact_id 批量取关联的风险信号（risk_type + severity + object_type）。"""
     if not fact_ids:
         return {}
     placeholders = ",".join("?" * len(fact_ids))
     rows = conn.execute(
-        f"select distinct fact_id, risk_type from risk_signals where fact_id in ({placeholders})",
+        f"select distinct fact_id, risk_type, severity, object_type from risk_signals where fact_id in ({placeholders})",
         fact_ids,
     ).fetchall()
-    result: dict[str, list[str]] = {}
+    result: dict[str, list[dict]] = {}
     for row in rows:
-        result.setdefault(row["fact_id"], []).append(row["risk_type"])
+        result.setdefault(row["fact_id"], []).append({
+            "risk_type": row["risk_type"],
+            "severity": row["severity"],
+            "object_type": row["object_type"],
+        })
     return result
 
 
@@ -75,83 +79,89 @@ def list_mcp_calls(
     page_size: int = 50,
     server: str | None = None,
     risk_only: bool = False,
+    error_only: bool = False,
 ) -> dict:
     """查询 MCP 工具调用记录。
 
-    筛选策略：
-      - SQL 层用 projection_json LIKE '%"mcp_server"%' 收窄候选集
-      - risk_only=True 时追加 EXISTS risk_signals 子查询
-      - server 在 Python 层过滤（projection 解析后精确匹配）
-    返回 items + 分页信息 + summary（servers/total_calls/error_calls/risk_calls）。
-    summary 反映筛选后、分页前的集合。
+    筛选和分页全部在 SQL 层完成：
+      - json_extract 在 SQL 层过滤 mcp_server / mcp_is_error
+      - LIMIT/OFFSET 只加载当前页的 raw_content
+      - summary 用聚合查询，不加载 raw_content
     """
-    sql = (
-        "select ep.fact_id, ep.projection_json, ep.raw_content, of.occurred_at, of.conversation_ref "
-        "from evidence_projections ep "
-        "join observed_facts of on ep.fact_id = of.fact_id "
-        "where ep.projection_json like '%\"mcp_server\"%'"
-    )
+    where_clauses = ["ep.projection_json like '%\"mcp_server\"%'"]
+    params: list = []
+    if server:
+        where_clauses.append("json_extract(ep.projection_json, '$.mcp_server') = ?")
+        params.append(server)
+    if error_only:
+        where_clauses.append("json_extract(ep.projection_json, '$.mcp_is_error') = 1")
     if risk_only:
-        sql += " and exists (select 1 from risk_signals rs where rs.fact_id = ep.fact_id)"
-    sql += " order by of.occurred_at desc"
+        where_clauses.append("exists (select 1 from risk_signals rs where rs.fact_id = ep.fact_id)")
+    where = "where " + " and ".join(where_clauses)
+    join = "from evidence_projections ep join observed_facts of on ep.fact_id = of.fact_id"
 
-    rows = conn.execute(sql).fetchall()
+    # 1. Summary（轻量聚合，不加载 raw_content）
+    total = conn.execute(f"select count(*) {join} {where}", params).fetchone()[0]
 
-    parsed: list[dict] = []
-    for row in rows:
+    servers_rows = conn.execute(
+        f"select distinct json_extract(ep.projection_json, '$.mcp_server') as s {join} {where}",
+        params,
+    ).fetchall()
+    servers = sorted(r["s"] for r in servers_rows if r["s"])
+
+    error_calls = conn.execute(
+        f"select sum(case when json_extract(ep.projection_json, '$.mcp_is_error') = 1 then 1 else 0 end) {join} {where}",
+        params,
+    ).fetchone()[0] or 0
+
+    if risk_only:
+        risk_calls = total
+    else:
+        risk_where = where + " and exists (select 1 from risk_signals rs where rs.fact_id = ep.fact_id)"
+        risk_calls = conn.execute(f"select count(*) {join} {risk_where}", params).fetchone()[0] or 0
+
+    # 2. 页数据（只加载当前页的 raw_content）
+    offset = (page - 1) * page_size
+    page_rows = conn.execute(
+        f"select ep.fact_id, ep.projection_json, ep.raw_content, of.occurred_at, of.conversation_ref "
+        f"{join} {where} order by of.occurred_at desc limit ? offset ?",
+        params + [page_size, offset],
+    ).fetchall()
+
+    # 3. 风险信号（仅当前页）
+    risk_map = _fetch_risk_signals(conn, [r["fact_id"] for r in page_rows])
+
+    items = []
+    for row in page_rows:
         try:
             projection = json.loads(row["projection_json"])
         except (json.JSONDecodeError, TypeError):
             continue
         if not isinstance(projection, dict):
             continue
-        if "mcp_server" not in projection:
-            continue
-        if server is not None and projection.get("mcp_server") != server:
-            continue
-        parsed.append({
+        arguments, result_text = _extract_detail(row["raw_content"])
+        items.append({
             "fact_id": row["fact_id"],
             "occurred_at": row["occurred_at"],
             "conversation_ref": row["conversation_ref"],
-            "projection": projection,
-            "raw_content": row["raw_content"],
-        })
-
-    risk_map = _fetch_risk_signals(conn, [p["fact_id"] for p in parsed])
-    servers = sorted({p["projection"]["mcp_server"] for p in parsed})
-    total_calls = len(parsed)
-    error_calls = sum(1 for p in parsed if p["projection"].get("mcp_is_error"))
-    risk_calls = sum(1 for p in parsed if risk_map.get(p["fact_id"]))
-
-    start = (page - 1) * page_size
-    page_items = parsed[start : start + page_size]
-
-    items = []
-    for p in page_items:
-        proj = p["projection"]
-        arguments, result_text = _extract_detail(p["raw_content"])
-        items.append({
-            "fact_id": p["fact_id"],
-            "occurred_at": p["occurred_at"],
-            "conversation_ref": p["conversation_ref"],
-            "mcp_server": proj.get("mcp_server"),
-            "mcp_tool": proj.get("mcp_tool"),
-            "mcp_duration_ms": proj.get("mcp_duration_ms"),
-            "mcp_is_error": proj.get("mcp_is_error", False),
-            "mcp_args_summary": proj.get("mcp_args_summary", ""),
+            "mcp_server": projection.get("mcp_server"),
+            "mcp_tool": projection.get("mcp_tool"),
+            "mcp_duration_ms": projection.get("mcp_duration_ms"),
+            "mcp_is_error": projection.get("mcp_is_error", False),
+            "mcp_args_summary": projection.get("mcp_args_summary", ""),
             "arguments": arguments,
             "result_text": result_text,
-            "risk_signals": risk_map.get(p["fact_id"], []),
+            "risk_signals": risk_map.get(row["fact_id"], []),
         })
 
     return {
         "items": items,
-        "total": total_calls,
+        "total": total,
         "page": page,
         "page_size": page_size,
         "summary": {
             "servers": servers,
-            "total_calls": total_calls,
+            "total_calls": total,
             "error_calls": error_calls,
             "risk_calls": risk_calls,
         },

@@ -464,7 +464,7 @@ def _audit_fact(config: SourceConfig, collector_id: str, sequence: int, source_k
             "quality": "high",
             "severity": "high",
             "summary": f"WorkBuddy audit 拒绝了本地操作：{event_type}。",
-            "projection": {"operation": event_type, "command_excerpt": command[:240], "decision": decision},
+            "projection": {"operation": event_type, "command_excerpt": command_excerpt(command), "decision": decision},
             "risk": {"risk_type": "destructive_operation", "severity": "high", "object_type": "command"},
         }
     return {
@@ -474,7 +474,7 @@ def _audit_fact(config: SourceConfig, collector_id: str, sequence: int, source_k
         "quality": "high",
         "severity": "low",
         "summary": f"WorkBuddy audit 记录工具或权限事件：{event_type}。",
-        "projection": {"tool_name": event_type, "command_excerpt": command[:240], "decision": decision, "raw_content_uploaded": True},
+        "projection": {"tool_name": event_type, "command_excerpt": command_excerpt(command), "decision": decision, "raw_content_uploaded": True},
     }
 
 

@@ -45,7 +45,9 @@ def _create_test_db() -> sqlite3.Connection:
         create table risk_signals (
             signal_id text primary key,
             fact_id text not null,
-            risk_type text not null
+            risk_type text not null,
+            severity text,
+            object_type text
         )
         """
     )
@@ -68,11 +70,11 @@ def _insert_projection(conn: sqlite3.Connection, fact_id: str, projection: dict,
     )
 
 
-def _insert_risk(conn: sqlite3.Connection, fact_id: str, risk_type: str, signal_id: str | None = None) -> None:
+def _insert_risk(conn: sqlite3.Connection, fact_id: str, risk_type: str, signal_id: str | None = None, severity: str = "high", object_type: str = "email") -> None:
     sid = signal_id or f"risk:{fact_id}:{risk_type}"
     conn.execute(
-        "insert into risk_signals (signal_id, fact_id, risk_type) values (?, ?, ?)",
-        (sid, fact_id, risk_type),
+        "insert into risk_signals (signal_id, fact_id, risk_type, severity, object_type) values (?, ?, ?, ?, ?)",
+        (sid, fact_id, risk_type, severity, object_type),
     )
 
 
@@ -178,13 +180,21 @@ class TestListMcpCalls:
         fact_ids = {item["fact_id"] for item in result["items"]}
         assert fact_ids == {"fact-mcp-2", "fact-mcp-3"}
 
+    def test_error_only_filter(self, db_with_mcp_records):
+        """error_only=True 只返回 mcp_is_error=True 的记录。"""
+        result = list_mcp_calls(db_with_mcp_records, error_only=True)
+        fact_ids = {item["fact_id"] for item in result["items"]}
+        assert fact_ids == {"fact-mcp-2"}
+
     def test_risk_signals_attached_to_items(self, db_with_mcp_records):
-        """item 的 risk_signals 字段包含关联的 risk_type 列表。"""
+        """item 的 risk_signals 字段包含结构化风险信号。"""
         result = list_mcp_calls(db_with_mcp_records, page=1, page_size=50)
         item2 = next(i for i in result["items"] if i["fact_id"] == "fact-mcp-2")
-        assert "sensitive_content_exposure" in item2["risk_signals"]
+        assert any(rs["risk_type"] == "sensitive_content_exposure" for rs in item2["risk_signals"])
+        assert any(rs["severity"] == "high" for rs in item2["risk_signals"])
+        assert any(rs["object_type"] == "email" for rs in item2["risk_signals"])
         item3 = next(i for i in result["items"] if i["fact_id"] == "fact-mcp-3")
-        assert "destructive_operation" in item3["risk_signals"]
+        assert any(rs["risk_type"] == "destructive_operation" for rs in item3["risk_signals"])
 
     def test_summary_contains_required_fields(self, db_with_mcp_records):
         """summary 包含 servers/total_calls/error_calls/risk_calls。"""
