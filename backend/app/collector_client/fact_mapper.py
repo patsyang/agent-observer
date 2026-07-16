@@ -333,7 +333,7 @@ def _tool_fact(common: dict, record: dict) -> dict | None:
     return {
         **common,
         "fact_type": "tool",
-        "category": "tool_call" if "call_output" not in payload_type else "tool_result",
+        "category": "tool_call" if payload_type in {"function_call", "custom_tool_call", "tool_call"} else "tool_result",
         "quality": "high",
         "severity": "low",
         "summary": f"Agent 调用工具 {tool_name}，类别 {command_category or payload_type}，已提取工具调用摘要。",

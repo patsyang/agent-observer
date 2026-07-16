@@ -8,7 +8,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from app.sensitive import sensitive_categories_from_text
-from app.collector_client.tool_execution import command_from_js_input, command_text, parse_tool_output
+from app.collector_client.tool_execution import command_text, parse_tool_output
 
 
 def payload(record: dict) -> dict:
@@ -41,12 +41,6 @@ def arguments(value: dict) -> dict:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
-    # Codex custom_tool_call 的 input 是 JS 代码字符串（如 tools.exec_command({cmd:"..."}），
-    # 不是 JSON。尝试从中提取命令构造 {"cmd": "..."}，让 command_text/command_category 生效。
-    if isinstance(raw, str):
-        command = command_from_js_input(raw)
-        if command:
-            return {"cmd": command}
     # MCP 事件回退：payload.arguments / payload.input 为空时查 payload.invocation.arguments
     invocation = value.get("invocation")
     if isinstance(invocation, dict):
@@ -68,21 +62,6 @@ def exit_code(record: dict) -> int | None:
         parsed = parse_tool_output(output)
         if parsed.exit_code is not None:
             return parsed.exit_code
-    # Codex custom_tool_call_output 的 output 是 list（如 [{'text': '...', 'type': 'input_text'}]），
-    # 拼接 text/content 字段后解析退出码。
-    if isinstance(output, list):
-        text_parts: list[str] = []
-        for item in output:
-            if isinstance(item, dict):
-                text = item.get("text") or item.get("content") or ""
-                if isinstance(text, str):
-                    text_parts.append(text)
-            elif isinstance(item, str):
-                text_parts.append(item)
-        if text_parts:
-            parsed = parse_tool_output("\n".join(text_parts))
-            if parsed.exit_code is not None:
-                return parsed.exit_code
     if payload_type(record) == "patch_apply_end" and value.get("success") is False:
         return 1
     return None

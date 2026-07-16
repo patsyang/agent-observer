@@ -41,29 +41,6 @@ def command_text(args: dict) -> str:
     return str(args.get("cmd") or args.get("command") or "").strip()
 
 
-_JS_CMD_DOUBLE_QUOTE = re.compile(r'cmd\s*:\s*"((?:[^"\\]|\\.)*)"')
-_JS_CMD_SINGLE_QUOTE = re.compile(r"cmd\s*:\s*'((?:[^'\\]|\\.)*)'")
-
-
-def command_from_js_input(input_str: str) -> str:
-    """从 Codex custom_tool_call 的 JS 代码 input 中提取命令。
-
-    Codex 新格式事件的 input 是 JS 代码字符串，如：
-    'const [files, ...] = await Promise.all([tools.exec_command({cmd:"rg --files ..."})])'
-
-    提取首个 cmd:"..." 或 cmd:'...' 中的命令文本，用于命令分类和语义退出码判断。
-    返回空字符串表示未匹配（调用方按原逻辑处理）。
-    """
-    if not input_str or not isinstance(input_str, str):
-        return ""
-    for pattern in (_JS_CMD_DOUBLE_QUOTE, _JS_CMD_SINGLE_QUOTE):
-        match = pattern.search(input_str)
-        if match:
-            command = match.group(1)
-            return command.replace('\\"', '"').replace("\\'", "'").replace("\\\\", "\\").strip()
-    return ""
-
-
 def command_fingerprint(command: str) -> str:
     normalized = " ".join(str(command or "").split()).lower()
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()[:16] if normalized else ""
@@ -92,11 +69,6 @@ def arguments_from_payload(payload: dict) -> dict:
         except json.JSONDecodeError:
             return {}
         return parsed if isinstance(parsed, dict) else {}
-    # Codex custom_tool_call 的 input 是 JS 代码字符串，尝试提取命令。
-    if isinstance(raw, str):
-        command = command_from_js_input(raw)
-        if command:
-            return {"cmd": command}
     return {}
 
 
