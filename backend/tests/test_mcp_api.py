@@ -26,7 +26,8 @@ def _create_test_db() -> sqlite3.Connection:
         create table observed_facts (
             fact_id text primary key,
             occurred_at text not null,
-            conversation_ref text not null default ''
+            conversation_ref text not null default '',
+            normalized_event_type text not null default ''
         )
         """
     )
@@ -55,10 +56,10 @@ def _create_test_db() -> sqlite3.Connection:
     return conn
 
 
-def _insert_fact(conn: sqlite3.Connection, fact_id: str, occurred_at: str, conversation_ref: str = "ref:conv1") -> None:
+def _insert_fact(conn: sqlite3.Connection, fact_id: str, occurred_at: str, conversation_ref: str = "ref:conv1", normalized_event_type: str = "event_msg:mcp_tool_call_end") -> None:
     conn.execute(
-        "insert into observed_facts (fact_id, occurred_at, conversation_ref) values (?, ?, ?)",
-        (fact_id, occurred_at, conversation_ref),
+        "insert into observed_facts (fact_id, occurred_at, conversation_ref, normalized_event_type) values (?, ?, ?, ?)",
+        (fact_id, occurred_at, conversation_ref, normalized_event_type),
     )
 
 
@@ -127,7 +128,7 @@ def db_with_mcp_records() -> sqlite3.Connection:
     _insert_risk(conn, "fact-mcp-3", "destructive_operation")
 
     # 非 MCP 记录：projection 不含 mcp_server
-    _insert_fact(conn, "fact-non-mcp-1", "2026-07-12T09:00:00+00:00", "ref:conv1")
+    _insert_fact(conn, "fact-non-mcp-1", "2026-07-12T09:00:00+00:00", "ref:conv1", normalized_event_type="event_msg:tool_call_end")
     _insert_projection(conn, "fact-non-mcp-1", {"tool_name": "edit", "argument_keys": []})
 
     conn.commit()

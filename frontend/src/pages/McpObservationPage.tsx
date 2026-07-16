@@ -79,22 +79,22 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
       <section className="metrics" aria-label="MCP 汇总">
         <div className="metric" data-testid="mcp-summary-servers">
           <span>Servers</span>
-          <strong>{showPlaceholder ? '—' : formatNumber(summary.servers.length)}</strong>
+          <strong>{showPlaceholder ? <span className="loading-inline">加载中</span> : formatNumber(summary.servers.length)}</strong>
           <small>已接入服务器</small>
         </div>
         <div className="metric" data-testid="mcp-summary-total">
           <span>调用总数</span>
-          <strong>{showPlaceholder ? '—' : formatNumber(summary.total_calls)}</strong>
+          <strong>{showPlaceholder ? <span className="loading-inline">加载中</span> : formatNumber(summary.total_calls)}</strong>
           <small>窗口内调用</small>
         </div>
         <div className="metric" data-testid="mcp-summary-errors">
           <span>错误数</span>
-          <strong>{showPlaceholder ? '—' : formatNumber(summary.error_calls)}</strong>
+          <strong>{showPlaceholder ? <span className="loading-inline">加载中</span> : formatNumber(summary.error_calls)}</strong>
           <small>失败调用</small>
         </div>
         <div className="metric" data-testid="mcp-summary-risks">
           <span>风险数</span>
-          <strong>{showPlaceholder ? '—' : formatNumber(summary.risk_calls)}</strong>
+          <strong>{showPlaceholder ? <span className="loading-inline">加载中</span> : formatNumber(summary.risk_calls)}</strong>
           <small>命中风险信号</small>
         </div>
       </section>
@@ -140,7 +140,11 @@ export function McpObservationPage({ loadMcpCalls }: Props) {
           </tr>
         </thead>
         <tbody>
-          {items.map((item) => (
+          {showPlaceholder ? (
+            <tr><td colSpan={7}><span className="loading-inline">加载中</span></td></tr>
+          ) : items.length === 0 ? (
+            <tr><td colSpan={7}>当前筛选条件下没有 MCP 调用记录。</td></tr>
+          ) : items.map((item) => (
             <Fragment key={item.fact_id}>
               <tr
                 data-testid="mcp-call-row"

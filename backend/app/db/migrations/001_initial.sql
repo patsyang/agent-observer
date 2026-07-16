@@ -264,6 +264,8 @@ create index if not exists idx_risk_signals_severity
   on risk_signals(severity);
 create index if not exists idx_observed_facts_source_event_type_occurred_at
   on observed_facts(source_event_type, occurred_at desc);
+create index if not exists idx_observed_facts_normalized_event_type
+  on observed_facts(normalized_event_type, occurred_at desc);
 create index if not exists idx_usage_signals_fact_id
   on usage_signals(fact_id);
 create index if not exists idx_behavior_signals_decision_priority_last_event

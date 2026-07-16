@@ -67,7 +67,7 @@ def test_mcp_event_with_rm_rf_cmd_tool_fact_not_destructive():
     fact = _tool_fact(_common(), record)
     assert fact is not None
     assert fact["fact_type"] == "tool"
-    assert fact["category"] == "tool_call"
+    assert fact["category"] == "tool_result"
     assert fact["fact_type"] != "destructive_operation"
 
 
@@ -132,6 +132,32 @@ def _record_with_path(command: str, path: str) -> dict:
             "arguments": {"command": command},
         },
     }
+
+
+def test_tool_result_payload_type_classified_as_tool_result():
+    """payload_type='tool_result' 必须归为 category='tool_result'，不能误分为 'tool_call'。
+
+    回归：旧逻辑用 ``payload_type == "mcp_tool_call_end" or "call_output" in payload_type``
+    判断 tool_result，但 ``"call_output" in "tool_result"`` 为 False，
+    导致 tool_result 被误分为 tool_call，进而被 filter_policy 丢弃 PII。
+    新逻辑用显式集合枚举 tool_call 类，其余全归 tool_result。
+    """
+    record = {
+        "type": "response_item",
+        "payload": {
+            "type": "tool_result",
+            "name": "shell_command",
+            "call_id": "call_tool_result_1",
+            "arguments": {"command": "cat config.json"},
+            "output": '{"password": "secret123"}',
+        },
+    }
+    fact = _tool_fact(_common(), record)
+    assert fact is not None
+    assert fact["fact_type"] == "tool"
+    assert fact["category"] == "tool_result", (
+        "payload_type='tool_result' 必须归为 tool_result，否则 PII 会被 filter_policy 误过滤"
+    )
 
 
 def test_path_with_undelete_word_not_destructive():
