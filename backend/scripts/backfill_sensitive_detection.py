@@ -26,6 +26,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.db.connection import connect  # noqa: E402
 from app.sensitive import detect_for_fact, object_type_from_matches  # noqa: E402
+from app.sensitive.filter_policy import filter_sensitive_matches  # noqa: E402
 
 BATCH_DEFAULT = 100
 SLEEP_DEFAULT = 0.5
@@ -144,6 +145,17 @@ def _reconcile_sensitive_risk(
         )
 
 
+def _update_conversation_hits_sensitive(
+    conn: sqlite3.Connection, fact_id: str, matches: list[dict]
+) -> None:
+    """同步更新 conversation_hits.sensitive_matches_json，保持前端展示一致。"""
+    matches_json = json.dumps(matches or [], ensure_ascii=False, sort_keys=True)
+    conn.execute(
+        "update conversation_hits set sensitive_matches_json = ? where fact_id = ?",
+        (matches_json, fact_id),
+    )
+
+
 def _update_projection_json(
     conn: sqlite3.Connection, fact_id: str, projection_id: str, proj_json: str
 ) -> None:
@@ -170,7 +182,7 @@ def _upsert_risk_signal(
 
 
 def _process_fact(
-    conn: sqlite3.Connection, fact_id: str, *, dry_run: bool = False, recompute: bool = False
+    conn: sqlite3.Connection, fact_id: str, fact_type: str, category: str, *, dry_run: bool = False, recompute: bool = False
 ) -> dict | None:
     """对单条 fact 跑 detector，命中则更新 projection + risk_signal（dry_run 只检测不写库）。
 
@@ -196,15 +208,25 @@ def _process_fact(
         high = detect_for_fact(None, raw_content, source="backfill")
     else:
         high = detect_for_fact(proj_json_text, None, source="backfill")
+    # 与 ingest 端 _detect_fact_sensitive 一致的过滤策略
+    item_context = {"fact_type": fact_type, "category": category}
+    high = filter_sensitive_matches(item_context, high)
     object_type = object_type_from_matches(high) if high else None
     had_old = bool(proj.get("sensitive_matches"))
     # 增量模式且无命中：无事可做。重算模式：即便无命中也要清除旧误报。
     if not high and not (recompute and had_old):
+        # recompute 模式下，即使 evidence_projections 无旧数据，
+        # conversation_hits 可能仍有旧敏感命中（首次 recompute 清空了 projection
+        # 但 conversation_hits 未同步的情况），需要清空保持一致。
+        if recompute and not dry_run:
+            _update_conversation_hits_sensitive(conn, fact_id, [])
+            _reconcile_sensitive_risk(conn, fact_id, None)
         return None
     if not dry_run:
         _stamp_projection(proj, high, recompute=recompute)
         _update_projection_json(conn, fact_id, proj_row["projection_id"],
                                 json.dumps(proj, ensure_ascii=False, sort_keys=True, default=str))
+        _update_conversation_hits_sensitive(conn, fact_id, high)
         if recompute:
             _reconcile_sensitive_risk(conn, fact_id, object_type)
         elif object_type:
@@ -259,7 +281,7 @@ def backfill(
             fact_id = row["fact_id"]
             created_at = row["created_at"]
             try:
-                hit = _process_fact(conn, fact_id, dry_run=dry_run, recompute=recompute)
+                hit = _process_fact(conn, fact_id, row["fact_type"], row["category"], dry_run=dry_run, recompute=recompute)
                 if hit:
                     if hit["matches"]:
                         stats["hit_facts"] += 1

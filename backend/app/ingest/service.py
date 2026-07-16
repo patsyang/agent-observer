@@ -15,6 +15,7 @@ from app.conversations.materialize import (
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
 from app.processing.jobs import JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
 from app.sensitive import detect_for_fact, object_type_from_matches
+from app.sensitive.filter_policy import filter_sensitive_matches
 
 
 def _now() -> str:
@@ -559,6 +560,9 @@ def _detect_fact_sensitive(item: dict) -> tuple[list[dict], str | None]:
                     projection_parts.append(json.dumps(projection_value, ensure_ascii=False, sort_keys=True, default=str))
         text = "\n".join(raw_parts) if raw_parts else "\n".join(projection_parts)
         high = detect_for_fact(text, None, source="ingest")
+        if not high:
+            return [], None
+        high = filter_sensitive_matches(item, high)
         if not high:
             return [], None
         return high, object_type_from_matches(high)
