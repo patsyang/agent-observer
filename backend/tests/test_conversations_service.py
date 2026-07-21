@@ -563,6 +563,37 @@ def test_conversation_detail_can_be_loaded_from_story_fact(tmp_path):
     assert by_fact["focus_fact_id"] == "detail-response"
 
 
+def test_get_conversation_for_fact_resolves_focus_to_nearest_message_for_non_message_fact(tmp_path):
+    """非消息 fact（如 usage/perf）未物化进 conversation_messages，
+    focus_fact_id 应解析为同一会话内 occurred_at 最近的 message fact_id，
+    而不是直接返回原 fact_id 导致前端定位失败。"""
+    now = datetime.now(UTC).replace(microsecond=0)
+    with connect(tmp_path / "observer.sqlite") as conn:
+        ingest_telemetry(
+            conn,
+            {
+                "batch_id": "batch-focus-nearest",
+                **default_versions(),
+                "collector_id": "collector-codex",
+                "source": "codex",
+        "source_id": "codex-local",
+        "agent_type": "codex",
+        "source_kind": "codex_local",
+                "cursor": "cursor-focus",
+                "items": [
+                    _item("focus-prompt", "agent_prompt", "用户提问", (now - timedelta(minutes=10)).isoformat(), "conv-focus"),
+                    _item("focus-response", "agent_response", "助手回复", (now - timedelta(minutes=9)).isoformat(), "conv-focus"),
+                    # usage fact 在 response 之后 30s（距 response 30s，距 prompt 90s）
+                    _usage("focus-usage", 64, (now - timedelta(minutes=8, seconds=30)).isoformat(), "conv-focus"),
+                ],
+            },
+        )
+        detail = get_conversation_for_fact(conn, "focus-usage")
+    # usage fact 未物化进 conversation_messages，应解析为时间最近的 message fact
+    assert detail["focus_fact_id"] == "focus-response"
+    assert detail["conversation_ref"] == "conv-focus"
+
+
 def test_conversation_detail_hits_expose_tool_context(tmp_path):
     now = datetime.now(UTC).replace(microsecond=0)
     with connect(tmp_path / "observer.sqlite") as conn:

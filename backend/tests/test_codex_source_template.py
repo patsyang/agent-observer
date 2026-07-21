@@ -405,3 +405,140 @@ def test_codex_source_template_attaches_workspace_label_from_global_state(tmp_pa
     assert refs["workspace_path"].endswith("test-project")
     assert refs["workspace_alias_source"] == "codex_global_state"
     assert refs["workspace_confidence"] == "high"
+
+
+def test_codex_task_complete_produces_perf_signal_with_ttft(tmp_path):
+    """Codex task_complete 事件应产出 perf fact，含 TTFT 和 duration。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-07-01T01:24:30.517Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": "019f117e-aeed-7c12-8cf2-f25505df436f",
+                "last_agent_message": "done",
+                "completed_at": 1782705396,
+                "duration_ms": 454140,
+                "time_to_first_token_ms": 4761,
+            },
+        },
+    ]
+    (sessions / "perf-session.jsonl").write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=5,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+    perf_facts = [f for f in facts if f.get("fact_type") == "perf"]
+    assert perf_facts, "expected a perf fact from task_complete"
+    fact = perf_facts[0]
+    assert fact["category"] == "agent_turn_latency"
+    assert fact["perf_signals"], "perf_signals list should not be empty"
+    # 拆分后 perf_signals = [task span, llm_call span]
+    assert len(fact["perf_signals"]) == 2
+    task_span = fact["perf_signals"][0]
+    assert task_span["span_type"] == "task"
+    assert task_span["span_name"] == "codex_turn"
+    assert task_span["duration_ms"] == 454140
+    assert task_span["ttft_ms"] == 0  # TTFT 迁移到 llm_call span
+    assert task_span["trace_id"] == "019f117e-aeed-7c12-8cf2-f25505df436f"
+    assert task_span["span_id"] == "task-019f117e-aeed-7c"
+    assert task_span["status"] == "ok"
+    assert task_span["error"] == ""
+    # completed_at 1782705396 → 由 Unix 秒转 ISO；验证已转换（非原始 record.timestamp）
+    assert task_span["occurred_at"].startswith("2026-06-") and task_span["occurred_at"].endswith("+00:00")
+    # llm_call span 继承 ttft_ms，parent_span_id 指向 task span
+    # duration_ms=0：codex turn 事件无 LLM generation duration 字段
+    llm_span = fact["perf_signals"][1]
+    assert llm_span["span_type"] == "llm_call"
+    assert llm_span["span_name"] == "codex_generation"
+    assert llm_span["ttft_ms"] == 4761
+    assert llm_span["parent_span_id"] == task_span["span_id"]
+    assert llm_span["duration_ms"] == 0
+    assert llm_span["status"] == "ok"
+
+
+def test_codex_turn_aborted_produces_perf_signal_with_error_status(tmp_path):
+    """Codex turn_aborted 事件应产出 perf fact，status=error，无 TTFT。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-07-01T02:00:00.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "turn_aborted",
+                "turn_id": "019f171c-225b-7fa1-846e-a0369ffc8a4d",
+                "reason": "interrupted",
+                "completed_at": 1782799172,
+                "duration_ms": 24891,
+            },
+        },
+    ]
+    (sessions / "abort-session.jsonl").write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=5,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+    perf_facts = [f for f in facts if f.get("fact_type") == "perf"]
+    assert perf_facts, "expected a perf fact from turn_aborted"
+    # 拆分后 perf_signals = [task span, llm_call span]
+    assert len(perf_facts[0]["perf_signals"]) == 2
+    span = perf_facts[0]["perf_signals"][0]
+    assert span["status"] == "error"
+    assert span["error"] == "interrupted"
+    assert span["ttft_ms"] == 0  # turn_aborted 无 TTFT 字段
+    assert span["duration_ms"] == 24891
+    # llm_call span 也应为 error 状态，ttft_ms=0（无 TTFT 数据），duration_ms=0（无 generation duration）
+    llm_span = perf_facts[0]["perf_signals"][1]
+    assert llm_span["span_type"] == "llm_call"
+    assert llm_span["status"] == "error"
+    assert llm_span["error"] == "interrupted"
+    assert llm_span["ttft_ms"] == 0
+    assert llm_span["duration_ms"] == 0
+
+
+def test_codex_task_complete_missing_fields_does_not_crash(tmp_path):
+    """task_complete 缺失 duration_ms/ttft 字段时应安全降级为 0，不抛异常。"""
+    codex_home = tmp_path / ".codex"
+    sessions = codex_home / "sessions"
+    sessions.mkdir(parents=True)
+    records = [
+        {
+            "timestamp": "2026-07-01T03:00:00.000Z",
+            "type": "event_msg",
+            "payload": {
+                "type": "task_complete",
+                "turn_id": "minimal-turn-id",
+            },
+        },
+    ]
+    (sessions / "minimal.jsonl").write_text("\n".join(json.dumps(r) for r in records), encoding="utf-8")
+
+    facts = collect_facts(
+        "collector-codex",
+        1,
+        "safe_probe",
+        codex_home=codex_home,
+        max_events=5,
+        cursor={"last_sequence": 0, "sources": {}},
+    )
+    perf_facts = [f for f in facts if f.get("fact_type") == "perf"]
+    assert perf_facts
+    span = perf_facts[0]["perf_signals"][0]
+    assert span["duration_ms"] == 0
+    assert span["ttft_ms"] == 0
+    assert span["trace_id"] == "minimal-turn-id"

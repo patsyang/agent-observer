@@ -370,3 +370,97 @@ def test_tool_result_error_signature_has_signature_key_and_category(tmp_path):
     fact = next(f for f in result.facts if f["category"] == "tool_execution_failure")
     assert fact["error_signature"]["signature_key"] == "tool_execution_failure:unknown:tool_result:1"
     assert fact["error_signature"]["category"] == "tool_execution_failure"
+
+
+def test_system_turn_duration_produces_perf_signal(tmp_path):
+    """type=system, subtype=turn_duration 应产出 perf fact（task span）。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {
+            "type": "system",
+            "subtype": "turn_duration",
+            "durationMs": 191587,
+            "messageCount": 80,
+            "timestamp": "2026-07-04T03:32:25.014Z",
+            "uuid": "a074b244-55a0-45aa-96c5-bb8e95e6af81",
+            "sessionId": "s1",
+            "cwd": "D:\\test",
+        },
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts, "expected a perf fact from turn_duration"
+    fact = perf_facts[0]
+    assert fact["category"] == "agent_turn_latency"
+    span = fact["perf_signals"][0]
+    assert span["span_type"] == "task"
+    assert span["span_name"] == "claude_turn"
+    assert span["duration_ms"] == 191587
+    assert span["ttft_ms"] == 0  # claude 无 TTFT
+    assert span["trace_id"] == "s1"
+    assert span["span_id"] == "turn-a074b244-55a0-45"
+    assert span["status"] == "ok"
+    assert span["occurred_at"] == "2026-07-04T03:32:25.014Z"
+
+
+def test_system_non_turn_duration_subtype_produces_no_perf_fact(tmp_path):
+    """type=system 但 subtype 不是 turn_duration 时不应产出 perf fact。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "system", "subtype": "other_event", "timestamp": "2026-07-04T03:32:25.014Z", "sessionId": "s1", "cwd": "D:\\test"},
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts == []
+
+
+def test_user_tool_use_result_duration_ms_produces_perf_signal(tmp_path):
+    """顶层 toolUseResult.durationMs 应产出 tool_call perf span。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        # 先有 assistant tool_use，缓存工具名
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "call_abc123", "name": "Grep", "input": {"pattern": "foo"}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:00+00:00", "model": "claude-sonnet-4"},
+        # user 记录带顶层 toolUseResult（durationMs）
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_abc123", "content": "matched: 3 files"}]}, "toolUseResult": {"durationMs": 1234, "totalMatches": 3, "filenames": ["a.py"]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:05+00:00"},
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts, "expected a perf fact from toolUseResult"
+    fact = perf_facts[0]
+    assert fact["category"] == "tool_call_latency"
+    span = fact["perf_signals"][0]
+    assert span["span_type"] == "tool_call"
+    assert span["span_name"] == "Grep"
+    assert span["duration_ms"] == 1234
+    assert span["tool_name"] == "Grep"
+    assert span["trace_id"] == "s1"
+    assert span["span_id"] == "tool-call_abc123"
+    # 不应影响原有 tool_result fact
+    tool_result_facts = [f for f in result.facts if f.get("category") == "tool_result"]
+    assert tool_result_facts, "原有 tool_result fact 不应丢失"
+
+
+def test_user_tool_use_result_duration_seconds_produces_perf_signal(tmp_path):
+    """toolUseResult.durationSeconds（WebSearch）应转换为毫秒。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "call_def456", "name": "WebSearch", "input": {"query": "test"}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:00+00:00", "model": "claude-sonnet-4"},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_def456", "content": "search results"}]}, "toolUseResult": {"durationSeconds": 5, "query": "test", "searchCount": 10}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:05+00:00"},
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts
+    span = perf_facts[0]["perf_signals"][0]
+    assert span["duration_ms"] == 5000  # 5 秒 → 5000ms
+    assert span["tool_name"] == "WebSearch"
+
+
+def test_user_without_tool_use_result_produces_no_perf_fact(tmp_path):
+    """user 记录无 toolUseResult 时不产出 perf fact。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "user", "message": {"role": "user", "content": "hello"}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-06-30T01:00:00+00:00"},
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts == []

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, rebuild_signals
 from app.db.connection import connect
 from app.evidence_enrichment.service import get_enrichment_availability, request_enrichment
@@ -397,3 +399,93 @@ def test_destructive_operation_per_conversation_scope_id(tmp_path):
     assert len(result) == 1
     assert result[0]["affected_scope"]["conversation_ref"] == "conv-scope-a"
     assert result[0]["affected_scope"]["operation_count"] == 2
+
+
+def test_rebuild_signals_preserves_committed_on_later_builder_failure(tmp_path, monkeypatch):
+    """Part C try/finally：后续 builder 失败时，已 commit 的前序 builder 信号保留。
+
+    验证 rebuild_signals 的 try/finally 语义：
+    - builder 1 (build_tool_execution_failures) 成功 → commit 信号
+    - builder 2 (build_execution_timeouts) 抛异常
+    - finally 块用部分 active 列表执行 _remove_stale
+    - builder 1 的信号在 active 列表中，不被清理
+    - 异常正确传播
+    """
+    prompt = _base_item("prompt-c-1", "agent_prompt", "event")
+    prompt["source_refs"] = {"conversation_ref": "conversation-c"}
+    prompt["projection"] = {"role": "user", "prompt_text": "context"}
+    prompt["raw_content"] = {"text": "context"}
+    item = _base_item("tool-failure-c-1", "tool_execution_failure", "error")
+    item.update(
+        {
+            "summary": "function_call_output failed with exit_code=1",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 1,
+                "command": "false",
+                "command_excerpt": "false",
+                "command_category": "shell",
+                "error_excerpt": "exit 1",
+            },
+            "error_signature": {"signature_key": "tool_execution_failure:exec_command:abc-c:1", "category": "tool_execution_failure"},
+        }
+    )
+
+    def _boom(*args, **kwargs):
+        raise RuntimeError("simulated builder failure")
+
+    monkeypatch.setattr("app.behavior_signals.service.build_execution_timeouts", _boom)
+
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [prompt, item])
+        with pytest.raises(RuntimeError, match="simulated builder failure"):
+            rebuild_signals(conn, reason="test")
+        queue = list_signals(conn)
+
+    tool_signals = [s for s in queue["signals"] if s["signal_kind"] == "tool_execution_failure"]
+    assert len(tool_signals) == 1, "已 commit 的 builder 1 信号应保留（在 active 列表中）"
+
+
+def test_rebuild_signals_cleans_stale_when_all_builders_fail(tmp_path, monkeypatch):
+    """Part C try/finally：所有 builder 都失败时，_remove_stale 仍执行清理 stale 信号。"""
+    prompt = _base_item("prompt-c-2", "agent_prompt", "event")
+    prompt["source_refs"] = {"conversation_ref": "conversation-c2"}
+    prompt["projection"] = {"role": "user", "prompt_text": "context"}
+    prompt["raw_content"] = {"text": "context"}
+    item = _base_item("tool-failure-c-2", "tool_execution_failure", "error")
+    item.update(
+        {
+            "summary": "function_call_output failed with exit_code=1",
+            "projection": {
+                "tool_name": "exec_command",
+                "exit_code": 1,
+                "command": "false",
+                "command_excerpt": "false",
+                "command_category": "shell",
+                "error_excerpt": "exit 1",
+            },
+            "error_signature": {"signature_key": "tool_execution_failure:exec_command:abc-c2:1", "category": "tool_execution_failure"},
+        }
+    )
+
+    with connect(tmp_path / "observer.sqlite") as conn:
+        _ingest(conn, [prompt, item])
+        # 第一次 rebuild 成功，产生信号
+        rebuild_signals(conn, reason="first")
+        queue_after_first = list_signals(conn)
+        assert any(s["signal_kind"] == "tool_execution_failure" for s in queue_after_first["signals"])
+
+        # Monkeypatch 第一个 builder 失败 → active 为空 → 旧信号变 stale
+        def _boom(*args, **kwargs):
+            raise RuntimeError("all builders fail")
+
+        monkeypatch.setattr("app.behavior_signals.service.build_tool_execution_failures", _boom)
+
+        with pytest.raises(RuntimeError, match="all builders fail"):
+            rebuild_signals(conn, reason="second")
+
+        # _remove_stale 应在 finally 中执行，active=[] 清理所有 stale 信号
+        queue_after_failure = list_signals(conn)
+
+    tool_signals = [s for s in queue_after_failure["signals"] if s["signal_kind"] == "tool_execution_failure"]
+    assert tool_signals == [], "builder 全失败时 _remove_stale 应在 finally 中清理 stale 信号"
