@@ -1174,6 +1174,43 @@ a {
   white-space: normal;
 }
 
+/* R2-C2: 样本不足时标灰 */
+.signal-insight-card.muted {
+  opacity: 0.55;
+}
+
+/* 性能观测延迟分布卡片网格：响应式 auto-fit，每个卡片不小于 280px */
+.perf-latency-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  margin: 14px 0;
+}
+
+.signal-insight-card .hint,
+.hint {
+  color: #98a2b3;
+  font-size: 11px;
+}
+
+/* R2-E1: 错误提示样式 */
+.alert {
+  border-radius: 6px;
+  margin-bottom: 10px;
+  padding: 8px 12px;
+  font-size: 13px;
+}
+
+.alert-warning {
+  background: #fffaeb;
+  border: 1px solid #fec84b;
+  color: #b54708;
+}
+
+.error-text {
+  color: #d92d20;
+}
+
 .signal-conversation-grid,
 .workspace-chip-row {
   display: grid;
@@ -1735,6 +1772,49 @@ textarea {
   width: min(520px, calc(100vw - 24px));
 }
 
+/* 性能任务详情抽屉：表格列多，需要更宽 + 撑满高度 + 内部独立滚动 */
+.perf-detail-drawer {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100vh;
+  overflow: hidden;
+  padding: 0;
+  width: min(820px, calc(100vw - 24px));
+}
+
+.perf-detail-drawer > .drawer-header {
+  background: #ffffff;
+  border-bottom: 1px solid #e1e6ec;
+  flex: 0 0 auto;
+  margin: 0;
+  padding: 16px 18px 14px;
+}
+
+.perf-detail-drawer > .drawer-header code {
+  word-break: break-all;
+}
+
+.perf-detail-drawer__body {
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 18px;
+}
+
+.perf-detail-drawer__body .drawer-section {
+  overflow-x: auto;
+}
+
+.perf-detail-drawer__body table {
+  min-width: 720px;
+}
+
+/* 表格操作列内的占位文本（避免 muted-inline 的块级 margin 破坏对齐） */
+.cell-muted {
+  color: #667085;
+  font-size: 12px;
+}
+
 .drawer-form {
   display: grid;
   gap: 10px;
@@ -1788,6 +1868,20 @@ textarea {
 .ghost-button {
   background: #fbfaf6;
   flex: 0 0 auto;
+}
+
+/* R2-E6: 可点击的 trace_id 链接按钮 */
+.link-button {
+  background: none;
+  border: none;
+  color: #16795b;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.link-button:hover {
+  color: #0f6f55;
 }
 
 .drawer-meta,

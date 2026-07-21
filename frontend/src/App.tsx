@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { ActivitySquare, LayoutDashboard, MessagesSquare, Network, Radio } from 'lucide-react';
+import { ActivitySquare, Gauge, LayoutDashboard, MessagesSquare, Network, Radio } from 'lucide-react';
 
 import {
   clientPackageUrl,
@@ -32,18 +32,21 @@ import {
   locateConversationMessage,
 } from './api/conversations';
 import { fetchMcpCalls } from './api/mcp';
+import { fetchPerfFailures, fetchPerfSummary, fetchPerfTaskDetail, fetchPerfTasks } from './api/performance';
 import { AccessConfigDrawer } from './components/AccessConfigDrawer';
 import { CollectorsPage } from './pages/CollectorsPage';
 import { ConversationQueryPage } from './pages/ConversationQueryPage';
 import { DashboardPage } from './pages/DashboardPage';
 import { McpObservationPage } from './pages/McpObservationPage';
+import { PerformancePage } from './pages/PerformancePage';
 import { SignalDetailPage } from './pages/SignalDetailPage';
 
-type View = 'dashboard' | 'collectors' | 'conversations' | 'mcp';
+type View = 'dashboard' | 'collectors' | 'conversations' | 'mcp' | 'performance';
 
 const navItems: Array<{ view: View; label: string; desc: string; icon: typeof LayoutDashboard }> = [
   { view: 'dashboard', label: '观测总览', desc: '信号与用量', icon: LayoutDashboard },
   { view: 'conversations', label: '会话查询', desc: '输入与响应', icon: MessagesSquare },
+  { view: 'performance', label: '性能观测', desc: '延迟与耗时', icon: Gauge },
   { view: 'mcp', label: 'MCP 观测', desc: '工具调用审计', icon: Network },
   { view: 'collectors', label: '采集器', desc: '状态与策略', icon: Radio }
 ];
@@ -53,6 +56,7 @@ export function App() {
   const [selectedSignalId, setSelectedSignalId] = useState<string | null>(null);
   const [selectedFactId, setSelectedFactId] = useState<string | null>(null);
   const [returnSignalId, setReturnSignalId] = useState<string | null>(null);
+  const [returnPerformance, setReturnPerformance] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
@@ -77,6 +81,7 @@ export function App() {
                 setSelectedSignalId(null);
                 setSelectedFactId(null);
                 setReturnSignalId(null);
+                setReturnPerformance(false);
                 setView(item.view);
               }}
             >
@@ -104,7 +109,7 @@ export function App() {
       <main className="main">
         <header className="topbar">
           <div>
-            <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : view === 'mcp' ? 'MCP 观测' : '采集器'}</h1>
+            <h1>{view === 'dashboard' ? '观测总览' : view === 'conversations' ? '会话查询' : view === 'mcp' ? 'MCP 观测' : view === 'performance' ? '性能观测' : '采集器'}</h1>
             <p>围绕信号、会话输入输出和 collector 接入状态进行日常排查。</p>
           </div>
           {view === 'dashboard' && <div className="topbar-status-slot" id="dashboard-topbar-status-slot" />}
@@ -139,6 +144,7 @@ export function App() {
             onOpenFact={(factId) => {
               setSelectedFactId(factId);
               setReturnSignalId(selectedSignalId);
+              setReturnPerformance(false);
               setSelectedSignalId(null);
               setView('conversations');
             }}
@@ -159,8 +165,12 @@ export function App() {
               setSelectedSignalId(returnSignalId);
               setReturnSignalId(null);
               setView('dashboard');
+            } : returnPerformance ? () => {
+              setSelectedFactId(null);
+              setReturnPerformance(false);
+              setView('performance');
             } : undefined}
-            backLabel="返回信号"
+            backLabel={returnSignalId ? '返回信号' : returnPerformance ? '返回性能观测' : '返回'}
           />
         )}
         {view === 'collectors' && (
@@ -171,6 +181,20 @@ export function App() {
         )}
         {view === 'mcp' && (
           <McpObservationPage loadMcpCalls={fetchMcpCalls} />
+        )}
+        {view === 'performance' && (
+          <PerformancePage
+            loadSummary={fetchPerfSummary}
+            loadTasks={fetchPerfTasks}
+            loadFailures={fetchPerfFailures}
+            loadTaskDetail={fetchPerfTaskDetail}
+            onOpenFact={(factId) => {
+              setSelectedFactId(factId);
+              setReturnPerformance(true);
+              setReturnSignalId(null);
+              setView('conversations');
+            }}
+          />
         )}
         {drawerOpen && (
           <AccessConfigDrawer
