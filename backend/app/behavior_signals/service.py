@@ -49,23 +49,37 @@ from app.behavior_signals.helpers import (
 def rebuild_signals(conn: sqlite3.Connection, reason: str = "manual") -> dict:
     active: list[str] = []
     signals: list[dict] = []
-    for builder in (
-        lambda db, why: build_tool_execution_failures(db, why, _upsert_signal),
-        lambda db, why: build_execution_timeouts(db, why, _upsert_signal),
-        lambda db, why: detect_repeated_failures(db, why, _upsert_signal),
-        lambda db, why: detect_loop_stuck(db, why, _upsert_signal),
-        lambda db, why: detect_usage_anomalies(db, why, _upsert_signal),
-        _build_destructive_operations,
-        _build_change_volume_anomalies,
-        _build_key_file_changes,
-        _build_sensitive_content_exposures,
-    ):
-        for item in builder(conn, reason):
-            if item:
-                active.append(item["signal_id"])
-                signals.append(item)
-    _remove_stale(conn, active)
-    conn.commit()
+    try:
+        for builder in (
+            lambda db, why: build_tool_execution_failures(db, why, _upsert_signal),
+            lambda db, why: build_execution_timeouts(db, why, _upsert_signal),
+            lambda db, why: detect_repeated_failures(db, why, _upsert_signal),
+            lambda db, why: detect_loop_stuck(db, why, _upsert_signal),
+            lambda db, why: detect_usage_anomalies(db, why, _upsert_signal),
+            _build_destructive_operations,
+            _build_change_volume_anomalies,
+            _build_key_file_changes,
+            _build_sensitive_content_exposures,
+        ):
+            for item in builder(conn, reason):
+                if item:
+                    active.append(item["signal_id"])
+                    signals.append(item)
+            # Part C：每个 builder 独立 commit，提供失败弹性（单个 builder 失败不丢失
+            # 已 commit 的）和读可见性（WAL 读端点能看到中间进度）。
+            # 注意：应用层 _WRITE_LOCK 在整个 rebuild_signals 期间被持有（worker 持锁），
+            # Part C 不减少 HTTP 写端点阻塞时间——那是 write_lock 串行化的固有代价。
+            conn.commit()
+    finally:
+        # 无论成功或失败，都用 active 列表清理 stale 信号。
+        # 成功时 active 完整；失败时 active 是部分列表（已 commit 的 builder 信号）。
+        # 失败时先 rollback 丢弃失败 builder 的脏写入，再清理 stale——半新半旧比全旧好。
+        try:
+            conn.rollback()  # 幂等：无未 commit 事务时 no-op
+        except sqlite3.Error:
+            pass
+        _remove_stale(conn, active)
+        conn.commit()
     return {"reason": reason, "updated": len(signals), "signals": signals}
 
 

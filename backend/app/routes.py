@@ -17,7 +17,7 @@ from app.conversations.service import (
     query_conversations,
 )
 from app.dashboard.service import get_dashboard_summary
-from app.db.connection import connect
+from app.db.connection import connect, write_lock
 from app.evidence_enrichment.service import (
     cancel_enrichment,
     get_enrichment_availability,
@@ -28,6 +28,7 @@ from app.evidence_enrichment.service import (
 )
 from app.ingest.service import ingest_telemetry
 from app.package.builder import build_windows_package
+from app.perf.router import register_performance_routes
 from app.policy import get_effective_policy, recent_audit, update_effective_policy
 from app.processing.jobs import enqueue_global_signal_rebuild, processing_status, run_next_job
 from app.risks.service import get_risk_summary
@@ -48,6 +49,7 @@ def register_routes(app, http_exception, file_response) -> None:
     register_processing_routes(app)
     register_enrichment_routes(app, http_exception)
     register_summary_routes(app)
+    register_performance_routes(app, http_exception)
     register_package_routes(app, file_response)
 
 
@@ -62,7 +64,7 @@ def register_health_routes(app) -> None:
 def register_collector_routes(app, http_exception) -> None:
     @app.post("/api/collectors/register")
     def api_register(payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return register_collector(conn, payload)
             except ValueError as exc:
@@ -70,7 +72,7 @@ def register_collector_routes(app, http_exception) -> None:
 
     @app.post("/api/collectors/{collector_id}/heartbeat")
     def api_heartbeat(collector_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return heartbeat(conn, collector_id, payload)
             except LookupError as exc:
@@ -80,7 +82,7 @@ def register_collector_routes(app, http_exception) -> None:
 
     @app.patch("/api/collectors/{collector_id}/display-name")
     def api_collector_display_name(collector_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return update_collector_display_name(conn, collector_id, payload.get("display_name", ""))
             except LookupError as exc:
@@ -95,7 +97,7 @@ def register_collector_routes(app, http_exception) -> None:
 
     @app.delete("/api/collectors/{collector_id}")
     def api_delete_collector(collector_id: str):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return delete_collector(conn, collector_id)
             except LookupError as exc:
@@ -105,7 +107,7 @@ def register_collector_routes(app, http_exception) -> None:
 def register_ingest_routes(app, http_exception) -> None:
     @app.post("/api/telemetry/ingest")
     def api_ingest(payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return ingest_telemetry(conn, payload)
             except ValueError as exc:
@@ -205,7 +207,7 @@ def register_policy_routes(app, http_exception) -> None:
 
     @app.patch("/api/policy")
     def api_update_policy(payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return update_effective_policy(conn, payload)
             except ValueError as exc:
@@ -266,12 +268,12 @@ def register_signal_routes(app, http_exception) -> None:
 
     @app.post("/api/signals/rebuild")
     def api_rebuild_signals(payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             return enqueue_global_signal_rebuild(conn, reason=payload.get("reason", "api"))
 
     @app.post("/api/signals/{signal_id}/read")
     def api_mark_signal_read(signal_id: str):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return mark_signal_read(conn, signal_id)
             except LookupError as exc:
@@ -279,7 +281,7 @@ def register_signal_routes(app, http_exception) -> None:
 
     @app.post("/api/signals/{signal_id}/handle")
     def api_handle_signal(signal_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return handle_signal(conn, signal_id, payload.get("conclusion_code"), payload.get("note"))
             except LookupError as exc:
@@ -296,7 +298,7 @@ def register_processing_routes(app) -> None:
 
     @app.post("/api/processing/jobs/run-once")
     def api_processing_run_once():
-        with connect() as conn:
+        with write_lock() as conn:
             return run_next_job(conn, reason="api-run-once")
 
 
@@ -311,7 +313,7 @@ def register_enrichment_routes(app, http_exception) -> None:
 
     @app.post("/api/signals/{signal_id}/enrichments")
     def api_request_enrichment(signal_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return request_enrichment(conn, signal_id, payload.get("capability_id", ""))
             except LookupError as exc:
@@ -321,7 +323,7 @@ def register_enrichment_routes(app, http_exception) -> None:
 
     @app.post("/api/enrichments/{job_id}/cancel")
     def api_cancel_enrichment(job_id: str):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return cancel_enrichment(conn, job_id)
             except LookupError as exc:
@@ -331,7 +333,7 @@ def register_enrichment_routes(app, http_exception) -> None:
 
     @app.post("/api/enrichments/{job_id}/result")
     def api_enrichment_result(job_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return record_enrichment_result(
                     conn,
@@ -356,7 +358,7 @@ def register_enrichment_routes(app, http_exception) -> None:
 
     @app.post("/api/collectors/{collector_id}/enrichments/{job_id}/result")
     def api_collector_enrichment_result(collector_id: str, job_id: str, payload: dict):
-        with connect() as conn:
+        with write_lock() as conn:
             try:
                 return record_collector_enrichment_result(conn, collector_id, job_id, payload)
             except LookupError as exc:
@@ -389,7 +391,7 @@ def register_summary_routes(app) -> None:
 
     @app.post("/api/validation/minimum-experiment")
     def api_minimum_validation():
-        with connect() as conn:
+        with write_lock() as conn:
             return run_minimum_validation_experiment(conn)
 
 

@@ -8,11 +8,40 @@ from app.behavior_signals.service import update_signal_scope
 JOB_STATUS = ("pending", "running", "succeeded", "failed")
 JOB_TYPE_SIGNAL_UPDATE = "behavior_signal_update"
 JOB_TYPE_SIGNAL_REBUILD = "behavior_signal_rebuild"
+JOB_TYPE_PERF_ROLLUP_UPDATE = "perf_rollup_update"
+JOB_TYPE_PERF_ROLLUP_REBUILD = "perf_rollup_rebuild"
 RUNNING_LEASE_SECONDS = 300
+# OperationalError (database is locked) 是临时性锁竞争，给更高的重试上限。
+# 永久性错误（ValueError 等）3 次后放弃。
+TRANSIENT_ERROR_MAX_ATTEMPTS = 100
+PERMANENT_ERROR_MAX_ATTEMPTS = 3
+# last_error 截断长度，避免异常消息过长撑爆 DB 行。
+LAST_ERROR_MAX_LENGTH = 500
 
 
 def now_iso() -> str:
     return datetime.now(UTC).replace(microsecond=0).isoformat()
+
+
+def _is_transient_db_error(exc: Exception) -> bool:
+    """判断是否为临时性数据库锁竞争错误（m1：缩小 OperationalError 范围）。
+
+    只有 "locked"/"busy" 类 OperationalError 才算临时性，给高重试上限；
+    其他 OperationalError（如 "no such table"）按永久性错误处理。
+    """
+    if not isinstance(exc, sqlite3.OperationalError):
+        return False
+    msg = str(exc).lower()
+    return "locked" in msg or "busy" in msg
+
+
+def _format_error(exc: Exception) -> str:
+    """格式化 last_error：包含类型名和消息（m5），截断到 LAST_ERROR_MAX_LENGTH。"""
+    text = f"{type(exc).__name__}: {exc}"
+    if len(text) > LAST_ERROR_MAX_LENGTH:
+        # 截断时加省略号，便于区分"正好 500 字符"和"被截断"（m-3）。
+        text = text[:LAST_ERROR_MAX_LENGTH] + "..."
+    return text
 
 
 def enqueue_processing_job(
@@ -95,14 +124,17 @@ def run_next_job(conn: sqlite3.Connection, reason: str = "worker") -> dict:
     if job is None:
         return {"status": "idle", "processed": 0}
     try:
-        result = update_signal_scope(
-            conn,
-            job_type=job["job_type"],
-            scope_type=job["scope_type"],
-            scope_id=job["scope_id"],
-            reason=reason,
-        )
+        result = _dispatch_job(conn, job, reason)
     except Exception as exc:
+        # M1：回滚 _dispatch_job 的部分写入，避免被 _mark_failed 的 commit 一起提交。
+        # _dispatch_job 的所有子路径（update_signal_scope、build_perf_rollups）只在最后 commit，
+        # 中途抛异常会留下未提交的部分写入；若不回滚，_mark_failed 的 conn.commit() 会把这些
+        # 脏数据一起落库。特别地，build_perf_rollups 先 delete 再循环 insert，若 insert 阶段抛
+        # 异常且未回滚，会丢失该 window 的全部历史 rollup 数据。
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
         return _mark_failed(conn, job, exc)
     now = now_iso()
     conn.execute(
@@ -117,26 +149,51 @@ def run_next_job(conn: sqlite3.Connection, reason: str = "worker") -> dict:
     return {"status": "processed", "processed": 1, "job_id": job["job_id"], "result": result}
 
 
+def _dispatch_job(conn: sqlite3.Connection, job: sqlite3.Row, reason: str) -> dict:
+    """按 job_type 分发到对应处理器（审查 I3 修正）。"""
+    if job["job_type"] in (JOB_TYPE_PERF_ROLLUP_UPDATE, JOB_TYPE_PERF_ROLLUP_REBUILD):
+        from app.perf.service import build_perf_rollups
+        return build_perf_rollups(conn, window=job["scope_id"])
+    return update_signal_scope(
+        conn,
+        job_type=job["job_type"],
+        scope_type=job["scope_type"],
+        scope_id=job["scope_id"],
+        reason=reason,
+    )
+
+
 def _claim_next_job(conn: sqlite3.Connection) -> sqlite3.Row | None:
-    _recover_stale_running_jobs(conn)
-    now = now_iso()
-    row = conn.execute(
-        """
-        update processing_jobs
-        set status = 'running', attempts = attempts + 1, updated_at = ?, started_at = ?
-        where job_id = (
-          select job_id
-          from processing_jobs
-          where status = 'pending'
-          order by priority desc, updated_at, job_id
-          limit 1
-        )
-        returning *
-        """,
-        (now, now),
-    ).fetchone()
-    conn.commit()
-    return row
+    try:
+        _recover_stale_running_jobs(conn)
+        now = now_iso()
+        row = conn.execute(
+            """
+            update processing_jobs
+            set status = 'running', attempts = attempts + 1, updated_at = ?, started_at = ?
+            where job_id = (
+              select job_id
+              from processing_jobs
+              where status = 'pending'
+              order by priority desc, updated_at, job_id
+              limit 1
+            )
+            returning *
+            """,
+            (now, now),
+        ).fetchone()
+        conn.commit()
+        return row
+    except sqlite3.OperationalError:
+        # database is locked：其他连接正持有写锁，跳过本次 claim，下个 cycle 重试。
+        # M2：claim UPDATE 也纳入同一 try/except，避免 claim 阶段锁竞争崩溃 worker cycle。
+        # 回滚未提交的部分写入（如 _recover_stale_running_jobs 的 UPDATE），保持连接干净。
+        # 回归：07/15-07/17 多次 worker cycle failed 根因。
+        try:
+            conn.rollback()
+        except sqlite3.Error:
+            pass
+        return None
 
 
 def _recover_stale_running_jobs(conn: sqlite3.Connection) -> None:
@@ -153,9 +210,16 @@ def _recover_stale_running_jobs(conn: sqlite3.Connection) -> None:
 
 def _mark_failed(conn: sqlite3.Connection, job: sqlite3.Row, exc: Exception) -> dict:
     attempts = int(job["attempts"])
-    status = "failed" if attempts >= 3 else "pending"
+    # OperationalError (database is locked) 是临时性锁竞争，不是 job 本身的问题。
+    # 给更高的重试上限，避免因短暂锁竞争永久标 failed。
+    # 回归：ref:948e68c21fb5e4fa 在 attempts=32 时遇锁竞争被永久标 failed，
+    # 但同类 job ref:ea976ff49a529928 attempts=49 仍能成功。
+    # m1：只把 locked/busy 类 OperationalError 当临时性，其他按永久性处理。
+    is_transient = _is_transient_db_error(exc)
+    max_attempts = TRANSIENT_ERROR_MAX_ATTEMPTS if is_transient else PERMANENT_ERROR_MAX_ATTEMPTS
+    status = "failed" if attempts >= max_attempts else "pending"
     now = now_iso()
-    error = type(exc).__name__
+    error = _format_error(exc)
     conn.execute(
         """
         update processing_jobs

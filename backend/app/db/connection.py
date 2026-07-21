@@ -3,6 +3,8 @@ from __future__ import annotations
 import os
 import sqlite3
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 
@@ -337,6 +339,54 @@ SCHEMA_SQL = """
           sensitive_matches_json text not null default '[]'
         );
 
+        -- 性能信号：每条调用（LLM/工具/任务/MCP）一行明细，对标 usage_signals
+        create table if not exists perf_signals (
+          signal_id text primary key,
+          fact_id text not null,
+          trace_id text not null default '',
+          parent_span_id text not null default '',
+          span_id text not null default '',
+          span_type text not null,
+          span_name text not null default '',
+          duration_ms integer not null default 0,
+          ttft_ms integer not null default 0,
+          tps real not null default 0,
+          status text not null default 'unknown',
+          error text not null default '',
+          model text not null default '',
+          tool_name text not null default '',
+          agent_type text not null default '',
+          conversation_ref text not null default '',
+          session_ref text not null default '',
+          project_ref text not null default '',
+          occurred_at text not null,
+          foreign key (fact_id) references observed_facts(fact_id)
+        );
+
+        -- 性能预聚合：按 window/scope 预聚合百分位，对标 usage_rollups
+        create table if not exists perf_rollups (
+          rollup_id text primary key,
+          window text not null,
+          scope text not null,
+          scope_value text not null,
+          span_type text not null,
+          sample_count integer not null default 0,
+          success_count integer not null default 0,
+          failure_count integer not null default 0,
+          duration_avg_ms integer not null default 0,
+          duration_p50_ms integer not null default 0,
+          duration_p95_ms integer not null default 0,
+          duration_p99_ms integer not null default 0,
+          duration_min_ms integer not null default 0,
+          duration_max_ms integer not null default 0,
+          ttft_avg_ms integer not null default 0,
+          ttft_p50_ms integer not null default 0,
+          ttft_p95_ms integer not null default 0,
+          tps_avg real not null default 0,
+          tps_max real not null default 0,
+          built_at text not null
+        );
+
         create virtual table if not exists conversation_messages_fts using fts5(
           content,
           conversation_ref unindexed,
@@ -349,7 +399,12 @@ SCHEMA_SQL = """
 
 
 def default_db_path() -> Path:
-    return Path(os.environ.get("AGENT_OBSERVER_DB", "data/agent-observer.sqlite"))
+    env_path = os.environ.get("AGENT_OBSERVER_DB")
+    if env_path:
+        return Path(env_path)
+    # 基于 connection.py 位置（backend/app/db/connection.py）计算绝对路径，
+    # 避免相对路径依赖 CWD 导致不同启动方式写入不同数据库。
+    return Path(__file__).resolve().parent.parent.parent / "data" / "agent-observer.sqlite"
 
 
 def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
@@ -367,6 +422,37 @@ def connect(db_path: str | Path | None = None) -> sqlite3.Connection:
                 initialize(conn)
                 _INITIALIZED_PATHS.add(resolved)
     return conn
+
+
+# 全局写锁：所有写操作经此锁串行化，避免多连接在 SQLite 层抢写锁导致
+# OperationalError: database is locked。RLock 允许同线程嵌套获取（防死锁）。
+_WRITE_LOCK = threading.RLock()
+
+
+@contextmanager
+def write_lock(db_path: str | Path | None = None) -> Iterator[sqlite3.Connection]:
+    """写事务上下文：获取全局写锁 → 返回独立连接 → 异常时 rollback。
+
+    把 SQLite 层的锁等待（busy_timeout 超时后抛 OperationalError）换成应用层
+    有序排队（不超时）。读端点继续用 connect()，WAL 下读不阻塞写。
+
+    用法：
+        with write_lock() as conn:
+            ingest_telemetry(conn, batch)  # service 内部自行 commit
+    """
+    with _WRITE_LOCK:
+        with connect(db_path) as conn:
+            try:
+                yield conn
+            except Exception:
+                # service 内部可能已部分写入但未 commit，rollback 防止脏状态
+                # 污染下一次 write_lock（连接虽关闭，但未 rollback 的脏数据可能
+                # 在连接池/缓存中残留——显式 rollback 更安全）。
+                try:
+                    conn.rollback()
+                except sqlite3.Error:
+                    pass
+                raise
 
 
 def initialize(conn: sqlite3.Connection) -> None:
@@ -520,6 +606,18 @@ def _ensure_indexes(conn: sqlite3.Connection) -> None:
           on conversation_hits(conversation_ref, occurred_at, fact_id);
         create index if not exists idx_conv_hits_base_path
           on conversation_hits(base_ref, source_path_hash, source_line);
+        create index if not exists idx_perf_signals_span_type_occurred
+          on perf_signals(span_type, occurred_at desc);
+        create index if not exists idx_perf_signals_agent_occurred
+          on perf_signals(agent_type, occurred_at desc);
+        create index if not exists idx_perf_signals_trace_id
+          on perf_signals(trace_id);
+        create index if not exists idx_perf_signals_conversation
+          on perf_signals(conversation_ref, occurred_at desc);
+        create index if not exists idx_perf_signals_fact_id
+          on perf_signals(fact_id);
+        create index if not exists idx_perf_rollups_window_scope
+          on perf_rollups(window, scope, scope_value, span_type);
         """
     )
 

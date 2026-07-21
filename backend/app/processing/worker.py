@@ -4,7 +4,7 @@ import logging
 import threading
 import time
 
-from app.db.connection import connect
+from app.db.connection import write_lock
 from app.log import apply_log_level
 from app.policy import DEFAULT_WORKER_POLL_INTERVAL_SECONDS, get_effective_policy
 from app.processing.jobs import run_next_job
@@ -29,7 +29,7 @@ def _worker_loop() -> None:
     while True:
         interval = DEFAULT_WORKER_POLL_INTERVAL_SECONDS
         try:
-            with connect() as conn:
+            with write_lock() as conn:
                 policy = get_effective_policy(conn)
                 interval = int(policy.get("worker_poll_interval_seconds") or interval)
                 apply_log_level(policy.get("log_level", "INFO"))

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,8 @@ def _record_fact(
         fact = content_fact(common, record)
         stamp_content_identity(fact, path, record)
         return fact
+    if _is_perf(record):
+        return _perf_fact(common, record)
     return _low_evidence_fact(common, record)
 
 def _error_fact(common: dict, record: dict) -> dict:
@@ -241,6 +244,98 @@ def _low_evidence_fact(common: dict, record: dict) -> dict:
             "payload_type": _payload_type(record),
             "payload_keys": sorted(_safe_key(key) for key in payload.keys())[:12],
         },
+    }
+
+# Codex task_complete / turn_aborted 事件：提取 turn 级延迟与 TTFT，写入 perf_signals。
+# task_complete.payload: {turn_id, duration_ms, time_to_first_token_ms, completed_at, last_agent_message}
+# turn_aborted.payload:  {turn_id, duration_ms, completed_at, reason}  (无 TTFT)
+_PERF_EVENT_TYPES = {"task_complete", "turn_aborted"}
+
+
+def _is_perf(record: dict) -> bool:
+    return _payload_type(record) in _PERF_EVENT_TYPES
+
+
+def _perf_occurred_at(payload: dict, fallback: str) -> str:
+    """completed_at 是 Unix 秒，转成 ISO；缺失或异常时回退到 record.timestamp。"""
+    raw = payload.get("completed_at")
+    try:
+        if raw is not None:
+            return datetime.fromtimestamp(int(raw), tz=UTC).replace(microsecond=0).isoformat()
+    except (TypeError, ValueError, OverflowError, OSError):
+        pass
+    return fallback
+
+
+def _perf_fact(common: dict, record: dict) -> dict:
+    payload = _payload(record)
+    event_type = _payload_type(record)
+    turn_id = str(payload.get("turn_id") or "")
+    trace_id = turn_id or _hash(common["source_event_id"])
+    task_span_id = f"task-{turn_id[:16]}" if turn_id else f"task-{_hash(common['source_event_id'])[:16]}"
+    llm_span_id = f"llm-{turn_id[:16]}" if turn_id else f"llm-{_hash(common['source_event_id'])[:16]}"
+    duration_ms = _int(payload.get("duration_ms"))
+    # ttft_ms 是 turn 级原始事实：用于 summary、projection、llm_call span。
+    # task span 的 ttft_ms 置 0，因为 TTFT 是 LLM generation 指标，应归属 llm_call span。
+    ttft_ms = _int(payload.get("time_to_first_token_ms"))  # turn_aborted 无此字段，自然为 0
+    status = "ok" if event_type == "task_complete" else "error"
+    error = str(payload.get("reason") or "") if event_type == "turn_aborted" else ""
+    occurred_at = _perf_occurred_at(payload, common["occurred_at"])
+    task_span = {
+        "trace_id": trace_id,
+        "span_id": task_span_id,
+        "parent_span_id": "",
+        "span_type": "task",
+        "span_name": "codex_turn",
+        "duration_ms": duration_ms,
+        "ttft_ms": 0,
+        "tps": 0.0,
+        "status": status,
+        "error": error,
+        "model": "",
+        "tool_name": "",
+        "occurred_at": occurred_at,
+    }
+    # 拆分 llm_call span：codex 一个 turn 在协议层就是一次 generation 调用。
+    # duration_ms=0：codex turn 事件只提供 turn 总耗时（含工具调用、等待），
+    # 没有 LLM generation duration 字段，不能把 turn duration 当 LLM duration（会显示 23 分钟）。
+    # ttft_ms 迁移到这里，使"LLM 调用"的 TTFT 指标有真实值。
+    # _latency_stats 会过滤 duration_ms=0 的行，不参与百分位统计。
+    llm_span = {
+        "trace_id": trace_id,
+        "span_id": llm_span_id,
+        "parent_span_id": task_span_id,
+        "span_type": "llm_call",
+        "span_name": "codex_generation",
+        "duration_ms": 0,
+        "ttft_ms": ttft_ms,
+        "tps": 0.0,
+        "status": status,
+        "error": error,
+        "model": "",
+        "tool_name": "",
+        "occurred_at": occurred_at,
+    }
+    summary = (
+        f"Codex turn 完成，耗时 {duration_ms}ms，TTFT {ttft_ms}ms。"
+        if event_type == "task_complete"
+        else f"Codex turn 中止（{error or 'unknown'}），耗时 {duration_ms}ms。"
+    )
+    return {
+        **common,
+        "fact_type": "perf",
+        "category": "agent_turn_latency",
+        "quality": "high",
+        "severity": "low",
+        "summary": summary,
+        "projection": {
+            "event_type": event_type,
+            "turn_id": turn_id,
+            "duration_ms": duration_ms,
+            "ttft_ms": ttft_ms,
+            "status": status,
+        },
+        "perf_signals": [task_span, llm_span],
     }
 
 def _mcp_args_summary(invocation: dict) -> str:

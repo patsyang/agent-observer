@@ -13,7 +13,7 @@ from app.conversations.materialize import (
     refresh as materialize_refresh,
 )
 from app.evidence.presentation import projection_preview, raw_available, raw_status_label
-from app.processing.jobs import JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
+from app.processing.jobs import JOB_TYPE_PERF_ROLLUP_UPDATE, JOB_TYPE_SIGNAL_UPDATE, enqueue_processing_job
 from app.sensitive import detect_for_fact, object_type_from_matches
 from app.sensitive.filter_policy import filter_sensitive_matches
 
@@ -66,6 +66,19 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
                 source_kind=source_kind,
                 dedup=True,
             )
+            # duplicate 补写 perf_signals：历史 fact 由旧版客户端采集时无 perf_signals，
+            # 新版客户端重新上传带 perf_signals 的同名 fact 时，需在此补写，否则历史
+            # codex/claude 数据永远无法进入性能观测页面。insert or ignore 保证幂等。
+            if item.get("perf_signals"):
+                _insert_perf_signals(conn, existing["fact_id"], item, agent_type)
+                perf_job_id = f"{JOB_TYPE_PERF_ROLLUP_UPDATE}:window:24h"
+                pending_jobs[perf_job_id] = {
+                    "job_id": perf_job_id,
+                    "job_type": JOB_TYPE_PERF_ROLLUP_UPDATE,
+                    "scope_type": "window",
+                    "scope_id": "24h",
+                    "priority": 50,
+                }
             duplicates += 1
             continue
         fact_id = _fact_id(conn, collector_id, source_id, source_event_id)
@@ -114,7 +127,7 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
         _insert_evidence_projections(conn, fact_id, item)
         if sensitive_matches:
             _write_sensitive_risk(conn, fact_id, sensitive_object_type, pending_jobs)
-        _insert_optional_signals(conn, fact_id, item)
+        _insert_optional_signals(conn, fact_id, item, agent_type)
         _materialize_fact(
             conn,
             fact_id=fact_id,
@@ -128,6 +141,15 @@ def ingest_telemetry(conn: sqlite3.Connection, batch: dict) -> dict:
         accepted += 1
         for job in _signal_jobs_for_item(item, source):
             pending_jobs[job["job_id"]] = job
+        if item.get("perf_signals"):
+            perf_job_id = f"{JOB_TYPE_PERF_ROLLUP_UPDATE}:window:24h"
+            pending_jobs[perf_job_id] = {
+                "job_id": perf_job_id,
+                "job_type": JOB_TYPE_PERF_ROLLUP_UPDATE,
+                "scope_type": "window",
+                "scope_id": "24h",
+                "priority": 50,
+            }
 
     conn.execute(
         """
@@ -410,7 +432,7 @@ def _list_projection_preview(item: dict) -> dict:
     }
 
 
-def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict) -> None:
+def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict, agent_type: str = "") -> None:
     if error := item.get("error_signature"):
         signature_key = error["signature_key"]
         category = error.get("category", item.get("category", "error"))
@@ -487,6 +509,77 @@ def _insert_optional_signals(conn: sqlite3.Connection, fact_id: str, item: dict)
                 risk.get("risk_type", "unknown"),
                 risk.get("severity", item.get("severity", "low")),
                 risk.get("object_type", "unknown"),
+            ),
+        )
+    # perf 分支：循环 INSERT perf_signals（一个 fact 对应 N 个 span）
+    _insert_perf_signals(conn, fact_id, item, agent_type)
+
+
+def _insert_perf_signals(conn: sqlite3.Connection, fact_id: str, item: dict, agent_type: str = "") -> None:
+    """幂等写入 perf_signals（upsert）。
+
+    用于新 fact 入库和 duplicate fact 补齐 perf_signals：历史 fact 由旧版客户端
+    采集时无 perf_signals 字段，新版客户端重新上传带 perf_signals 的同名 fact 时，
+    走 duplicate 分支，需要在此补写 perf_signals，否则历史 codex/claude 数据永远
+    无法进入性能观测页面。
+
+    P0-2: 用 on conflict do update 替代 insert or ignore，使 duplicate 分支能更新
+    已有 span 的 ttft_ms/tps/status 等字段。场景：旧版 codex collector 上传的 task span
+    ttft_ms>0，新版 collector 拆分 llm_call span 后 task span ttft_ms=0；duplicate 分支
+    重新上传时必须 update task span 的 ttft_ms，否则 TTFT 会在 task span 和 llm_call span
+    重复统计。
+    """
+    refs = item.get("source_refs") or {}
+    for span in item.get("perf_signals", []):
+        span_id = str(span.get("span_id") or "")
+        if not span_id:
+            continue
+        signal_id = f"perf-{fact_id}-{span_id}"
+        conn.execute(
+            """
+            insert into perf_signals (
+              signal_id, fact_id, trace_id, parent_span_id, span_id, span_type, span_name,
+              duration_ms, ttft_ms, tps, status, error, model, tool_name,
+              agent_type, conversation_ref, session_ref, project_ref, occurred_at
+            ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict(signal_id) do update set
+              trace_id=excluded.trace_id,
+              parent_span_id=excluded.parent_span_id,
+              span_type=excluded.span_type,
+              span_name=excluded.span_name,
+              duration_ms=excluded.duration_ms,
+              ttft_ms=excluded.ttft_ms,
+              tps=excluded.tps,
+              status=excluded.status,
+              error=excluded.error,
+              model=excluded.model,
+              tool_name=excluded.tool_name,
+              agent_type=excluded.agent_type,
+              conversation_ref=excluded.conversation_ref,
+              session_ref=excluded.session_ref,
+              project_ref=excluded.project_ref,
+              occurred_at=excluded.occurred_at
+            """,
+            (
+                signal_id,
+                fact_id,
+                str(span.get("trace_id") or ""),
+                str(span.get("parent_span_id") or ""),
+                span_id,
+                str(span.get("span_type") or "unknown"),
+                str(span.get("span_name") or ""),
+                int(span.get("duration_ms") or 0),
+                int(span.get("ttft_ms") or 0),
+                float(span.get("tps") or 0),
+                str(span.get("status") or "unknown"),
+                str(span.get("error") or ""),
+                str(span.get("model") or ""),
+                str(span.get("tool_name") or ""),
+                agent_type,
+                str(refs.get("conversation_ref") or ""),
+                str(refs.get("session_ref") or ""),
+                str(refs.get("workspace_path") or ""),
+                str(span.get("occurred_at") or item.get("occurred_at") or ""),
             ),
         )
 

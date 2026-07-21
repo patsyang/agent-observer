@@ -441,14 +441,150 @@ def _trace_fact(
     usage_keys: set[str],
 ) -> dict:
     base = _common(config, collector_id, sequence, source_key, path, line, record, "trace")
+    trace = record.get("trace") if isinstance(record.get("trace"), dict) else {}
+    spans = record.get("spans") if isinstance(record.get("spans"), list) else []
     trace_keys = _trace_usage_keys(record)
-    if trace_keys and trace_keys.intersection(usage_keys):
+    already_covered = bool(trace_keys and trace_keys.intersection(usage_keys))
+    # perf projection（trace 有 duration 时计算，不 early return 以保留 usage）
+    perf_projection, perf_signals = (None, [])
+    if trace.get("duration") is not None:
+        perf_projection, perf_signals = _trace_perf_projection(trace, spans, base)
+    # usage projection（保留原逻辑，除非已被覆盖）
+    usage_projection = None
+    if not already_covered:
+        usage_projection = _trace_usage_projection(record)
+        if usage_projection:
+            usage_keys.update(trace_keys)
+    if perf_projection:
+        summary = "WorkBuddy trace 性能与用量已采集。" if usage_projection else "WorkBuddy trace 性能已采集，无 token 字段。"
+        return _perf_fact(base, perf_projection, perf_signals, usage_projection, summary)
+    if usage_projection:
+        return _usage_fact(base, usage_projection, "WorkBuddy trace 记录到 fallback 模型调用用量。")
+    if already_covered:
         return _unknown_fact(base, "WorkBuddy trace 已采集，project usage 已覆盖该模型调用。")
-    projection = _trace_usage_projection(record)
-    if projection:
-        usage_keys.update(trace_keys)
-        return _usage_fact(base, projection, "WorkBuddy trace 记录到 fallback 模型调用用量。")
-    return _unknown_fact(base, "WorkBuddy trace 已采集，未发现可汇总 token 字段。")
+    return _unknown_fact(base, "WorkBuddy trace 已采集，未发现可汇总字段。")
+
+
+_SPAN_TYPE_MAP = {
+    "generation": "llm_call",
+    "function": "tool_call",
+    "custom": "mcp_call",
+}
+
+
+def _trace_perf_projection(trace: dict, spans: list, base: dict) -> tuple[dict | None, list[dict]]:
+    """从 trace + spans 提取 perf projection 和 perf_signals 列表（对标 plan §4.1）。"""
+    trace_id = clean(trace.get("traceId") or trace.get("trace_id") or "")
+    duration_ms = _int(trace.get("duration"))
+    status = clean(trace.get("status") or "unknown")
+    occurred_at = base.get("occurred_at") or _now()
+    model_info = trace.get("modelInfo") if isinstance(trace.get("modelInfo"), dict) else {}
+    trace_model = ",".join(str(m) for m in model_info.get("models", []) if m) if isinstance(model_info.get("models"), list) else ""
+    seen_span_ids: set[str] = set()
+
+    def _unique_span_id(raw: str, fallback: str) -> str:
+        # I2: 保证 span_id 在同一 fact 内唯一，避免 signal_id 冲突导致 insert or ignore 丢数据
+        base_id = clean(raw) or fallback
+        candidate = base_id
+        counter = 1
+        while candidate in seen_span_ids:
+            candidate = f"{base_id}-{counter}"
+            counter += 1
+        seen_span_ids.add(candidate)
+        return candidate
+
+    perf_signals: list[dict] = [{
+        "trace_id": trace_id,
+        "span_id": _unique_span_id(f"trace-{trace_id[:16]}" if trace_id else "", "trace-root"),
+        "parent_span_id": "",
+        "span_type": "task",
+        "span_name": clean(trace.get("name") or "trace"),
+        "duration_ms": duration_ms,
+        "ttft_ms": 0,
+        "tps": 0.0,
+        "status": status,
+        "error": clean(trace.get("error") or ""),
+        "model": trace_model,
+        "tool_name": "",
+        "occurred_at": occurred_at,
+    }]
+    for span in spans:
+        if not isinstance(span, dict) or span.get("duration") is None:
+            continue
+        span_type = _SPAN_TYPE_MAP.get(clean(span.get("type") or ""))
+        if not span_type:
+            continue
+        perf_signals.append({
+            "trace_id": trace_id,
+            "span_id": _unique_span_id(
+                clean(span.get("spanId") or span.get("span_id") or ""),
+                f"span-{len(perf_signals)}",
+            ),
+            "parent_span_id": clean(span.get("parentId") or span.get("parent_span_id") or ""),
+            "span_type": span_type,
+            "span_name": clean(span.get("name") or span.get("toolName") or ""),
+            "duration_ms": _int(span.get("duration")),
+            "ttft_ms": 0,
+            "tps": 0.0,
+            "status": clean(span.get("status") or "unknown"),
+            "error": clean(span.get("error") or ""),
+            "model": _extract_span_model(span),
+            "tool_name": clean(span.get("toolName") or span.get("name") or "") if span_type in ("tool_call", "mcp_call") else "",
+            "occurred_at": _span_occurred_at(span) or occurred_at,
+        })
+    projection = {
+        "trace_id": trace_id,
+        "span_type": "task",
+        "duration_ms": duration_ms,
+        "status": status,
+        "span_count": len(perf_signals) - 1,
+    }
+    return projection, perf_signals
+
+
+def _extract_span_model(span: dict) -> str:
+    """从 generation span 的 toolOutput 提取 model。"""
+    if clean(span.get("type") or "") != "generation":
+        return ""
+    tool_output = span.get("toolOutput")
+    if not tool_output:
+        return ""
+    try:
+        parsed = json.loads(tool_output) if isinstance(tool_output, str) else tool_output
+        if isinstance(parsed, dict):
+            return clean(parsed.get("model") or "")
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return ""
+
+
+def _span_occurred_at(span: dict) -> str:
+    """从 span 提取 occurred_at（优先 startedAt）。"""
+    for key in ("startedAt", "started_at", "endedAt", "ended_at"):
+        value = span.get(key)
+        if isinstance(value, str) and value:
+            return value
+    return ""
+
+
+def _perf_fact(base: dict, projection: dict, perf_signals: list[dict], usage_projection: dict | None, summary: str) -> dict:
+    """构建 perf fact dict（对标 _usage_fact，同时承载 perf_signals 列表和可选 usage）。"""
+    fact = {
+        **base,
+        "fact_type": "perf",
+        "category": "task",
+        "quality": "high",
+        "severity": "low",
+        "summary": summary,
+        "projection": projection,
+        "perf_signals": perf_signals,
+    }
+    if usage_projection:
+        merged = dict(projection)
+        merged.update(usage_projection)
+        fact["projection"] = merged
+        fact["usage"] = _usage_signal(fact, usage_projection)
+    return fact
 
 
 def _audit_fact(config: SourceConfig, collector_id: str, sequence: int, source_key: str, path: Path, line: int, record: dict) -> dict:

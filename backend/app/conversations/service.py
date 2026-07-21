@@ -261,7 +261,11 @@ def get_conversation_query(conn: sqlite3.Connection, conversation_ref: str) -> d
 
 
 def get_conversation_for_fact(conn: sqlite3.Connection, fact_id: str) -> dict:
-    """从一个 fact 定位其会话概要 + focus_fact_id（前端用于定位目标消息所在页）。"""
+    """从一个 fact 定位其会话概要 + focus_fact_id（前端用于定位目标消息所在页）。
+
+    对于未物化进 conversation_messages 的 fact（如 perf 信号、usage、reasoning），
+    取同一会话内时间最近的 message fact_id 作为定位锚点，避免前端落到会话首页。
+    """
     fact = conn.execute(
         "select * from observed_facts where fact_id = ?", (fact_id,)
     ).fetchone()
@@ -269,8 +273,40 @@ def get_conversation_for_fact(conn: sqlite3.Connection, fact_id: str) -> dict:
         raise LookupError(fact_id)
     ref = _conversation_ref_for_fact(conn, fact_id) or _fallback_conversation_ref(fact)
     detail = get_conversation_query(conn, ref)
-    detail["focus_fact_id"] = fact_id
+    detail["focus_fact_id"] = _resolve_focus_fact_id(
+        conn, fact_id, ref, fact["occurred_at"]
+    )
     return detail
+
+
+def _resolve_focus_fact_id(
+    conn: sqlite3.Connection,
+    fact_id: str,
+    conversation_ref: str,
+    occurred_at: str | None,
+) -> str:
+    """解析前端定位用的 focus_fact_id。
+
+    - 若 fact 已物化进 conversation_messages，直接返回该 fact_id。
+    - 否则（perf/usage/reasoning 等非消息 fact），找同一会话内 occurred_at 最近的
+      message fact_id 作为锚点；找不到时回退到原 fact_id（前端会 fallback 到首页）。
+    """
+    direct = conn.execute(
+        "select fact_id from conversation_messages where fact_id = ?",
+        (fact_id,),
+    ).fetchone()
+    if direct:
+        return fact_id
+    if not occurred_at:
+        return fact_id
+    nearest = conn.execute(
+        "select fact_id from conversation_messages "
+        "where conversation_ref = ? and occurred_at is not null "
+        "order by abs(julianday(occurred_at) - julianday(?)) asc, occurred_at desc "
+        "limit 1",
+        (conversation_ref, occurred_at),
+    ).fetchone()
+    return nearest["fact_id"] if nearest else fact_id
 
 
 def _conversation_ref_for_fact(conn: sqlite3.Connection, fact_id: str) -> str | None:

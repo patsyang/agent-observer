@@ -22,7 +22,7 @@ from app.conversations.service import (
     query_conversations,
 )
 from app.dashboard.service import get_dashboard_summary
-from app.db.connection import connect
+from app.db.connection import connect, write_lock
 from app.evidence_enrichment.service import (
     cancel_enrichment,
     get_enrichment_availability,
@@ -40,10 +40,28 @@ from app.risks.service import get_risk_summary
 from app.behavior_signals.service import get_signal_detail, handle_signal, list_signals, mark_signal_read, signal_summary
 from app.behavior_signals.taxonomy import taxonomy_payload
 from app.telemetry_batches.service import get_batch_status
+from app.perf.service import (
+    _VALID_WINDOWS as _PERF_VALID_WINDOWS,
+    build_perf_rollups,
+    get_failure_timeline,
+    get_perf_call_timeline,
+    get_perf_rollups,
+    get_perf_summary,
+    get_perf_task_detail,
+    get_perf_tasks,
+)
 from app.usage.service import get_usage_summary
 from app.validation.service import run_minimum_validation_experiment
 
 logger = logging.getLogger("agent-observer.app.dev_server_handlers")
+
+
+def _check_perf_window(handler, window: str) -> bool:
+    """校验 performance window 参数，非法值返回 400。"""
+    if window not in _PERF_VALID_WINDOWS:
+        handler._json(400, {"error": f"invalid window: {window}"})
+        return False
+    return True
 
 
 def _query_one(query: dict[str, list[str]], key: str, default: str | None = None) -> str | None:
@@ -119,6 +137,19 @@ def _path_part(path: str, index: int) -> str:
 
 def handle_get(handler) -> None:
     path = urlparse(handler.path).path
+    # /api/validation/minimum-experiment 在 FastAPI router 是 POST，但 legacy server
+    # 历史上挂在 GET。它是写操作（创建 validation 数据），独立走 write_lock 串行化，
+    # 不进下方只读 connect 块，避免与 worker/ingest 抢 SQLite 写锁。
+    if path == "/api/validation/minimum-experiment":
+        try:
+            with write_lock() as conn:
+                return handler._json(200, run_minimum_validation_experiment(conn))
+        except sqlite3.OperationalError as exc:
+            if "locked" in str(exc).lower():
+                logger.warning("database busy on GET %s", path)
+                return handler._json(503, {"error": "database busy", "reason_code": "sqlite_busy"})
+            logger.exception("database error on GET %s", path)
+            raise
     try:
         with connect() as conn:
             if path == "/api/collectors":
@@ -188,8 +219,6 @@ def handle_get(handler) -> None:
             if path == "/api/risks/summary":
                 query = parse_qs(urlparse(handler.path).query)
                 return handler._json(200, get_risk_summary(conn, mode=_query_one(query, "mode", "summary") or "summary", **_summary_query_options(handler.path, "24h")))
-            if path == "/api/validation/minimum-experiment":
-                return handler._json(200, run_minimum_validation_experiment(conn))
             if path == "/api/policy":
                 return handler._json(200, get_effective_policy(conn))
             if path == "/api/processing/status":
@@ -232,19 +261,82 @@ def handle_get(handler) -> None:
             if path == "/api/client-package/windows":
                 package = build_windows_package(conn)
                 return _send_package(handler, package["path"])
+            if path == "/api/performance/summary":
+                query = parse_qs(urlparse(handler.path).query)
+                window = _query_one(query, "window", "24h") or "24h"
+                if not _check_perf_window(handler, window):
+                    return
+                return handler._json(200, get_perf_summary(
+                    conn,
+                    window=window,
+                    agent_type=_query_one(query, "agent_type"),
+                    span_type=_query_one(query, "span_type"),
+                    start_at=_query_one(query, "start_at"),
+                    end_at=_query_one(query, "end_at"),
+                ))
+            if path == "/api/performance/tasks":
+                query = parse_qs(urlparse(handler.path).query)
+                window = _query_one(query, "window", "24h") or "24h"
+                if not _check_perf_window(handler, window):
+                    return
+                return handler._json(200, get_perf_tasks(
+                    conn,
+                    window=window,
+                    agent_type=_query_one(query, "agent_type"),
+                    page=_query_int(query, "page", 1),
+                    page_size=_query_int(query, "page_size", 20),
+                    start_at=_query_one(query, "start_at"),
+                    end_at=_query_one(query, "end_at"),
+                ))
+            if path.startswith("/api/performance/tasks/") and path.endswith("/calls"):
+                # /api/performance/tasks/{trace_id}/calls?span_type=
+                trace_id = _path_part(path, 4)
+                query = parse_qs(urlparse(handler.path).query)
+                span_type = _query_one(query, "span_type")
+                if span_type == "":
+                    span_type = None
+                return handler._json(200, {"calls": get_perf_call_timeline(conn, trace_id, span_type=span_type)})
+            if path.startswith("/api/performance/tasks/"):
+                # /api/performance/tasks/{trace_id}
+                trace_id = _path_part(path, 4)
+                result = get_perf_task_detail(conn, trace_id)
+                if result is None:
+                    return handler._json(404, {"error": "task not found"})
+                return handler._json(200, result)
+            if path == "/api/performance/failures":
+                query = parse_qs(urlparse(handler.path).query)
+                window = _query_one(query, "window", "24h") or "24h"
+                if not _check_perf_window(handler, window):
+                    return
+                return handler._json(200, {"failures": get_failure_timeline(
+                    conn,
+                    window=window,
+                    agent_type=_query_one(query, "agent_type"),
+                    start_at=_query_one(query, "start_at"),
+                    end_at=_query_one(query, "end_at"),
+                )})
+            if path == "/api/performance/rollups":
+                query = parse_qs(urlparse(handler.path).query)
+                window = _query_one(query, "window", "24h") or "24h"
+                if not _check_perf_window(handler, window):
+                    return
+                return handler._json(200, {"rollups": get_perf_rollups(conn, window=window, scope=_query_one(query, "scope"))})
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
             logger.warning("database busy on GET %s", path)
             return handler._json(503, {"error": "database busy", "reason_code": "sqlite_busy"})
         logger.exception("database error on GET %s", path)
         raise
+    except ValueError as exc:
+        # M3: service 层校验失败（如无效 start_at/end_at）转为 400，避免 500 污染日志
+        return handler._json(400, {"error": str(exc)})
     handler._json(404, {"error": "not found"})
 
 
 def handle_patch(handler) -> None:
     path = urlparse(handler.path).path
     payload = _read_payload(handler)
-    with connect() as conn:
+    with write_lock() as conn:
         if path == "/api/policy":
             try:
                 return handler._json(200, update_effective_policy(conn, payload))
@@ -262,7 +354,7 @@ def handle_patch(handler) -> None:
 
 def handle_delete(handler) -> None:
     path = urlparse(handler.path).path
-    with connect() as conn:
+    with write_lock() as conn:
         if path.startswith("/api/collectors/"):
             try:
                 return handler._json(200, delete_collector(conn, path.split("/")[3]))
@@ -275,7 +367,7 @@ def handle_post(handler) -> None:
     path = urlparse(handler.path).path
     payload = _read_payload(handler)
     try:
-        with connect() as conn:
+        with write_lock() as conn:
             return _handle_post_locked(handler, conn, path, payload)
     except sqlite3.OperationalError as exc:
         if "locked" in str(exc).lower():
@@ -308,6 +400,13 @@ def _handle_post_locked(handler, conn, path: str, payload: dict) -> None:
             return handler._json(200, enqueue_global_signal_rebuild(conn, reason=payload.get("reason", "api")))
         if path == "/api/processing/jobs/run-once":
             return handler._json(200, run_next_job(conn, reason="api-run-once"))
+        if path == "/api/performance/rebuild":
+            # R2-D1: 只从 query string 读 window，与 FastAPI router 保持一致
+            query = parse_qs(urlparse(handler.path).query)
+            window = _query_one(query, "window", "24h") or "24h"
+            if window not in _PERF_VALID_WINDOWS:
+                return handler._json(400, {"error": f"invalid window: {window}"})
+            return handler._json(200, build_perf_rollups(conn, window=window))
         if path == "/api/validation/minimum-experiment":
             return handler._json(200, run_minimum_validation_experiment(conn))
         if path.startswith("/api/signals/") and path.endswith("/read"):

@@ -159,25 +159,31 @@ def _fact(collector_id, sequence, source_key, path, line, record, session_titles
         return _user_facts(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache)
     if event_type == "assistant":
         return _assistant_facts(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache, seen_message_ids)
+    if event_type == "system":
+        return _system_facts(collector_id, sequence, source_key, path, line, record, session_titles)
     return []
 
 
 def _user_facts(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache) -> list[dict]:
     message = record.get("message") if isinstance(record.get("message"), dict) else {}
     content = message.get("content")
+    facts: list[dict] = []
     if isinstance(content, str):
         base = _common(collector_id, sequence, source_key, path, line, record, "user", session_titles)
         text = content.strip()
-        return [_content_fact(base, "agent_prompt", "user", text, "记录到 Claude 用户消息，已上传原始内容。")]
-    if isinstance(content, list):
-        facts: list[dict] = []
+        facts.append(_content_fact(base, "agent_prompt", "user", text, "记录到 Claude 用户消息，已上传原始内容。"))
+    elif isinstance(content, list):
         for item in content:
             if isinstance(item, dict) and item.get("type") == "tool_result":
                 fact = _tool_result_fact(collector_id, sequence, source_key, path, line, record, item, session_titles, tool_use_cache)
                 if fact:
                     facts.append(fact)
-        return facts
-    return []
+    # 顶层 toolUseResult 携带 durationMs/durationSeconds 时，额外生成一条 perf fact。
+    # 与 message.content 的 tool_result 事实不冲突：后者记录工具输出，前者记录工具延迟。
+    perf_fact = _tool_perf_fact(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache)
+    if perf_fact:
+        facts.append(perf_fact)
+    return facts
 
 
 def _assistant_facts(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache, seen_message_ids) -> list[dict]:
@@ -244,6 +250,138 @@ def _tool_result_fact(collector_id, sequence, source_key, path, line, record, it
         signature = f"tool_execution_failure:{tool_name}:tool_result:{exit_code if exit_code is not None else 'none'}"
         return {**base, "fact_type": "error", "category": "tool_execution_failure", "quality": "high", "severity": "high", "summary": f"Claude 工具执行失败（exit={exit_code}）。", "projection": {"tool_name": tool_name, "tool_call_id": call_id, "exit_code": exit_code, "output_excerpt": output_text[:240], "raw_content_uploaded": True}, "error_signature": {"signature_key": signature, "category": "tool_execution_failure", "tool_name": tool_name, "exit_code": exit_code, "object_type": "tool_result"}}
     return {**base, "fact_type": "tool", "category": "tool_result", "quality": "high", "severity": "low", "summary": f"Claude 工具结果已采集：{tool_name}。", "projection": {"tool_name": tool_name, "tool_call_id": call_id, "result_excerpt": output_text[:240], "raw_content_uploaded": True}}
+
+
+def _tool_duration_ms(tool_use_result: dict) -> int:
+    """从顶层 toolUseResult 提取毫秒级时长；无时长字段返回 0。"""
+    if not isinstance(tool_use_result, dict):
+        return 0
+    if "durationMs" in tool_use_result:
+        try:
+            return int(tool_use_result.get("durationMs") or 0)
+        except (TypeError, ValueError):
+            return 0
+    if "durationSeconds" in tool_use_result:
+        try:
+            return int(float(tool_use_result.get("durationSeconds") or 0) * 1000)
+        except (TypeError, ValueError):
+            return 0
+    return 0
+
+
+def _tool_perf_fact(collector_id, sequence, source_key, path, line, record, session_titles, tool_use_cache) -> dict | None:
+    """从顶层 toolUseResult 提取工具调用延迟，生成 perf fact。
+
+    toolUseResult 与 message.content 的 tool_result 是同一工具调用的两种视图：
+    - message.content.tool_result 记录输出文本（已有 _tool_result_fact 处理）
+    - toolUseResult 记录延迟等元数据（本函数处理）
+    两者通过不同 discriminator 生成不同 source_event_id，不会互相去重。
+    """
+    tool_use_result = record.get("toolUseResult")
+    duration_ms = _tool_duration_ms(tool_use_result)
+    if duration_ms <= 0:
+        return None
+    # 从 message.content 找到 tool_use_id 以匹配工具名
+    tool_use_id = ""
+    message = record.get("message") if isinstance(record.get("message"), dict) else {}
+    content = message.get("content")
+    if isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "tool_result":
+                tool_use_id = str(item.get("tool_use_id") or "")
+                if tool_use_id:
+                    break
+    tool_name = tool_use_cache.get(tool_use_id) or "unknown"
+    session_id = _session_id(record, path)
+    trace_id = session_id
+    span_id = f"tool-{tool_use_id[:16]}" if tool_use_id else f"tool-{hash_value(source_key, line)[:16]}"
+    occurred_at = _occurred_at(record)
+    span = {
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "parent_span_id": "",
+        "span_type": "tool_call",
+        "span_name": tool_name,
+        "duration_ms": duration_ms,
+        "ttft_ms": 0,
+        "tps": 0.0,
+        "status": "ok",
+        "error": "",
+        "model": "",
+        "tool_name": tool_name,
+        "occurred_at": occurred_at,
+    }
+    base = _common(collector_id, sequence, source_key, path, line, record, "user", session_titles, discriminator=f"perf:{span_id}")
+    return {
+        **base,
+        "fact_type": "perf",
+        "category": "tool_call_latency",
+        "quality": "high",
+        "severity": "low",
+        "summary": f"Claude 工具 {tool_name} 耗时 {duration_ms}ms。",
+        "projection": {
+            "event_type": "tool_use_result",
+            "tool_name": tool_name,
+            "tool_use_id": tool_use_id,
+            "duration_ms": duration_ms,
+        },
+        "perf_signals": [span],
+    }
+
+
+def _system_facts(collector_id, sequence, source_key, path, line, record, session_titles) -> list[dict]:
+    """处理 type=system 事件。目前只识别 subtype=turn_duration，提取 turn 级延迟。"""
+    subtype = clean(record.get("subtype") or "")
+    if subtype != "turn_duration":
+        return []
+    duration_ms = 0
+    try:
+        duration_ms = int(record.get("durationMs") or 0)
+    except (TypeError, ValueError):
+        duration_ms = 0
+    if duration_ms <= 0:
+        return []
+    session_id = _session_id(record, path)
+    message_count = 0
+    try:
+        message_count = int(record.get("messageCount") or 0)
+    except (TypeError, ValueError):
+        message_count = 0
+    trace_id = session_id
+    uuid_raw = str(record.get("uuid") or "")
+    span_id = f"turn-{uuid_raw[:16]}" if uuid_raw else f"turn-{hash_value(source_key, line)[:16]}"
+    occurred_at = _occurred_at(record)
+    span = {
+        "trace_id": trace_id,
+        "span_id": span_id,
+        "parent_span_id": "",
+        "span_type": "task",
+        "span_name": "claude_turn",
+        "duration_ms": duration_ms,
+        "ttft_ms": 0,
+        "tps": 0.0,
+        "status": "ok",
+        "error": "",
+        "model": "",
+        "tool_name": "",
+        "occurred_at": occurred_at,
+    }
+    base = _common(collector_id, sequence, source_key, path, line, record, "system", session_titles, discriminator=f"perf:{span_id}")
+    return [{
+        **base,
+        "fact_type": "perf",
+        "category": "agent_turn_latency",
+        "quality": "high",
+        "severity": "low",
+        "summary": f"Claude turn 完成，耗时 {duration_ms}ms。",
+        "projection": {
+            "event_type": "turn_duration",
+            "session_id": session_id,
+            "duration_ms": duration_ms,
+            "message_count": message_count,
+        },
+        "perf_signals": [span],
+    }]
 
 
 def _usage_fact(collector_id, sequence, source_key, path, line, record, session_titles, usage, message) -> dict:
