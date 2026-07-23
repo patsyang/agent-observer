@@ -197,7 +197,7 @@ export function PerformanceTaskDetail({ traceId, detail, loading, error, onClose
                       <th>类型</th>
                       <th>名称</th>
                       <th title="Span 自身执行耗时（end - start）。单位 ms。">耗时</th>
-                      <th title="TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。仅 LLM 调用 span 有此指标，其他类型显示 —。">TTFT</th>
+                      <th title="TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。codex 此值含 turn 内工具耗时，非纯 LLM TTFT。仅 LLM 调用 span 有此指标，其他类型显示 —。">TTFT</th>
                       <th title="TPS（Tokens Per Second，每秒 token 数）：生成速度。单位 tokens/s。当前采集器暂未采集此指标，显示 —。">TPS</th>
                       <th>状态</th>
                       {onOpenFact && <th>操作</th>}

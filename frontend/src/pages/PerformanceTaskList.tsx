@@ -46,7 +46,7 @@ export function PerformanceTaskList({ data, loading, error, page, onPageChange, 
             <th>Agent</th>
             <th>调用数</th>
             <th>LLM / 工具</th>
-            <th>任务耗时</th>
+            <th title="任务总耗时（含 LLM 调用、工具调用、用户等待时间），非纯 LLM 耗时。">任务耗时</th>
             <th>状态</th>
             {showAction && <th>操作</th>}
           </tr>

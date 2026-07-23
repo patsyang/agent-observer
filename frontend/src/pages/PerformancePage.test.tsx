@@ -15,7 +15,8 @@ const emptySummary: PerfSummary = {
     tool_call_count: 0,
     success_count: 0,
     failure_count: 0,
-    success_rate: 0,
+    interrupted_count: 0,
+    success_rate: null,
   },
   latency: {},
   sample_count: 0,
@@ -30,11 +31,15 @@ const sampleSummary: PerfSummary = {
     tool_call_count: 8,
     success_count: 10,
     failure_count: 2,
+    interrupted_count: 0,
     success_rate: 0.8333,
   },
   latency: {
     llm_call: {
       sample_count: 12,
+      duration_sample_count: 12,
+      ttft_sample_count: 12,
+      tps_sample_count: 12,
       success_count: 10,
       failure_count: 2,
       duration_avg_ms: 200,
@@ -71,11 +76,15 @@ const sufficientSummary: PerfSummary = {
     tool_call_count: 8,
     success_count: 23,
     failure_count: 2,
+    interrupted_count: 0,
     success_rate: 0.92,
   },
   latency: {
     llm_call: {
       sample_count: 25,
+      duration_sample_count: 25,
+      ttft_sample_count: 25,
+      tps_sample_count: 25,
       success_count: 23,
       failure_count: 2,
       duration_avg_ms: 200,
@@ -147,6 +156,32 @@ describe('PerformancePage', () => {
     );
     expect(await screen.findByText('TTFT P50 45ms / P95 120ms')).toBeDefined();
     expect(screen.getByText('TPS 均值 15.5 / 峰值 30.2')).toBeDefined();
+  });
+
+  // P1-1（审查 #2）：duration_sample_count=0 时显示"无 duration 数据"
+  it('renders 无 duration 数据 hint when duration_sample_count is 0', async () => {
+    const noDurationSummary: PerfSummary = {
+      ...sufficientSummary,
+      latency: {
+        llm_call: {
+          ...sufficientSummary.latency.llm_call,
+          sample_count: 5,
+          duration_sample_count: 0,
+          duration_p50_ms: 0,
+          duration_p95_ms: 0,
+          duration_p99_ms: 0,
+        },
+      },
+    };
+    render(
+      <PerformancePage
+        loadSummary={vi.fn().mockResolvedValue(noDurationSummary)}
+        loadTasks={vi.fn().mockResolvedValue(emptyTasks)}
+        loadFailures={vi.fn().mockResolvedValue({ failures: [] })}
+        loadTaskDetail={vi.fn().mockResolvedValue(null)}
+      />
+    );
+    expect(await screen.findByText('无 duration 数据，不计算百分位')).toBeDefined();
   });
 
   // R2-E3: 验证新增的窗口选项
@@ -547,8 +582,8 @@ describe('PerformancePage open fact button', () => {
     expect(smalls.length).toBeGreaterThan(0);
     const titles = Array.from(smalls).map((s) => s.getAttribute('title') || '');
     // P2-2: 完整文案匹配，避免 substring 漏检
-    expect(titles).toContain('百分位延迟（nearest-rank）：P50=中位数，P95=95% 请求快于此值，P99=99% 请求快于此值。单位 ms。样本数≥20 才计算，否则显示 —。');
-    expect(titles).toContain('TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。仅 LLM 调用 span 有此指标，其他类型显示 —。');
+    expect(titles).toContain('百分位延迟（nearest-rank）：P50=中位数，P95=95% 请求快于此值，P99=99% 请求快于此值。单位 ms。仅统计有耗时数据的样本（duration_ms>0），样本数≥20 才计算，否则显示 —。');
+    expect(titles).toContain('TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。codex 此值含 turn 内工具耗时，非纯 LLM TTFT。样本数≥20 才计算，否则显示 —。');
     expect(titles).toContain('TPS（Tokens Per Second，每秒 token 数）：生成速度。单位 tokens/s。当前采集器暂未采集此指标，显示 —。');
   });
 
@@ -570,7 +605,7 @@ describe('PerformancePage open fact button', () => {
     const titles = Array.from(ths).map((th) => th.getAttribute('title') || '');
     // P2-2: 完整文案匹配，覆盖"耗时"列 title
     expect(titles).toContain('Span 自身执行耗时（end - start）。单位 ms。');
-    expect(titles).toContain('TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。仅 LLM 调用 span 有此指标，其他类型显示 —。');
+    expect(titles).toContain('TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。codex 此值含 turn 内工具耗时，非纯 LLM TTFT。仅 LLM 调用 span 有此指标，其他类型显示 —。');
     expect(titles).toContain('TPS（Tokens Per Second，每秒 token 数）：生成速度。单位 tokens/s。当前采集器暂未采集此指标，显示 —。');
   });
 });

@@ -62,25 +62,34 @@ function metricCard(label: string, value: string, hint: string, testId: string) 
 
 function latencyRow(spanType: string, stats: PerfLatencyStats) {
   const labels: Record<string, string> = { llm_call: 'LLM 调用', tool_call: '工具调用', task: '任务', mcp_call: 'MCP 调用' };
-  // R2-C2: n<20 时百分位返回 0，前端标灰显示"—"避免误导用户
-  const insufficient = stats.sample_count < 20;
-  const pct = (v: number) => (insufficient ? '—' : `${formatNumber(v)}ms`);
-  const ttftPct = (v: number) => (insufficient || v === 0 ? '—' : `${formatNumber(v)}ms`);
-  const tpsDisplay = (v: number) => (v > 0 ? v.toFixed(1) : '—');
+  // P1-1（审查 #2）：区分"无数据"（=0）和"样本不足"（>0 且 <20），避免误导
+  const durationNoData = stats.duration_sample_count === 0;
+  const durationInsufficient = !durationNoData && stats.duration_sample_count < 20;
+  const ttftNoData = stats.ttft_sample_count === 0;
+  const ttftInsufficient = !ttftNoData && stats.ttft_sample_count < 20;
+  const isLlmCall = spanType === 'llm_call';
+  const pct = (v: number) => (durationNoData || durationInsufficient ? '—' : `${formatNumber(v)}ms`);
+  const ttftPct = (v: number) => (ttftNoData || ttftInsufficient || v === 0 ? '—' : `${formatNumber(v)}ms`);
+  const tpsDisplay = (v: number) => (stats.tps_sample_count > 0 && v > 0 ? v.toFixed(1) : '—');
+  const muted = durationNoData && (ttftNoData || !isLlmCall) && stats.tps_sample_count === 0;
   return (
-    <div className={`signal-insight-card${insufficient ? ' muted' : ''}`} key={spanType}>
+    <div className={`signal-insight-card${muted ? ' muted' : ''}`} key={spanType}>
       <span>{labels[spanType] || spanType}</span>
       <strong>样本 {formatNumber(stats.sample_count)}</strong>
-      <small title="百分位延迟（nearest-rank）：P50=中位数，P95=95% 请求快于此值，P99=99% 请求快于此值。单位 ms。样本数≥20 才计算，否则显示 —。">
+      <small title="百分位延迟（nearest-rank）：P50=中位数，P95=95% 请求快于此值，P99=99% 请求快于此值。单位 ms。仅统计有耗时数据的样本（duration_ms>0），样本数≥20 才计算，否则显示 —。">
         P50 {pct(stats.duration_p50_ms)} / P95 {pct(stats.duration_p95_ms)} / P99 {pct(stats.duration_p99_ms)}
       </small>
-      <small title="TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。仅 LLM 调用 span 有此指标，其他类型显示 —。">
-        TTFT P50 {ttftPct(stats.ttft_p50_ms)} / P95 {ttftPct(stats.ttft_p95_ms)}
-      </small>
+      {/* P1-5: 仅 LLM 调用显示 TTFT 行，其他类型不产出此指标 */}
+      {isLlmCall && (
+        <small title="TTFT（Time To First Token，首 token 延迟）：从请求发出到收到第一个 token 的耗时。单位 ms。codex 此值含 turn 内工具耗时，非纯 LLM TTFT。样本数≥20 才计算，否则显示 —。">
+          TTFT P50 {ttftPct(stats.ttft_p50_ms)} / P95 {ttftPct(stats.ttft_p95_ms)}
+        </small>
+      )}
       <small title="TPS（Tokens Per Second，每秒 token 数）：生成速度。单位 tokens/s。当前采集器暂未采集此指标，显示 —。">
         TPS 均值 {tpsDisplay(stats.tps_avg)} / 峰值 {tpsDisplay(stats.tps_max)}
       </small>
-      {insufficient && <small className="hint">样本不足 20，不计算百分位</small>}
+      {durationNoData && <small className="hint">无 duration 数据，不计算百分位</small>}
+      {durationInsufficient && <small className="hint">耗时样本不足 20（当前 {stats.duration_sample_count}），不计算百分位</small>}
     </div>
   );
 }
@@ -215,8 +224,13 @@ export function PerformancePage({ loadSummary, loadTasks, loadFailures, loadTask
               : '当前为 0：仅 codex 拆分了 llm_call span，claude 暂未拆分，筛选 claude 或全部且无 codex 数据时为 0',
           'perf-summary-llm',
         )}
-        {metricCard('成功率', showSummaryPlaceholder ? '...' : `${((totals?.success_rate ?? 0) * 100).toFixed(2)}%`, 'LLM 调用成功占比', 'perf-summary-rate')}
-        {metricCard('失败数', showSummaryPlaceholder ? '...' : formatNumber(totals?.failure_count ?? 0), 'LLM 调用失败', 'perf-summary-failures')}
+        {metricCard(
+          '成功率',
+          showSummaryPlaceholder ? '...' : (totals?.success_rate === null || totals?.success_rate === undefined ? '—' : `${(totals.success_rate * 100).toFixed(2)}%`),
+          showSummaryPlaceholder ? '...' : (totals?.llm_call_count ?? 0) === 0 ? '无 LLM 调用数据' : 'LLM 调用成功占比（不含中断）',
+          'perf-summary-rate',
+        )}
+        {metricCard('失败数', showSummaryPlaceholder ? '...' : formatNumber(totals?.failure_count ?? 0), showSummaryPlaceholder ? '...' : `LLM 调用失败${(totals?.interrupted_count ?? 0) > 0 ? `（另 ${totals.interrupted_count} 中断）` : ''}`, 'perf-summary-failures')}
         {metricCard('工具调用', showSummaryPlaceholder ? '...' : formatNumber(totals?.tool_call_count ?? 0), '窗口内工具调用', 'perf-summary-tools')}
         {metricCard('样本数', showSummaryPlaceholder ? '...' : formatNumber(summary.data?.sample_count ?? 0), '性能信号总数', 'perf-summary-samples')}
       </section>

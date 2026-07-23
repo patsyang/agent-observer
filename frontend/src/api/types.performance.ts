@@ -6,8 +6,13 @@ export type PerfWindow = '1h' | '2h' | '3h' | '6h' | '12h' | '24h' | '7d' | 'tod
 /** 延迟统计：百分位 + TTFT + TPS。 */
 export interface PerfLatencyStats {
   sample_count: number;
+  duration_sample_count: number;
+  ttft_sample_count: number;
+  tps_sample_count: number;
   success_count: number;
   failure_count: number;
+  /** P1-5（审查 #2）：与 get_perf_summary 同口径，failure 已排除 interrupted。 */
+  interrupted_count?: number;
   duration_avg_ms: number;
   duration_p50_ms: number;
   duration_p95_ms: number;
@@ -31,7 +36,9 @@ export interface PerfSummary {
     tool_call_count: number;
     success_count: number;
     failure_count: number;
-    success_rate: number;
+    interrupted_count: number;
+    /** P0-3: llm_call=0 时为 null，前端显示 — 而非 0%。 */
+    success_rate: number | null;
   };
   /** key = span_type（llm_call / tool_call / task / mcp_call）。 */
   latency: Record<string, PerfLatencyStats>;
