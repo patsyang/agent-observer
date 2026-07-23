@@ -397,7 +397,7 @@ def test_system_turn_duration_produces_perf_signal(tmp_path):
     assert span["span_name"] == "claude_turn"
     assert span["duration_ms"] == 191587
     assert span["ttft_ms"] == 0  # claude 无 TTFT
-    assert span["trace_id"] == "s1"
+    assert span["trace_id"] == "s1:a074b244-55a0-45"  # P0-1: turn 级 trace_id
     assert span["span_id"] == "turn-a074b244-55a0-45"
     assert span["status"] == "ok"
     assert span["occurred_at"] == "2026-07-04T03:32:25.014Z"
@@ -430,14 +430,31 @@ def test_user_tool_use_result_duration_ms_produces_perf_signal(tmp_path):
     assert fact["category"] == "tool_call_latency"
     span = fact["perf_signals"][0]
     assert span["span_type"] == "tool_call"
-    assert span["span_name"] == "Grep"
+    assert span["tool_name"] == "Grep"
     assert span["duration_ms"] == 1234
     assert span["tool_name"] == "Grep"
-    assert span["trace_id"] == "s1"
+    # P0-1（审查 #2）：tool_call 的 trace_id 设为空串，不归属 task，
+    # 仍参与 tool_call_count 统计和失败时间线展示。
+    assert span["trace_id"] == ""
     assert span["span_id"] == "tool-call_abc123"
     # 不应影响原有 tool_result fact
     tool_result_facts = [f for f in result.facts if f.get("category") == "tool_result"]
     assert tool_result_facts, "原有 tool_result fact 不应丢失"
+
+
+def test_user_tool_perf_fact_detects_failure_from_output(tmp_path):
+    """P1-3: tool_perf_fact 应从 tool_result 输出检测失败，设 status=error。"""
+    root = tmp_path / ".claude"
+    _write_jsonl(_session_file(root), [
+        {"type": "assistant", "message": {"id": "m1", "role": "assistant", "content": [{"type": "tool_use", "id": "call_fail", "name": "shell", "input": {"command": "npm test"}}]}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:00+00:00", "model": "claude-sonnet-4"},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "call_fail", "content": "Error: test failed\nExit code: 1"}]}, "toolUseResult": {"durationMs": 5000}, "sessionId": "s1", "cwd": "D:\\test", "timestamp": "2026-07-04T03:30:05+00:00"},
+    ])
+    result = _collect(root)
+    perf_facts = [f for f in result.facts if f.get("fact_type") == "perf"]
+    assert perf_facts, "expected a perf fact from toolUseResult"
+    span = perf_facts[0]["perf_signals"][0]
+    assert span["status"] == "error"
+    assert "exit=1" in span["error"]
 
 
 def test_user_tool_use_result_duration_seconds_produces_perf_signal(tmp_path):

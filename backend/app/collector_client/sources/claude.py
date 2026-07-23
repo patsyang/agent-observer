@@ -293,9 +293,35 @@ def _tool_perf_fact(collector_id, sequence, source_key, path, line, record, sess
                     break
     tool_name = tool_use_cache.get(tool_use_id) or "unknown"
     session_id = _session_id(record, path)
-    trace_id = session_id
+    # P0-1（审查 #2）：claude tool_call 与 task span 无法按 turn 关联
+    # （tool_use 事件没有 turn_uuid，且其 parentUuid 与 turn_duration.uuid 无交集）。
+    # 方案 B'：tool_call 的 trace_id 设为空串，不进入"任务列表"语义；
+    # 仍参与 tool_call_count 统计（不依赖 trace_id）和失败时间线展示。
+    # 任务列表只显示有 task span 的 trace（见 service.py 的 having 过滤）。
+    trace_id = ""
     span_id = f"tool-{tool_use_id[:16]}" if tool_use_id else f"tool-{hash_value(source_key, line)[:16]}"
     occurred_at = _occurred_at(record)
+    # P1-3: 从 message.content 的 tool_result 输出检测失败，避免 claude 工具失败信号丢失
+    # P1-3（审查 #2）：tool_use_id 为空时跳过失败检测，避免任意 tool_result 误匹配
+    status = "ok"
+    error_text = ""
+    if tool_use_id and isinstance(content, list):
+        for item in content:
+            if isinstance(item, dict) and item.get("type") == "tool_result":
+                tid = str(item.get("tool_use_id") or "")
+                if tid == tool_use_id:
+                    raw_output = item.get("content")
+                    if isinstance(raw_output, list):
+                        output_text = "\n".join(str(p.get("text") or "") for p in raw_output if isinstance(p, dict))
+                    elif isinstance(raw_output, str):
+                        output_text = raw_output
+                    else:
+                        output_text = json.dumps(raw_output, ensure_ascii=False) if raw_output else ""
+                    exit_code = _extract_exit_code(output_text)
+                    if exit_code is not None or _ERROR_RE.search(output_text):
+                        status = "error"
+                        error_text = f"exit={exit_code}" if exit_code is not None else "error"
+                    break
     span = {
         "trace_id": trace_id,
         "span_id": span_id,
@@ -305,8 +331,8 @@ def _tool_perf_fact(collector_id, sequence, source_key, path, line, record, sess
         "duration_ms": duration_ms,
         "ttft_ms": 0,
         "tps": 0.0,
-        "status": "ok",
-        "error": "",
+        "status": status,
+        "error": error_text,
         "model": "",
         "tool_name": tool_name,
         "occurred_at": occurred_at,
@@ -347,8 +373,11 @@ def _system_facts(collector_id, sequence, source_key, path, line, record, sessio
         message_count = int(record.get("messageCount") or 0)
     except (TypeError, ValueError):
         message_count = 0
-    trace_id = session_id
     uuid_raw = str(record.get("uuid") or "")
+    # P0-1: trace_id 改为 turn 级唯一标识，避免 session 被当作 task
+    # 旧：trace_id = session_id → 1 session = N task span 共享 trace_id → 任务数=会话数（错）
+    # 新：trace_id = session:uuid → 每个 turn 独立 trace → 任务数=turn 数（正确）
+    trace_id = f"{session_id}:{uuid_raw[:16]}" if uuid_raw else f"{session_id}:{hash_value(source_key, line)[:16]}"
     span_id = f"turn-{uuid_raw[:16]}" if uuid_raw else f"turn-{hash_value(source_key, line)[:16]}"
     occurred_at = _occurred_at(record)
     span = {

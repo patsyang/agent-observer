@@ -18,6 +18,8 @@ MAX_PAGE_SIZE = 200
 # R2-A1: summary 端点硬上限，避免 window=all 时全表加载到内存
 SUMMARY_ROW_LIMIT = 50000
 _VALID_WINDOWS = {"1h", "2h", "3h", "6h", "12h", "24h", "7d", "today", "week", "all"}
+# P0-2：用户中断不计入失败（与 codex turn_aborted 的 reason 字段对齐）
+_INTERRUPT_ERRORS = {"interrupted", "cancelled"}
 
 
 def _now() -> str:
@@ -71,11 +73,17 @@ def _latency_stats(rows: list[sqlite3.Row]) -> dict:
     pct = compute_percentiles(durations)
     ttft_pct = compute_percentiles(ttfts)
     success = sum(1 for r in rows if r["status"] == "ok")
-    failure = sum(1 for r in rows if r["status"] == "error")
+    # P1-5（审查 #2）：failure 排除 interrupted/cancelled，与 get_perf_summary 口径一致
+    failure = sum(1 for r in rows if r["status"] == "error" and r["error"] not in _INTERRUPT_ERRORS)
+    interrupted = sum(1 for r in rows if r["status"] == "error" and r["error"] in _INTERRUPT_ERRORS)
     return {
         "sample_count": len(rows),
+        "duration_sample_count": len(durations),
+        "ttft_sample_count": len(ttfts),
+        "tps_sample_count": len(tps_values),
         "success_count": success,
         "failure_count": failure,
+        "interrupted_count": interrupted,
         "duration_avg_ms": int(safe_avg(durations)),
         "duration_p50_ms": int(pct[50]),
         "duration_p95_ms": int(pct[95]),
@@ -106,8 +114,12 @@ def get_perf_summary(
         params,
     ).fetchall()
     # M2: 独立 count 查询，避免截断时 task_count 与 get_perf_tasks.total 不一致
+    # P1-7: task_count 排除空 trace_id，与 get_perf_tasks 口径一致
+    # P0-3（审查 #2）：task_count 改为 count(distinct span_type='task' 的 trace_id)，
+    # 排除只有 tool_call/llm_call 的 trace（如 claude tool_call trace_id='' 或老数据残留）
+    # P0-A（审查 #3）：case when 加 trace_id != '' 条件，与 get_perf_tasks 的 where 口径一致
     total_row = conn.execute(
-        f"select count(*) as c, count(distinct trace_id) as t from perf_signals {where}", params
+        f"select count(*) as c, count(distinct case when span_type = 'task' and trace_id != '' then trace_id end) as t from perf_signals {where}", params
     ).fetchone()
     total_signals = int(total_row["c"]) if total_row else 0
     total_tasks = int(total_row["t"]) if total_row else 0
@@ -119,6 +131,13 @@ def get_perf_summary(
     latency = {st: _latency_stats(by_type[st]) for st in sorted(by_type.keys())}
     llm_rows = by_type.get("llm_call", [])
     llm_success = sum(1 for r in llm_rows if r["status"] == "ok")
+    # P0-2: 排除用户中断（interrupted/cancelled），中断不计入失败
+    llm_failure = sum(1 for r in llm_rows if r["status"] == "error" and r["error"] not in _INTERRUPT_ERRORS)
+    # P0-3: llm_rows 为空时 success_rate 返回 null，前端显示 — 而非 0%
+    success_rate = round(llm_success / len(llm_rows), 4) if llm_rows else None
+    # P1-4（审查 #2）：interrupted_count 统计所有 span_type 的中断，
+    # 避免未来 claude 加 task span 中断检测后漏统计
+    all_interrupted = sum(1 for r in rows if r["status"] == "error" and r["error"] in _INTERRUPT_ERRORS)
     return {
         "window": window,
         "bucket_size_minutes": bucket_size_minutes(window, start_at, end_at),
@@ -127,8 +146,9 @@ def get_perf_summary(
             "llm_call_count": len(llm_rows),
             "tool_call_count": len(by_type.get("tool_call", [])),
             "success_count": llm_success,
-            "failure_count": len(llm_rows) - llm_success,
-            "success_rate": round(llm_success / len(llm_rows), 4) if llm_rows else 0,
+            "failure_count": llm_failure,
+            "interrupted_count": all_interrupted,
+            "success_rate": success_rate,
         },
         "latency": latency,
         "sample_count": total_signals,
@@ -151,8 +171,9 @@ def get_perf_tasks(
     page_size = min(MAX_PAGE_SIZE, max(1, page_size))
     where, params = _where_clauses(window, agent_type, None, start_at, end_at)
     where = f"{where} and trace_id != ''" if where else "where trace_id != ''"
+    # P0-3（审查 #2）：total 只计有 task span 的 trace，与 get_perf_summary 口径一致
     total_row = conn.execute(
-        f"select count(distinct trace_id) as c from perf_signals {where}", params
+        f"select count(distinct case when span_type = 'task' then trace_id end) as c from perf_signals {where}", params
     ).fetchone()
     total = int(total_row["c"]) if total_row else 0
     offset = (page - 1) * page_size
@@ -177,6 +198,7 @@ def get_perf_tasks(
                     else '' end as task_status
         from perf_signals {where}
         group by trace_id
+        having sum(case when span_type = 'task' then 1 else 0 end) > 0
         order by started_at desc, trace_id desc
         limit ? offset ?
         """,

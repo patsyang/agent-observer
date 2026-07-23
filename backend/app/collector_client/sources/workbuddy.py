@@ -28,6 +28,11 @@ def collect_workbuddy_source(
         return SourceResult(config, "source_missing", "source_missing", [])
     facts: list[dict] = []
     usage_keys = set(str(key) for key in cursor.setdefault("usage_keys", []) if key)
+    # P0-2（审查 #3）：traces 优先于 projects 处理（保证 perf 数据不丢失），
+    # 但 trace 的 usage 去重逻辑（already_covered）依赖 projects 的 usage_keys。
+    # 预扫描 projects 文件提取 usage_keys，不产生 fact、不消耗 max_events 配额，
+    # 保证 trace 处理时 already_covered 判断正确，避免 usage 重复统计。
+    usage_keys.update(_prefill_project_usage_keys(config.root, history_window_days))
     records = _records(config.root, cursor, max_events=max(1, max_events), history_window_days=history_window_days)
     for source_key, path, line, record in records:
         if len(facts) >= max(1, max_events):
@@ -37,6 +42,29 @@ def collect_workbuddy_source(
             facts.append(fact)
     cursor["usage_keys"] = sorted(usage_keys)[-5000:]
     return SourceResult(config, "online", "collected", stamp_source(facts, config))
+
+
+def _prefill_project_usage_keys(root: Path, history_window_days: int) -> set[str]:
+    """预扫描 projects 文件提取 usage_keys（不产生 fact、不消耗 max_events 配额）。
+
+    P0-2 改为 traces 优先后，trace 的 already_covered 判断需要预先知道
+    projects 中已有的 usage 关联键（traceId/conversationRequestId 等）。
+    本函数从文件头读取 projects 文件，仅提取 usage_keys，不更新 cursor。
+    """
+    keys: set[str] = set()
+    cutoff = datetime.now(UTC) - timedelta(days=max(1, history_window_days))
+    for path in _candidate_files(root, cutoff):
+        if _relative_kind(root, path) != "projects":
+            continue
+        suffix = path.suffix.lower()
+        if suffix in {".jsonl", ".ndjson"}:
+            for _, _, record in _jsonl_records(path, 0, 0):
+                keys.update(_project_usage_keys(record))
+        else:
+            record = _json_file(path)
+            if record:
+                keys.update(_project_usage_keys(record))
+    return keys
 
 
 def _records(root: Path, cursor: dict, *, max_events: int, history_window_days: int) -> Iterable[tuple[str, Path, int, dict]]:
@@ -73,7 +101,11 @@ def _records(root: Path, cursor: dict, *, max_events: int, history_window_days: 
 
 
 def _candidate_files(root: Path, cutoff: datetime) -> list[Path]:
-    allowed_roots = ["projects", "traces", "audit-log", "tasks", "sessions"]
+    # P0-2（审查 #2）：traces 优先于 projects，避免 projects 目录满载时
+    # 把 max_events 用完导致 perf_signals 永远无法入库。
+    # traces 是性能观测的唯一数据源，projects 是辅助事件，perf 数据丢失比
+    # project 事件丢失严重得多。
+    allowed_roots = ["traces", "projects", "audit-log", "tasks", "sessions"]
     paths: list[tuple[int, float, Path]] = []
     for name in allowed_roots:
         base = root / name
@@ -476,7 +508,8 @@ def _trace_perf_projection(trace: dict, spans: list, base: dict) -> tuple[dict |
     """从 trace + spans 提取 perf projection 和 perf_signals 列表（对标 plan §4.1）。"""
     trace_id = clean(trace.get("traceId") or trace.get("trace_id") or "")
     duration_ms = _int(trace.get("duration"))
-    status = clean(trace.get("status") or "unknown")
+    # P1-2: status 缺省时用 "ok" 而非 "unknown"，避免被误计为失败
+    status = clean(trace.get("status") or "ok")
     occurred_at = base.get("occurred_at") or _now()
     model_info = trace.get("modelInfo") if isinstance(trace.get("modelInfo"), dict) else {}
     trace_model = ",".join(str(m) for m in model_info.get("models", []) if m) if isinstance(model_info.get("models"), list) else ""
@@ -526,7 +559,7 @@ def _trace_perf_projection(trace: dict, spans: list, base: dict) -> tuple[dict |
             "duration_ms": _int(span.get("duration")),
             "ttft_ms": 0,
             "tps": 0.0,
-            "status": clean(span.get("status") or "unknown"),
+            "status": clean(span.get("status") or "ok"),
             "error": clean(span.get("error") or ""),
             "model": _extract_span_model(span),
             "tool_name": clean(span.get("toolName") or span.get("name") or "") if span_type in ("tool_call", "mcp_call") else "",
